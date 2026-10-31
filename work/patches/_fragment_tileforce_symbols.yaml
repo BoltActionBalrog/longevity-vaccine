@@ -1,0 +1,4 @@
+  t_tile_force:                  { cave: pcave2, offset: 0x27a00 }   # console_tile_stripes (90B) Buffer_tile drop-in (RET 0x1C): g<=16 native; else tile, then force-restripe the tiled rect
+  t_msg_bgforce:                 { cave: pcave2, offset: 0x27a60 }   # console_tile_stripes (56B) Buffer_box_sprite drop-in (RET 8): g<=16 native; else box, then force-restripe its half-open rect
+  t_tf_restripe:                 { cave: pcave2, offset: 0x27aa0 }   # console_tile_stripes (110B) shared tail thiscall(dest)(l,t,r,b) RET 0x10: rect & clip -> g_fe_*, g_rm_force, thunk_fe_pair_remap
+  t_lb_item_stripes:             { cave: pcave2, offset: 0x27b10 }   # console_tile_stripes (80B) ListBox_draw_item drop-in (RET 4): faction picker only (g_faction_active, g>16) -> draw the item, then restripe the list canvas inside its clip

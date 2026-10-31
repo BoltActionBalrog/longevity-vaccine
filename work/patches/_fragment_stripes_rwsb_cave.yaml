@@ -1,0 +1,6 @@
+      - id: t_rwsb_begin
+        offset: 0xf7a0
+        bytes: "83 3D {abs32:g_popup_scale_num} 10 7E 34 83 3D {abs32:g_rwsb_sbw} 00 75 2B 83 3D {abs32:g_rw_inlist} 00 75 22 E8 {rel32:thunk_list_gate} 75 1B 50 A1 {abs32:g_scrollbar_w} A3 {abs32:g_rwsb_sbw} 0F AF 05 {abs32:g_popup_scale_num} C1 F8 04 A3 {abs32:g_scrollbar_w} 58 E9 8E DC BE FF"
+      - id: t_rwsb_end
+        offset: 0xf7f0
+        bytes: "83 C4 04 89 F1 FF 50 04 50 A1 {abs32:g_rwsb_sbw} 85 C0 74 0F A3 {abs32:g_scrollbar_w} C7 05 {abs32:g_rwsb_sbw} 00 00 00 00 58 68 7A D4 49 00 C3"

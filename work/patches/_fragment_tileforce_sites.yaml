@@ -1,0 +1,153 @@
+  - id: MainWin_tile_panels.tile_d80
+    status: confirmed
+    group: console_tile_stripes
+    function: MainWin_tile_panels
+    virtual_addr: 0x0045c2da
+    length: 5
+    original_bytes: "E8 81 E5 17 00"   # call Buffer_tile (24x24 console backdrop tile [0x78D6B0] 1:1 into the strip canvas) -> tile, then C6/41 law stripes
+    new_bytes:      "E8 {rel32:t_tile_force}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: MainWin_tile_panels.tile_centre
+    status: confirmed
+    group: console_tile_stripes
+    function: MainWin_tile_panels
+    virtual_addr: 0x0045c31a
+    length: 5
+    original_bytes: "E8 41 E5 17 00"   # call Buffer_tile (24x24 console backdrop tile [0x78D6B0] 1:1 into the strip canvas) -> tile, then C6/41 law stripes
+    new_bytes:      "E8 {rel32:t_tile_force}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: MainWin_tile_panels.tile_side
+    status: confirmed
+    group: console_tile_stripes
+    function: MainWin_tile_panels
+    virtual_addr: 0x0045c358
+    length: 5
+    original_bytes: "E8 03 E5 17 00"   # call Buffer_tile (24x24 console backdrop tile [0x78D6B0] 1:1 into the strip canvas) -> tile, then C6/41 law stripes
+    new_bytes:      "E8 {rel32:t_tile_force}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: MainWin_tile_panels.tile_d90
+    status: confirmed
+    group: console_tile_stripes
+    function: MainWin_tile_panels
+    virtual_addr: 0x0045c388
+    length: 5
+    original_bytes: "E8 D3 E4 17 00"   # call Buffer_tile (24x24 console backdrop tile [0x78D6B0] 1:1 into the strip canvas) -> tile, then C6/41 law stripes
+    new_bytes:      "E8 {rel32:t_tile_force}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: BaseWin_draw_garrison.console_tile
+    status: confirmed
+    group: console_tile_stripes
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x00410490
+    length: 5
+    original_bytes: "E8 CB A3 1C 00"   # call Buffer_tile (24x24 console backdrop tile [0x78D6B0] 1:1 into the strip canvas) -> tile, then C6/41 law stripes
+    new_bytes:      "E8 {rel32:t_tile_force}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: DesignWin_draw_slot_strip.console_tile
+    status: confirmed
+    group: console_tile_stripes
+    function: DesignWin_draw_slot_strip
+    virtual_addr: 0x0043d592
+    length: 5
+    original_bytes: "E8 C9 D2 19 00"   # call Buffer_tile (24x24 console backdrop tile [0x78D6B0] 1:1 into the strip canvas) -> tile, then C6/41 law stripes
+    new_bytes:      "E8 {rel32:t_tile_force}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: MessageWin_draw_bg.box_d7f8
+    status: confirmed
+    group: console_tile_stripes
+    function: MessageWin_draw_bg
+    virtual_addr: 0x00471fb3
+    length: 5
+    original_bytes: "E8 1B 0E 17 00"   # call Buffer_box_sprite (d7f8 filled box, fill cell tiled 1:1) -> box, then C4/41 law stripes inside the clip
+    new_bytes:      "E8 {rel32:t_msg_bgforce}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: ListBox_on_key_down.draw_item_60b2ff
+    status: confirmed
+    group: console_tile_stripes
+    function: ListBox_on_key_down
+    virtual_addr: 0x0060b2ff
+    length: 5
+    original_bytes: "E8 2C 02 00 00"   # call ListBox_draw_item -> the same, then (faction picker only) the item's rows restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_lb_item_stripes}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: ListBox_on_key_down.draw_item_60b32c
+    status: confirmed
+    group: console_tile_stripes
+    function: ListBox_on_key_down
+    virtual_addr: 0x0060b32c
+    length: 5
+    original_bytes: "E8 FF 01 00 00"   # call ListBox_draw_item -> the same, then (faction picker only) the item's rows restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_lb_item_stripes}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: ListBox_on_mouse_move.draw_item_60cdc2
+    status: confirmed
+    group: console_tile_stripes
+    function: ListBox_on_mouse_move
+    virtual_addr: 0x0060cdc2
+    length: 5
+    original_bytes: "E8 69 E7 FF FF"   # call ListBox_draw_item -> the same, then (faction picker only) the item's rows restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_lb_item_stripes}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: ListBox_on_mouse_move.draw_item_60cdef
+    status: confirmed
+    group: console_tile_stripes
+    function: ListBox_on_mouse_move
+    virtual_addr: 0x0060cdef
+    length: 5
+    original_bytes: "E8 3C E7 FF FF"   # call ListBox_draw_item -> the same, then (faction picker only) the item's rows restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_lb_item_stripes}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: ListBox_on_redraw.draw_item_60c577
+    status: confirmed
+    group: console_tile_stripes
+    function: ListBox_on_redraw
+    virtual_addr: 0x0060c577
+    length: 5
+    original_bytes: "E8 B4 EF FF FF"   # call ListBox_draw_item -> the same, then (faction picker only) the item's rows restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_lb_item_stripes}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: ListBox_on_scrolling.draw_item_60c663
+    status: confirmed
+    group: console_tile_stripes
+    function: ListBox_on_scrolling
+    virtual_addr: 0x0060c663
+    length: 5
+    original_bytes: "E8 C8 EE FF FF"   # call ListBox_draw_item -> the same, then (faction picker only) the item's rows restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_lb_item_stripes}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: ListBox_on_scrolling.draw_item_60c677
+    status: confirmed
+    group: console_tile_stripes
+    function: ListBox_on_scrolling
+    virtual_addr: 0x0060c677
+    length: 5
+    original_bytes: "E8 B4 EE FF FF"   # call ListBox_draw_item -> the same, then (faction picker only) the item's rows restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_lb_item_stripes}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then thunk_fe_pair_remap's force path over the drawn rect (clipped to the dest clip) rewrites the pair to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."

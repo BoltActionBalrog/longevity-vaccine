@@ -1,0 +1,5 @@
+# Upscaler evaluation test set (one clip name per line; # comments allowed).
+# Build just these with:  run-build-hd-pack.bat --list video-upscale\testset.txt
+# Chosen to stress the upscaler two different ways:
+openingx   # 592x288 cinematic intro -- motion + varied texture + text
+gaians     # 320x240 faction clip -- faces/skin/eyes (harshest test)

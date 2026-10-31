@@ -1,0 +1,84 @@
+  - id: diplo_talk_scale
+    description: >
+      DIPLOMACY talk screen: the anchored speech box (DiploTalkWin 700x450 window, backdrop/title/text-block
+      frames + strokes, header/art column/row gap/OK row/measure width anchored arms) and the console-strip
+      content under it (3 fonts, panel rect table, BIOSCAN/status/HQ painters, faction logo/colour bar/HQ
+      picture/bezel sprite ratios, the two flics dst-bounced, DATALINKS/PROFILE/HQINFO frame zoom) all scale
+      vanilla x g/16; g<=16 native no-op.  Proto hook_diplo_proto.js v9d/v10 user-verified 4K+1600 2026-08-17/18.
+      src assemble_diplo.py: sequential thunks pcave2 0x11590..0x12750, cells 0x11560; fixed blocks
+      t_dp_itemrect 0x45b0, t_cr_snap 0x127b0, t_cr_mark 0x17080, t_cr_tile_exit 0x170b0, t_cr_tile 0x17350, t_dp_q16anch 0x30850, t_dp_status_fit 0x30b00, t_dp_status_tail 0x30c00;
+      cells 0x12790 (save-under), 0x27c28 (status fit).  Also repoints 8 existing
+      sites at anchored-gate wrappers (see EXISTING_REPOINTS) and prefixes thunk_btn_gate (v8).
+      PLUS the console save-under (proto v6 user-verified 4K 2026-08-20): t_cr_snap on the iface vtbl
+      snapshots the strip's centre column on diplo enter; t_cr_tile wraps all 12 tile_panels callers and
+      blits it back after every armed normal-mode pass (this==MainWin gate), fixing the exit residue.
+      PLUS the status-line fit (2026-10-11): t_dp_status_fit at 0x43FE07 steps the +0xA44 font down until
+      'DIPLOMATIC STATUS: <treaty>' fits one line wherever vanilla shows one line (law diplo_status_font_size).
+    code_caves:
+      - pcave2
+    members:
+      - DiploTalkWin_init.font_a
+      - DiploTalkWin_init.font_b
+      - DiploTalkWin_init.font_c
+      - DiploTalkWin_init.font_a800
+      - DiploTalkWin_init.font_b800
+      - DiploTalkWin_init.rect_table
+      - DiploTalkWin_draw_strip.frame_centre
+      - DiploTalkWin_draw_strip.frame_hqunion
+      - DiploTalkWin_draw_status_panels.panel
+      - DiploTalkWin_draw_hq_panel.panel
+      - DiploTalkWin_draw_bioscan_panel.header_text
+      - DiploTalkWin_draw_hq_panel.name_text
+      - DiploTalkWin_draw_bioscan_panel.colour_bar
+      - DiploTalkWin_draw_status_panels.logo
+      - DiploTalkWin_draw_hq_panel.picture
+      - slide_show.diplo_bezel
+      - DiploTalkWin_draw_status_panels.name
+      - DiploTalkWin_draw_status_panels.status_wrap
+      - DiploTalkWin_draw_status_panels.infil_wrap
+      - DiploTalkWin_draw_status_panels.energy
+      - DiploTalkWin_draw_status_panels.might_label
+      - DiploTalkWin_draw_news_panel.sep_pixel
+      - DiploTalkWin_draw_news_panel.sep_line
+      - DiploTalkWin_draw_news_panel.name
+      - DiploTalkWin_draw_news_panel.reputation
+      - DiploTalkWin_draw_news_panel.mood
+      - DiploTalkWin_open.flic_bio
+      - DiploTalkWin_open.flic_news
+      - DiploTalkWin_open.flic_news_fallback
+      - DiploTalkWin_open.news_first_draw
+      - DiploTalkWin_bioscan_tick.draw
+      - DiploTalkWin_news_tick.draw
+      - tile_panels_wrap.site_41e7ad
+      - tile_panels_wrap.site_422cf2
+      - tile_panels_wrap.site_426ad2
+      - tile_panels_wrap.site_431e98
+      - tile_panels_wrap.site_4379d2
+      - tile_panels_wrap.site_4400cb
+      - tile_panels_wrap.site_4402b1
+      - tile_panels_wrap.site_4436d2
+      - tile_panels_wrap.site_45bc73
+      - tile_panels_wrap.site_45d90e
+      - tile_panels_wrap.site_45de3c
+      - tile_panels_wrap.site_4b19d2
+      - Popup_on_draw_background.diplo_fill
+      - Popup_on_draw_background.diplo_backdrop
+      - Popup_on_draw_background.diplo_title_outer
+      - Popup_on_draw_background.diplo_title_inner
+      - Popup_on_draw_background.diplo_title_text
+      - Popup_on_draw_background.diplo_textblock
+      - DiploTalkWin_init.gwinit_w
+      - DiploTalkWin_init.gwinit_h
+      - DiploTalkWin_init.move_x
+      - DiploTalkWin_init.frame_left
+      - DiploTalkWin_init.frame_right
+      - BasePop_calculate_dimensions.anch_e4
+      - BasePop_calculate_dimensions.anch_hdr
+      - Popup_on_adjust_button_placement.anch_oky
+      - Dialog_type16_calc.fixed_arm_gap
+      - Popup_on_draw_background.diplo_knest
+      - vtbl_item_back_draw_0
+      - vtbl_item_back_draw_1
+      - vtbl_item_back_draw_2
+      - vtbl_item_back_draw_3
+      - iface_on_mode_saveunder

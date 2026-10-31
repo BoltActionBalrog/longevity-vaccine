@@ -1,0 +1,41 @@
+# Toolchain and references are fetched, not committed (see README.md)
+tools/*
+!tools/build_ffmpeg_slim.sh
+!tools/run-build-ffmpeg-slim.bat
+refs/
+dist/
+work/ghidra-projects/
+work/build/
+work/video-upscale/tools/
+src/uimod/third_party/
+
+# Machine-specific game install path + target exe (copy the *.example templates)
+work/game-path.txt
+work/game-exe.txt
+
+# Game binaries: never commit the exe
+*.exe
+*.exe.bak
+*.exe.patching
+
+# Build output
+src/uimod/build/
+.vs/
+*.vcxproj.user
+**/__pycache__/
+*.pyc
+
+# Trace and capture output. Probes that dump buffers write CAPTURED GAME PIXELS under
+# work/_<name>/ : never commit those.
+work/_*/
+*.raw
+*.bin
+work/*.log
+work/tests/*.log
+work/tests/snapshots/
+work/tests/timings/
+work/screenshots/
+install-crash-*.log
+
+# Signing keys live outside every checkout
+*.key

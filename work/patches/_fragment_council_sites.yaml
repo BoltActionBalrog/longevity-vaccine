@@ -1,0 +1,189 @@
+  - id: CouncilWin_exec.caller_bracket
+    status: confirmed
+    group: council_scale
+    function: council_open_session(0x4284xx)
+    virtual_addr: 0x004284ca
+    length: 5
+    original_bytes: "E8 61 ED FF FF"   # call CouncilWin_exec (thiscall RET 8; the ONE caller) -> immfix + g_council_active bracket
+    new_bytes:      "E8 {rel32:thunk_cw_enter}"
+    pattern: call_target_redirect
+
+  - id: CouncilWin_exec.seed_table
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_exec
+    virtual_addr: 0x00427784
+    length: 5
+    original_bytes: "E8 B7 17 1F 00"   # call Font_init (the first of 6; esi=CWIN, seed table already written natively) -> rewrite the 63 seeds x g/16
+    new_bytes:      "E8 {rel32:t_cw_rowsym}"   # 2026-10-25 W3A F43: the YES / NO / ABSTAIN row's remainder mirrored at g>16, then thunk_cw_seeds (was {rel32:thunk_cw_seeds})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.name_text_y
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00425f83
+    length: 5
+    original_bytes: "E8 28 4D 1B 00"   # call 0x5DACB0 (thiscall, ecx=edi) -> name-line y = T+1 + dp(portrait h) + dp(4)
+    new_bytes:      "E8 {rel32:thunk_cw_texty}"
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.portrait_sd2
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00425f3c
+    length: 5
+    original_bytes: "E8 09 EC 1B 00"   # call Sprite_draw_2 portrait (1,1) -> num=g/16 + parity re-blit
+    new_bytes:      "E8 {rel32:t_cw_portx}"   # 2026-10-25 W6B v2: the portrait centred in the column interior, then thunk_cw_portrait (was {rel32:thunk_cw_portrait})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.logo_sd2
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00426105
+    length: 5
+    original_bytes: "E8 40 EA 1B 00"   # call Sprite_draw_2 logo (1,1) -> recentre + num=g/16 + parity re-blit
+    new_bytes:      "E8 {rel32:t_cw_logox}"   # 2026-10-25 W7B: the logo centred in the column interior, then thunk_cw_logo (was {rel32:thunk_cw_logo})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_repaint.backdrop37
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_repaint
+    virtual_addr: 0x00426b4e
+    length: 5
+    original_bytes: "E8 80 C2 1B 00"   # call Buffer_box_sprite d690 backdrop -> rect.right W-0x37 -> W-dp(0x37), tail devfill
+    new_bytes:      "E8 {rel32:t_cw_bd2}"   # 2026-10-25 W7B: + B = H + K, the frame clipped below the canvas (was {rel32:t_cw_backdrop}; W5B: was {rel32:thunk_cw_backdrop37})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.frame_d528
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00425ee9
+    length: 5
+    original_bytes: "E8 E5 CE 1B 00"   # column frame d528 -> thick frame + device-density fill
+    new_bytes:      "E8 {rel32:t_cw_hodf}"   # 2026-10-25 W5B: half-open (was {rel32:thunk_box_thick_devfill})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_da00
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x004261aa
+    length: 5
+    original_bytes: "E8 24 CC 1B 00"   # vote chip da00
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: half-open around t_si_chip (was {rel32:t_si_chip})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_d9d8
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x004261d6
+    length: 5
+    original_bytes: "E8 F8 CB 1B 00"   # vote chip d9d8
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: half-open around t_si_chip (was {rel32:t_si_chip})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_da28_a
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00426203
+    length: 5
+    original_bytes: "E8 CB CB 1B 00"   # vote chip da28
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: half-open around t_si_chip (was {rel32:t_si_chip})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_da28_b
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00426230
+    length: 5
+    original_bytes: "E8 9E CB 1B 00"   # vote chip da28
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: half-open around t_si_chip (was {rel32:t_si_chip})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_da28_c
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x0042625c
+    length: 5
+    original_bytes: "E8 72 CB 1B 00"   # vote chip da28
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: half-open around t_si_chip (was {rel32:t_si_chip})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.d528_b
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00426286
+    length: 5
+    original_bytes: "E8 48 CB 1B 00"   # d528
+    new_bytes:      "E8 {rel32:t_cw_hodf}"   # 2026-10-25 W5B: half-open (was {rel32:thunk_box_thick_devfill})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_repaint.d5a0
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_repaint
+    virtual_addr: 0x00426b7b
+    length: 5
+    original_bytes: "E8 53 C2 1B 00"   # d5a0 band (hollow)
+    new_bytes:      "E8 {rel32:t_cw_ring2}"   # 2026-10-25 W7B: the ring clipped below the canvas (was {rel32:t_bm_ho_hf}; W5B: was {rel32:thunk_box_thick_hollow_flat})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_repaint.d528
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_repaint
+    virtual_addr: 0x00426bd2
+    length: 5
+    original_bytes: "E8 FC C1 1B 00"   # repaint d528 (the ELECTED banner)
+    new_bytes:      "E8 {rel32:t_cw_hodf}"   # 2026-10-25 W6B: the ELECTED banner half-open (was {rel32:thunk_box_thick_devfill})
+    pattern: call_target_redirect
+
+  - id: CouncilWin_repaint.console_box
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_repaint
+    virtual_addr: 0x00426b14
+    length: 5
+    original_bytes: "E8 BA C2 1B 00"   # console d5a0 box (proposal rect inset 4): half-open R-1/B-1 exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_proposal.header_band
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_proposal
+    virtual_addr: 0x004264dd
+    length: 5
+    original_bytes: "E8 F1 C8 1B 00"   # console d618 header band: half-open R-1/B-1 exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_proposal.body_box
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_proposal
+    virtual_addr: 0x004265ab
+    length: 5
+    original_bytes: "E8 23 C8 1B 00"   # console d528 body box (B = text bottom): half-open R-1/B-1 exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: Sprite_blit_scaled_core.flag_restripe
+    status: confirmed
+    group: council_scale
+    function: Sprite_blit_scaled_core
+    virtual_addr: 0x005e4c01
+    length: 5
+    original_bytes: "E8 BA 38 FF FF"   # call Buffer_draw_2 (filename-backed art path, ecx=canvas 0x9b6080) -> flag-content-gated pair-LUT restripe of the dest rect
+    new_bytes:      "E8 {rel32:thunk_art_core}"   # popup_art_reblit 2026-09-20: calls thunk_flag_restripe first, then re-blits filename-backed popup pictures (was {rel32:thunk_flag_restripe})
+    pattern: call_target_redirect

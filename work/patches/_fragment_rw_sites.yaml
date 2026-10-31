@@ -1,0 +1,1969 @@
+  - id: init_report_screen.enter
+    status: confirmed
+    group: rw_scale_shared
+    function: init_report_screen
+    virtual_addr: 0x004a3460
+    length: 5
+    original_bytes: "55 8B EC 6A FF"   # ret-swap -> t_rw_init_leave: window/clip/font lever, imm table walk, tables, fonts, snapbuf (g>16) (E9 -> t_rw_init_enter)
+    new_bytes:      "E9 DB BF 58 00"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.row_left_inset
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_activate
+    virtual_addr: 0x004a43ba
+    length: 10
+    original_bytes: "8D 51 4B 2B F9 A3 7C E0 87 00"   # row L = clipL + s(0x4B) (disp8 overflow) (E9 -> t_rw_btnl)
+    new_bytes:      "E9 41 BA 58 00 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.row_right_edge
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_activate
+    virtual_addr: 0x004a43cf
+    length: 7
+    original_bytes: "8D 94 17 6A FF FF FF"   # row R = clipL + clipR - L (centred on the clip at every g) (E9 -> t_rw_btnr)
+    new_bytes:      "E9 5C C4 58 00 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.gap_left
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_activate
+    virtual_addr: 0x004a4418
+    length: 9
+    original_bytes: "2B C2 89 96 C8 E1 01 00 48"   # DATALINKS w -= s(2)>>1 (E9 -> t_rw_gap1)
+    new_bytes:      "E9 13 BA 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.gap_right
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_activate
+    virtual_addr: 0x004a44d4
+    length: 10
+    original_bytes: "2B C2 48 47 89 8E CC E1 01 00"   # CLOSE x += s(2)-a, w -= s(2)-a (E9 -> t_rw_gap2)
+    new_bytes:      "E9 87 B9 58 00 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ScrollBar_init_inner.rw_stash
+    status: confirmed
+    group: rw_scale_shared
+    function: ScrollBar_init_inner
+    virtual_addr: 0x006054d0
+    length: 5
+    original_bytes: "8B 44 24 14 53"   # report list bar -> g_rw_sb / g_rail_sb (E9 -> t_rw_sbinit)
+    new_bytes:      "E9 3B AA 42 00"
+    pattern: detour_inplace
+
+  - id: ReportWin_show.row_frame
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportWin_show
+    virtual_addr: 0x00496cd0
+    length: 5
+    original_bytes: "E8 FE C0 14 00"   # d5a0 row frame: exact-fill half-open helper -> thunk_box_thick_hollow_flat (g<=16 native)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_show.window_backdrop
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportWin_show
+    virtual_addr: 0x00496c91
+    length: 5
+    original_bytes: "E8 3D C1 14 00"   # d690 backdrop+border: exact-fill half-open helper -> thunk_box_thick_devfill (g<=16 native)
+    new_bytes:      "E8 {rel32:t_rw_backdrop}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_activate.tabsplit_tech
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_activate
+    virtual_addr: 0x004a45b6
+    length: 6
+    original_bytes: "D1 F8 83 C4 08 48"   # v2: TECH rect = t_rw_tabpair(left) (law rw_tab_pair), resume 0x4A45D9 (E9 -> t_rw_tabsplit1)
+    new_bytes:      "E9 D5 C1 58 00 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.tabsplit_bases
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_activate
+    virtual_addr: 0x004a4675
+    length: 7
+    original_bytes: "83 C1 14 8D 54 10 01"   # v2: BASES rect = t_rw_tabpair(right) (law rw_tab_pair), resume 0x4A4693 (E9 -> t_rw_tabsplit2)
+    new_bytes:      "E9 46 C1 58 00 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_labs.left_w
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7032
+    length: 7
+    original_bytes: "2B D0 6A 00 83 EA 0C"   # left cursor w = W - 2*s(6) (law rw_console_inset_w; was W - s(0xC)) (E9 -> t_rw_labs_w)
+    new_bytes:      "E9 B9 99 58 00 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_labs.left_h
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a704a
+    length: 9
+    original_bytes: "8D 8E 0C BA 00 00 83 E8 0C"   # left cursor h = H - 2*s(6) (E9 -> t_rw_labs_h)
+    new_bytes:      "E9 71 D0 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_labs.right_w
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7a78
+    length: 9
+    original_bytes: "8B 96 98 E1 01 00 83 E8 0C"   # right cursor w = W - 2*s(6) (E9 -> t_rw_labs_rw)
+    new_bytes:      "E9 73 8D 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_labs.right_h
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7a8f
+    length: 9
+    original_bytes: "8B 86 8C E1 01 00 83 E9 0C"   # right cursor h = H - 2*s(6) (E9 -> t_rw_labs_rh)
+    new_bytes:      "E9 4C C6 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_labs.tab_box
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7094
+    length: 5
+    original_bytes: "E8 3A BD 13 00"   # TECHNOLOGY|BASES d5a0 tab box: half-open R-1/B-1 + C6/41 force restripe (the F4 tab strip's treatment; was inclusive via hud_boxframe -> R/B channel +1)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.list_box
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a70bf
+    length: 5
+    original_bytes: "E8 0F BD 13 00"   # tech list d528: half-open R-1/B-1 exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.title_box
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7ad6
+    length: 5
+    original_bytes: "E8 F8 B2 13 00"   # right panel title d528: half-open
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.body_box
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7b01
+    length: 5
+    original_bytes: "E8 CD B2 13 00"   # right panel body d528: half-open
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.centre_d528
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3ea4
+    length: 5
+    original_bytes: "E8 2A EF 13 00"   # centre panel inner d528: half-open (was inclusive: inner channel L5 R4 T5 B4 at 4K)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.strip_d528
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3eb4
+    length: 5
+    original_bytes: "E8 1A EF 13 00"   # kind-icon strip inner d528: half-open
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_on_lclick.blink_tile
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_on_lclick
+    virtual_addr: 0x004974b2
+    length: 5
+    original_bytes: "E8 29 D0 02 00"   # v13: stash the clicked base's (tx,ty) in g_blink_tile for t_rwk_blink, then WorldWin_tile_to_pixel as before
+    new_bytes:      "E8 {rel32:t_rwk_blinktile}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_projects.rowdiv
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_projects
+    virtual_addr: 0x0049eb6f
+    length: 12
+    original_bytes: "B8 F7 12 DA 4B F7 E9 C1 FA 04 8B C2"   # rows = vanilla (textB-top-5)/0x36 in native space from ceil(win_h*16/g) (magic-multiply /54 replaced; law rw_projects_visible_rows) (E9 -> t_rwk_proj_rowdiv)
+    new_bytes:      "E9 2C 10 59 00 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_projects.rowy
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_projects
+    virtual_addr: 0x0049ee8f
+    length: 22
+    original_bytes: "8D 3C C5 00 00 00 00 89 8E 14 0A 00 00 2B F8 8B 45 CC 8D 44 F8 02"   # row y = top + s(2) + s(56k) (x56 lea replaced; law rw_projects_row_y: cum(k), not k*(s(0x36)+s(2))) (E9 -> t_rwk_proj_rowy)
+    new_bytes:      "E9 9C 7A 58 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_units.rowdiv
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_units
+    virtual_addr: 0x004a0974
+    length: 12
+    original_bytes: "B8 83 BE A0 2F F7 E9 C1 FA 03 8B C2"   # rows = vanilla (textB-top-2)/0x2B in native space from ceil(win_h*16/g) (magic-multiply /43 replaced; law rw_units_visible_rows) (E9 -> t_rwk_units_rowdiv)
+    new_bytes:      "E9 27 60 58 00 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_units.rowstep
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_units
+    virtual_addr: 0x004a0d3d
+    length: 10
+    original_bytes: "03 D0 03 C8 89 55 D4 89 4D DC"   # row rect top/bottom += cum(k) - cum(k-1) at pitch 0x2B (law rw_list_row_advance; was += s(0x2B)) (E9 -> t_rwk_units_rowstep)
+    new_bytes:      "E9 FE ED 58 00 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_bases.name_x
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e129
+    length: 5
+    original_bytes: "83 C2 3C 85 C0"   # name x += s(0x3C) (imm8 overflow at g=40) (E9 -> t_rwk_bases_namex)
+    new_bytes:      "E9 E2 28 59 00"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_intel.text_x
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_intel
+    virtual_addr: 0x004a3407
+    length: 5
+    original_bytes: "83 C0 7D 53 50"   # text x += s(0x7D) (imm8 overflow at g=40) (E9 -> t_rwk_intel_textx)
+    new_bytes:      "E9 34 D6 58 00"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_intel.portrait
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_intel
+    virtual_addr: 0x004a2415
+    length: 5
+    original_bytes: "E8 80 27 14 00"   # leader portrait 131x157 x g/16 through thunk_art_draw (bilinear + parity re-blit + DLL Lanczos), portrait_avg gate = RW canvas for this call; was 1:1 at every g
+    new_bytes:      "E8 {rel32:t_rwk_intel_portrait}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_intel.title_inset
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_intel
+    virtual_addr: 0x004ac4be
+    length: 5
+    original_bytes: "83 E0 4C 8B C8"   # and eax,0x4C mask -> s(0x4C) (imm8 overflow; centre console title right of the logo) (E9 -> t_rwk_intel_title)
+    new_bytes:      "E9 6D 2C 58 00"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_intel.lbr_l
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_intel
+    virtual_addr: 0x004ac2f9
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # left ListBox R/B inset -3 -> -s(3) (imm32 mov; table full) (E9 -> t_rwk_intel_lbr_l)
+    new_bytes:      "E9 62 2E 58 00"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_intel.lbr_r
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_intel
+    virtual_addr: 0x004ac767
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # right ListBox R/B inset -3 -> -s(3) (imm32 mov; table full) (E9 -> t_rwk_intel_lbr_r)
+    new_bytes:      "E9 14 2A 58 00"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_energy.title_inset
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_energy
+    virtual_addr: 0x004a8961
+    length: 5
+    original_bytes: "83 E0 4C 03 C8"   # and eax,0x4C / add ecx,eax -> CALL: ecx += mask & s(0x4C) (imm8 overflow; centre console title right of the logo; law rw_console_title_inset)
+    new_bytes:      "E8 {rel32:t_rwk_con_title_add}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_ops.title_inset
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a9b95
+    length: 5
+    original_bytes: "83 E0 4C 03 C8"   # and eax,0x4C / add ecx,eax -> CALL: ecx += mask & s(0x4C) (imm8 overflow; centre console title right of the logo; law rw_console_title_inset)
+    new_bytes:      "E8 {rel32:t_rwk_con_title_add}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_projects.title_inset
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_projects
+    virtual_addr: 0x004aa490
+    length: 5
+    original_bytes: "83 E0 4C 03 C8"   # and eax,0x4C / add ecx,eax -> CALL: ecx += mask & s(0x4C) (imm8 overflow; centre console title right of the logo; law rw_console_title_inset)
+    new_bytes:      "E8 {rel32:t_rwk_con_title_add}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_sat.title_inset
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004aadc9
+    length: 5
+    original_bytes: "83 E0 4C 03 C8"   # and eax,0x4C / add ecx,eax -> CALL: ecx += mask & s(0x4C) (imm8 overflow; centre console title right of the logo; law rw_console_title_inset)
+    new_bytes:      "E8 {rel32:t_rwk_con_title_add}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_score.title_inset
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_score
+    virtual_addr: 0x004abf0e
+    length: 5
+    original_bytes: "83 E0 4C 03 C8"   # and eax,0x4C / add ecx,eax -> CALL: ecx += mask & s(0x4C) (imm8 overflow; centre console title right of the logo; law rw_console_title_inset)
+    new_bytes:      "E8 {rel32:t_rwk_con_title_add}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_units.title_inset
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_units
+    virtual_addr: 0x004abad3
+    length: 5
+    original_bytes: "83 E0 4C 8B C8"   # and eax,0x4C / mov ecx,eax -> CALL: ecx = mask & s(0x4C) (imm8 overflow; law rw_console_title_inset)
+    new_bytes:      "E8 {rel32:t_rwk_con_title_mov}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_energy.lbr_listA
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_energy
+    virtual_addr: 0x004a864f
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # ListBox R/B inset mov eax,-3 -> CALL: eax = -s(3) (mirror of the +s(3) L/T rows; imm table full; law rw_console_listbox_rb)
+    new_bytes:      "E8 {rel32:t_rwk_con_lbr}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_energy.lbr_listB
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_energy
+    virtual_addr: 0x004a8d04
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # ListBox R/B inset mov eax,-3 -> CALL: eax = -s(3) (mirror of the +s(3) L/T rows; imm table full; law rw_console_listbox_rb)
+    new_bytes:      "E8 {rel32:t_rwk_con_lbr}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_projects.lbr_list
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_projects
+    virtual_addr: 0x004aa1f8
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # ListBox R/B inset mov eax,-3 -> CALL: eax = -s(3) (mirror of the +s(3) L/T rows; imm table full; law rw_console_listbox_rb)
+    new_bytes:      "E8 {rel32:t_rwk_con_lbr}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_sat.lbr_listA
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004aabf3
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # ListBox R/B inset mov eax,-3 -> CALL: eax = -s(3) (mirror of the +s(3) L/T rows; imm table full; law rw_console_listbox_rb)
+    new_bytes:      "E8 {rel32:t_rwk_con_lbr}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_sat.lbr_listB
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004ab1be
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # ListBox R/B inset mov eax,-3 -> CALL: eax = -s(3) (mirror of the +s(3) L/T rows; imm table full; law rw_console_listbox_rb)
+    new_bytes:      "E8 {rel32:t_rwk_con_lbr}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_units.lbr_listA
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_units
+    virtual_addr: 0x004ab6b1
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # ListBox R/B inset mov eax,-3 -> CALL: eax = -s(3) (mirror of the +s(3) L/T rows; imm table full; law rw_console_listbox_rb)
+    new_bytes:      "E8 {rel32:t_rwk_con_lbr}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_units.lbr_listB
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_units
+    virtual_addr: 0x004abd22
+    length: 5
+    original_bytes: "B8 FD FF FF FF"   # ListBox R/B inset mov eax,-3 -> CALL: eax = -s(3) (mirror of the +s(3) L/T rows; imm table full; law rw_console_listbox_rb)
+    new_bytes:      "E8 {rel32:t_rwk_con_lbr}"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportWin_draw_intel.block_y
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_intel
+    virtual_addr: 0x004a3046
+    length: 8
+    original_bytes: "03 C2 89 86 18 0A 00 00"   # POLITICS/treaty block top = max(flow y, portrait bottom + s(4)) (law intel_block_top; vanilla overlaps the portrait with <=9 rows) (E9 -> t_rwk_intel_blocky)
+    new_bytes:      "E9 55 C1 58 00 90 90 90"
+    pattern: detour_inplace
+
+  - id: slide_show.outer_rail_row
+    status: confirmed
+    group: rw_scale_kinds
+    function: slide_show
+    virtual_addr: 0x0045d4ae
+    length: 40
+    original_bytes: "8B 15 1C 7B 9B 00 33 C0 81 FA 20 03 00 00 53 0F 95 C0 F7 D8 1B C0 57 25 90 00 00 00 8B 3D 60 F6 93 00 83 C0 5E 89 45 DC"   # outer rail strips start at screen row ScreenH - fl(530g/16) (vanilla 238 = 768-530), ceil-descaled for the railscale shim; was the native 238 vs a device window top -> the wide pillars began at the window top at 4K (E9 -> t_slide_rail_a)
+    new_bytes:      "E9 CD FC 5A 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: slide_hide.outer_rail_row
+    status: confirmed
+    group: rw_scale_kinds
+    function: slide_hide
+    virtual_addr: 0x0045da07
+    length: 33
+    original_bytes: "8B 0D 1C 7B 9B 00 33 C0 81 F9 20 03 00 00 53 0F 95 C0 F7 D8 1B C0 25 90 00 00 00 83 C0 5E 89 45 C8"   # the close animation's copy of the outer rail row (same law; else the pillars jump to the window top when the close slide starts) (E9 -> t_slide_rail_a2)
+    new_bytes:      "E9 74 25 5B 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: slide_show.outer_left_settled
+    status: confirmed
+    group: rw_scale_kinds
+    function: slide_show
+    virtual_addr: 0x0045d7fd
+    length: 17
+    original_bytes: "8B 45 DC 3B F0 7E 02 8B C6 8B 4D E8 8B 55 E4 2B C1"   # settled left outer strip: v = max(slide_y, A) - T ceil-descaled for the railscale shim (law slide_rail_settled_v) (E9 -> t_slide_rail_s1)
+    new_bytes:      "E9 1E 08 5B 00 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: slide_show.outer_right_settled
+    status: confirmed
+    group: rw_scale_kinds
+    function: slide_show
+    virtual_addr: 0x0045d87a
+    length: 20
+    original_bytes: "8B 45 DC 3B F0 7F 02 8B F0 8B 55 E8 8B 45 D4 8B 4D E4 2B F2"   # settled right outer strip: v = max(slide_y, A) - T ceil-descaled for the railscale shim (law slide_rail_settled_v) (E9 -> t_slide_rail_s2)
+    new_bytes:      "E9 D1 42 5B 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.govsplit_w
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a478d
+    length: 6
+    original_bytes: "D1 F8 83 C4 08 48"   # v2: GOVERNOR rect = t_rw_tabpair(left) (law rw_tab_pair), resume 0x4A47B0 (E9 -> t_rwk_gov_split1)
+    new_bytes:      "E9 DE C2 58 00 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.govsplit_x
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a484f
+    length: 8
+    original_bytes: "83 C1 14 53 8D 54 10 01"   # v2: BEST BASES rect = t_rw_tabpair(right) (law rw_tab_pair), resume 0x4A486B (E9 -> t_rwk_gov_split2)
+    new_bytes:      "E9 4C C2 58 00 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_ops.tabbox_w
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a90dd
+    length: 9
+    original_bytes: "8D BE C8 E1 01 00 83 E8 0C"   # GOVERNOR|BEST BASES tab box + list box w = W - 2*s(6) (law rw_console_inset_w; was W - s(0xC)) (E9 -> t_rwk_ops_w)
+    new_bytes:      "E9 FE 60 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_ops.list_x
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a90a8
+    length: 6
+    original_bytes: "8D 51 09 89 56 0C"   # BEST BASES list x = L + P (law rw_tab_inset: aligned with the toggles above) (E9 -> t_rwk_ops_lx)
+    new_bytes:      "E9 33 D9 57 00 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_ops.list_w
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a90ba
+    length: 8
+    original_bytes: "8B 47 08 2B C3 83 E8 12"   # BEST BASES list w = W - 2P (law rw_tab_inset) (E9 -> t_rwk_ops_lw)
+    new_bytes:      "E9 B1 D8 57 00 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.govlist_cursor
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a4f05
+    length: 26
+    original_bytes: "83 C1 09 83 C2 23 89 4E 0C 89 56 10 8B 46 28 8B 4E 20 2B C1 83 E8 12 89 46 14"   # governor list buttons x = L + P, y = T + s(0x23), w = W - 2P (aligned with the toggles; law rw_tab_inset) (E9 -> t_rwk_govlist)
+    new_bytes:      "E9 D6 AC 58 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.sat_w
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a4c42
+    length: 8
+    original_bytes: "2B D7 83 EA 06 89 56 14"   # F6 tabs w = clipW - 2*s(3) (law rw_sat_tabs / rw_console_inset_w; was clipW - s(6)) (E9 -> t_rwk_sat_w)
+    new_bytes:      "E9 89 BE 58 00 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.modes_w
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a4927
+    length: 9
+    original_bytes: "2B 0D EC BD 87 00 83 E9 06"   # F4 PRODUCTION|CITIZENS|GARRISON w = clipW - 2*s(3) (law rw_console_inset_w; was clipW - s(6)) (E9 -> t_rwk_modes_w)
+    new_bytes:      "E9 C4 C1 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.satsplit_r
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a4c9a
+    length: 9
+    original_bytes: "68 78 64 87 00 8D 44 38 FF"   # SATELLITE SUMMARY R = L + (W - s(2)) >> 1 (E9 -> t_rwk_sat_split1)
+    new_bytes:      "E9 71 BE 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.satsplit_l
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a4d76
+    length: 9
+    original_bytes: "68 78 64 87 00 8D 44 38 01"   # ORBITAL ATTACK VIEW L = L + (W - s(2)) >> 1 + s(2) (E9 -> t_rwk_sat_split2)
+    new_bytes:      "E9 D5 BD 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_sat.planet_cx
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_sat
+    virtual_addr: 0x0049fb00
+    length: 6
+    original_bytes: "8B 86 D0 F3 00 00"   # planet x = centre - s(flicW)/2 (E9 -> t_rwk_sat_cx)
+    new_bytes:      "E9 9B 10 59 00 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_sat.planet_cy
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_sat
+    virtual_addr: 0x0049fb1b
+    length: 9
+    original_bytes: "8B 8E D4 F3 00 00 8B C1 51"   # planet y = centre - s(flicH)/2 (Buffer_init keeps native h) (E9 -> t_rwk_sat_cy)
+    new_bytes:      "E9 B0 10 59 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_bases.face_a
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e806
+    length: 5
+    original_bytes: "E8 8F 63 14 00"   # CITIZENS face: hybrid enlarge x g/16 (thunk_face_hybrid: bilinear photo + regenerated scanline background, full coverage), clamped to the canvas clip bottom
+    new_bytes:      "E8 {rel32:t_rwk_face_blit}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.face_b
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e8ca
+    length: 5
+    original_bytes: "E8 CB 62 14 00"   # CITIZENS face: hybrid enlarge x g/16 (thunk_face_hybrid: bilinear photo + regenerated scanline background, full coverage), clamped to the canvas clip bottom
+    new_bytes:      "E8 {rel32:t_rwk_face_blit}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.face_c
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e4d1
+    length: 5
+    original_bytes: "E8 C4 66 14 00"   # CITIZENS specialist face: hybrid enlarge x g/16 (thunk_face_hybrid: bilinear photo + regenerated scanline background, full coverage), clamped to the canvas clip bottom
+    new_bytes:      "E8 {rel32:t_rwk_face_blit}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.face_d
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e56d
+    length: 5
+    original_bytes: "E8 28 66 14 00"   # CITIZENS specialist face: hybrid enlarge x g/16 (thunk_face_hybrid: bilinear photo + regenerated scanline background, full coverage), clamped to the canvas clip bottom
+    new_bytes:      "E8 {rel32:t_rwk_face_blit}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.face_e
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e604
+    length: 5
+    original_bytes: "E8 91 65 14 00"   # CITIZENS specialist face: hybrid enlarge x g/16 (thunk_face_hybrid: bilinear photo + regenerated scanline background, full coverage), clamped to the canvas clip bottom
+    new_bytes:      "E8 {rel32:t_rwk_face_blit}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.face_f
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e681
+    length: 5
+    original_bytes: "E8 14 65 14 00"   # CITIZENS specialist face: hybrid enlarge x g/16 (thunk_face_hybrid: bilinear photo + regenerated scanline background, full coverage), clamped to the canvas clip bottom
+    new_bytes:      "E8 {rel32:t_rwk_face_blit}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.face_g
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e745
+    length: 5
+    original_bytes: "E8 50 64 14 00"   # CITIZENS specialist face: hybrid enlarge x g/16 (thunk_face_hybrid: bilinear photo + regenerated scanline background, full coverage), clamped to the canvas clip bottom
+    new_bytes:      "E8 {rel32:t_rwk_face_blit}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.face_h
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e96d
+    length: 5
+    original_bytes: "E8 28 62 14 00"   # CITIZENS specialist face: hybrid enlarge x g/16 (thunk_face_hybrid: bilinear photo + regenerated scanline background, full coverage), clamped to the canvas clip bottom
+    new_bytes:      "E8 {rel32:t_rwk_face_blit}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.cell
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049d590
+    length: 5
+    original_bytes: "B8 28 00 00 00"   # cell = 2K + floor(38g/16) (row height AND icon-cell width) (E9 -> t_rwk_bases_cell)
+    new_bytes:      "E9 BB 38 59 00"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_bases.cell_x
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049d620
+    length: 6
+    original_bytes: "83 C0 28 89 45 D4"   # x + cell (E9 -> t_rwk_bases_cellx)
+    new_bytes:      "E9 4B 38 59 00 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_bases.cell_y
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049d629
+    length: 6
+    original_bytes: "8D 51 28 83 C0 02"   # y + cell; x + s(2) (E9 -> t_rwk_bases_celly)
+    new_bytes:      "E9 72 38 59 00 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_draw_bases.face_y
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049e3f8
+    length: 9
+    original_bytes: "83 E9 12 89 96 14 0A 00 00"   # face y = rowBottom - pitch/2 - (cell - pitch/2 - K) = rowTop + K (E9 -> t_rwk_bases_facey)
+    new_bytes:      "E9 E3 2A 59 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportWin_sat_frame.planet
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_sat_frame
+    virtual_addr: 0x0049ff38
+    length: 5
+    original_bytes: "E8 33 84 13 00"   # planet flic frame under SCALE g/16
+    new_bytes:      "E8 {rel32:t_rwk_gdraw}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_blink_step.stamp_a
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_blink_step
+    virtual_addr: 0x004a40ad
+    length: 5
+    original_bytes: "E8 E8 0A 14 00"   # BASE LOCATOR ring stamp x g/16 (dot sprite, SCALE bracket + s(7)/s(5) recentre)
+    new_bytes:      "E8 {rel32:t_rwk_blink}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_blink_step.stamp_d
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_blink_step
+    virtual_addr: 0x004a40ea
+    length: 5
+    original_bytes: "E8 AB 0A 14 00"   # BASE LOCATOR ring stamp x g/16 (dot sprite, SCALE bracket + s(7)/s(5) recentre)
+    new_bytes:      "E8 {rel32:t_rwk_blink}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_blink_step.stamp_c
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_blink_step
+    virtual_addr: 0x004a4127
+    length: 5
+    original_bytes: "E8 6E 0A 14 00"   # BASE LOCATOR ring stamp x g/16 (dot sprite, SCALE bracket + s(7)/s(5) recentre)
+    new_bytes:      "E8 {rel32:t_rwk_blink}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_blink_step.stamp_b
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_blink_step
+    virtual_addr: 0x004a4164
+    length: 5
+    original_bytes: "E8 31 0A 14 00"   # BASE LOCATOR ring stamp x g/16 (dot sprite, SCALE bracket + s(7)/s(5) recentre)
+    new_bytes:      "E8 {rel32:t_rwk_blink}"
+    pattern: call_target_redirect
+
+  - id: sat_expl_step.frame
+    status: confirmed
+    group: rw_scale_kinds
+    function: sat_expl_step
+    virtual_addr: 0x004a020c
+    length: 5
+    original_bytes: "E8 E4 8D 14 00"   # explosion frame under SCALE g/16
+    new_bytes:      "E8 {rel32:t_rwk_gtable}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_energy.box0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_energy
+    virtual_addr: 0x0049bdab
+    length: 5
+    original_bytes: "E8 23 70 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_energy.box1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_energy
+    virtual_addr: 0x0049bdbb
+    length: 5
+    original_bytes: "E8 13 70 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_energy.box2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_energy
+    virtual_addr: 0x0049bdcb
+    length: 5
+    original_bytes: "E8 03 70 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_energy.box3
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_energy
+    virtual_addr: 0x0049bddb
+    length: 5
+    original_bytes: "E8 F3 6F 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_energy.box4
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_energy
+    virtual_addr: 0x0049bdeb
+    length: 5
+    original_bytes: "E8 E3 6F 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_energy.box5
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_energy
+    virtual_addr: 0x0049bdfb
+    length: 5
+    original_bytes: "E8 D3 6F 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049d653
+    length: 5
+    original_bytes: "E8 7B 57 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049d663
+    length: 5
+    original_bytes: "E8 6B 57 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049d676
+    length: 5
+    original_bytes: "E8 58 57 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box3
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049dad7
+    length: 5
+    original_bytes: "E8 F7 52 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box4
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049dae7
+    length: 5
+    original_bytes: "E8 E7 52 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box5
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049daf7
+    length: 5
+    original_bytes: "E8 D7 52 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box6
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049db18
+    length: 5
+    original_bytes: "E8 B6 52 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box7
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049db28
+    length: 5
+    original_bytes: "E8 A6 52 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.box8
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049db8b
+    length: 5
+    original_bytes: "E8 43 52 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_projects.box0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_projects
+    virtual_addr: 0x0049ebbe
+    length: 5
+    original_bytes: "E8 10 42 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_projects.box1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_projects
+    virtual_addr: 0x0049ebce
+    length: 5
+    original_bytes: "E8 00 42 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_projects.box2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_projects
+    virtual_addr: 0x0049ef3b
+    length: 5
+    original_bytes: "E8 93 3E 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_projects.box3
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_projects
+    virtual_addr: 0x0049ef56
+    length: 5
+    original_bytes: "E8 78 3E 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_sat.box0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_sat
+    virtual_addr: 0x0049f3b0
+    length: 5
+    original_bytes: "E8 1E 3A 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_sat.box1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_sat
+    virtual_addr: 0x0049f3c0
+    length: 5
+    original_bytes: "E8 0E 3A 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_sat.box2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_sat
+    virtual_addr: 0x0049fb79
+    length: 5
+    original_bytes: "E8 55 32 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_units.box0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_units
+    virtual_addr: 0x004a0954
+    length: 5
+    original_bytes: "E8 7A 24 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_units.box1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_units
+    virtual_addr: 0x004a0964
+    length: 5
+    original_bytes: "E8 6A 24 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_units.box2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_units
+    virtual_addr: 0x004a0d7d
+    length: 5
+    original_bytes: "E8 51 20 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_units.box3
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_units
+    virtual_addr: 0x004a0d98
+    length: 5
+    original_bytes: "E8 36 20 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_score.box0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_score
+    virtual_addr: 0x004a11b3
+    length: 5
+    original_bytes: "E8 1B 1C 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_score.box1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_score
+    virtual_addr: 0x004a11c3
+    length: 5
+    original_bytes: "E8 0B 1C 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_score.box2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_score
+    virtual_addr: 0x004a11d3
+    length: 5
+    original_bytes: "E8 FB 1B 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_intel.box0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_intel
+    virtual_addr: 0x004a228a
+    length: 5
+    original_bytes: "E8 44 0B 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_intel.box1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_intel
+    virtual_addr: 0x004a229a
+    length: 5
+    original_bytes: "E8 34 0B 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_intel.box2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_intel
+    virtual_addr: 0x004a22aa
+    length: 5
+    original_bytes: "E8 24 0B 14 00"   # K-stroke frame + device-density interior (g<=16 native inside the thunk)
+    new_bytes:      "E8 {rel32:t_rwk_boxhalf}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.strip_anchor
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3d65
+    length: 8
+    original_bytes: "83 C6 40 B9 64 EC 7A 00"   # 2026-10-18 fix 9: the strip draws (clip, da50, d5a0, d528) read g_rw_strip_rect = (left panel R - K, T, R, B) at g>16 (law rw_strip_anchor: the panel's right stroke is the strip's first K columns, d5a0 gap = the strip's T/B/R channel s(4)-K); ReportIf+0x40 untouched (E9 -> t_rwk_stripanchor)
+    new_bytes:      "E9 86 B7 56 00 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_chrome.boxforce0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3d3a
+    length: 5
+    original_bytes: "E8 94 F0 13 00"   # outer L panel: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.boxforce1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3d4d
+    length: 5
+    original_bytes: "E8 81 F0 13 00"   # outer R panel: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.boxforce2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3d60
+    length: 5
+    original_bytes: "E8 6E F0 13 00"   # outer centre-top: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.boxforce3
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3d85
+    length: 5
+    original_bytes: "E8 49 F0 13 00"   # outer centre-bottom: t_rwk_boxforce with the clip widened to the frame + the hidden band restored (band map, K strokes, half-open)
+    new_bytes:      "E8 {rel32:t_rwk_stripframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.boxforce4
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3e18
+    length: 5
+    original_bytes: "E8 B6 EF 13 00"   # inner L panel: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.boxforce5
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3e2e
+    length: 5
+    original_bytes: "E8 A0 EF 13 00"   # inner R panel: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.boxforce6
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3e3e
+    length: 5
+    original_bytes: "E8 90 EF 13 00"   # inner centre-top: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_chrome.boxforce7
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_chrome
+    virtual_addr: 0x004a3e4e
+    length: 5
+    original_bytes: "E8 80 EF 13 00"   # inner centre-bottom: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_ops.boxforce0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a90fc
+    length: 5
+    original_bytes: "E8 D2 9C 13 00"   # GOVERNOR/BEST BASES tab strip: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_ops.boxforce1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a9124
+    length: 5
+    original_bytes: "E8 AA 9C 13 00"   # left panel: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_ops.boxforce2
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a9e2f
+    length: 5
+    original_bytes: "E8 9F 8F 13 00"   # BASE LOCATOR outer: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_ops.boxforce3
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a9e85
+    length: 5
+    original_bytes: "E8 49 8F 13 00"   # BASE LOCATOR title band: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_projects.boxforce0
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_projects
+    virtual_addr: 0x004aa67c
+    length: 5
+    original_bytes: "E8 52 87 13 00"   # BASE LOCATOR outer: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_projects.boxforce1
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_projects
+    virtual_addr: 0x004aa6d2
+    length: 5
+    original_bytes: "E8 FC 86 13 00"   # BASE LOCATOR title band: native draw, then fe_pair_remap FORCE over the drawn rect (C6/41 tile -> P stripes)
+    new_bytes:      "E8 {rel32:t_rwk_boxforce}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_small.energy_listA
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004a8664
+    length: 5
+    original_bytes: "E8 67 FD 0D 00"   # console list bar width s(12) + panel slot
+    new_bytes:      "E8 {rel32:t_rw_scrollsmall}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_small.energy_listB
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004a8d19
+    length: 5
+    original_bytes: "E8 B2 F6 0D 00"   # console list bar width s(12) + panel slot
+    new_bytes:      "E8 {rel32:t_rw_scrollsmall}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_small.bases_list
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004a915b
+    length: 5
+    original_bytes: "E8 70 F2 0D 00"   # console list bar width s(12) + panel slot
+    new_bytes:      "E8 {rel32:t_rw_scrollsmall}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_small.intel_listA
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004ac30e
+    length: 5
+    original_bytes: "E8 BD C0 0D 00"   # console list bar width s(12) + panel slot
+    new_bytes:      "E8 {rel32:t_rw_scrollsmall}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_small.intel_listB
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004ac77c
+    length: 5
+    original_bytes: "E8 4F BC 0D 00"   # console list bar width s(12) + panel slot
+    new_bytes:      "E8 {rel32:t_rw_scrollsmall}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_normal.energy_listA
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004a892b
+    length: 5
+    original_bytes: "E8 10 FA 0D 00"   # inlist=0
+    new_bytes:      "E8 {rel32:t_rw_scrollnormal}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_normal.energy_listB
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004a8ffc
+    length: 5
+    original_bytes: "E8 3F F3 0D 00"   # inlist=0
+    new_bytes:      "E8 {rel32:t_rw_scrollnormal}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_normal.bases_list
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004a9ad8
+    length: 5
+    original_bytes: "E8 63 E8 0D 00"   # inlist=0
+    new_bytes:      "E8 {rel32:t_rw_scrollnormal}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_normal.intel_listA
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004ac48e
+    length: 5
+    original_bytes: "E8 AD BE 0D 00"   # inlist=0
+    new_bytes:      "E8 {rel32:t_rw_scrollnormal}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console.scroll_normal.intel_listB
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console
+    virtual_addr: 0x004ac95c
+    length: 5
+    original_bytes: "E8 DF B9 0D 00"   # inlist=0
+    new_bytes:      "E8 {rel32:t_rw_scrollnormal}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_show_page.scroll_show
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_show_page
+    virtual_addr: 0x004a3cb5
+    length: 5
+    original_bytes: "E8 E6 A1 FB FF"   # save the window's right-border column once (before the bar draws)
+    new_bytes:      "E8 {rel32:t_rwk_scrollshow}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_activate.scroll_show
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a5d1b
+    length: 5
+    original_bytes: "E8 80 81 FB FF"   # save the window's right-border column once (before the bar draws)
+    new_bytes:      "E8 {rel32:t_rwk_scrollshow}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_bases.scroll_hide
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_bases
+    virtual_addr: 0x0049d739
+    length: 5
+    original_bytes: "E8 02 0E FC FF"   # restore the right-border column after the gated slide-out
+    new_bytes:      "E8 {rel32:t_rwk_scrollhide}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_projects.scroll_hide
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_projects
+    virtual_addr: 0x0049ed11
+    length: 5
+    original_bytes: "E8 2A F8 FB FF"   # restore the right-border column after the gated slide-out
+    new_bytes:      "E8 {rel32:t_rwk_scrollhide}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_draw_units.scroll_hide
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportWin_draw_units
+    virtual_addr: 0x004a0b8d
+    length: 5
+    original_bytes: "E8 AE D9 FB FF"   # restore the right-border column after the gated slide-out
+    new_bytes:      "E8 {rel32:t_rwk_scrollhide}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_show_page.scroll_hide
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_show_page
+    virtual_addr: 0x004a3bc3
+    length: 5
+    original_bytes: "E8 78 A9 FB FF"   # restore the right-border column after the gated slide-out
+    new_bytes:      "E8 {rel32:t_rwk_scrollhide}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_activate.scroll_hide
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a5d94
+    length: 5
+    original_bytes: "E8 A7 87 FB FF"   # restore the right-border column after the gated slide-out
+    new_bytes:      "E8 {rel32:t_rwk_scrollhide}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_activate.railarm_show
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a5cee
+    length: 5
+    original_bytes: "E8 4D 77 FB FF"   # arm the filedlg rail gate around slide_show(ReportWin)
+    new_bytes:      "E8 {rel32:thunk_popup_railshow}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_activate.railarm_hide
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_activate
+    virtual_addr: 0x004a5da8
+    length: 5
+    original_bytes: "E8 C3 7B FB FF"   # arm the filedlg rail gate around slide_hide(ReportWin)
+    new_bytes:      "E8 {rel32:thunk_popup_railhide}"
+    pattern: call_target_redirect
+
+  - id: ListBox_close.report_text_pad
+    status: confirmed
+    group: rw_scale_kinds
+    function: ListBox_close
+    virtual_addr: 0x00609f5e
+    length: 6
+    original_bytes: "8B 15 E4 70 69 00"   # mov edx,[0x6970E4] -> CALL: edx = s(3)-1 for the console lists (g_rw_inlist) and the energy list ReportWin+0x5A0C at g>16, else the static 2 (ListBox_draw_item text inset pad+1 per side)
+    new_bytes:      "E8 {rel32:t_lb_textpad} 90"
+    pattern: instruction_to_thunk_call
+
+  - id: ReportIf_console_energy.d528_4A8549
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_energy
+    virtual_addr: 0x004a8549
+    length: 5
+    original_bytes: "E8 85 A8 13 00"   # BASE EXPENDITURES title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_energy.d528_4A863A
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_energy
+    virtual_addr: 0x004a863a
+    length: 5
+    original_bytes: "E8 94 A7 13 00"   # BASE EXPENDITURES list d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_energy.d528_4A8C32
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_energy
+    virtual_addr: 0x004a8c32
+    length: 5
+    original_bytes: "E8 9C A1 13 00"   # MAINTENANCE COSTS title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_energy.d528_4A8CEF
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_energy
+    virtual_addr: 0x004a8cef
+    length: 5
+    original_bytes: "E8 DF A0 13 00"   # MAINTENANCE COSTS list d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_ops.d528_4A9EB5
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_ops
+    virtual_addr: 0x004a9eb5
+    length: 5
+    original_bytes: "E8 19 8F 13 00"   # BASE LOCATOR title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_projects.d528_4AA1B8
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_projects
+    virtual_addr: 0x004aa1b8
+    length: 5
+    original_bytes: "E8 16 8C 13 00"   # PROJECT DESCRIPTION title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_projects.d528_4AA1E3
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_projects
+    virtual_addr: 0x004aa1e3
+    length: 5
+    original_bytes: "E8 EB 8B 13 00"   # PROJECT DESCRIPTION body d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_projects.d528_4AA702
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_projects
+    virtual_addr: 0x004aa702
+    length: 5
+    original_bytes: "E8 CC 86 13 00"   # BASE LOCATOR title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_sat.d528_4AA9EB
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004aa9eb
+    length: 5
+    original_bytes: "E8 E3 83 13 00"   # survey left d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_sat.d528_4AABB3
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004aabb3
+    length: 5
+    original_bytes: "E8 1B 82 13 00"   # SELECT FACTION TARGET title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_sat.d528_4AABDE
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004aabde
+    length: 5
+    original_bytes: "E8 F0 81 13 00"   # SELECT FACTION TARGET body d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_sat.d528_4AAFD7
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004aafd7
+    length: 5
+    original_bytes: "E8 F7 7D 13 00"   # survey right d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_sat.d528_4AB189
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004ab189
+    length: 5
+    original_bytes: "E8 45 7C 13 00"   # SELECT SATELLITE TARGET title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_sat.d528_4AB1B4
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_sat
+    virtual_addr: 0x004ab1b4
+    length: 5
+    original_bytes: "E8 1A 7C 13 00"   # SELECT SATELLITE TARGET body d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_units.d528_4AB671
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_units
+    virtual_addr: 0x004ab671
+    length: 5
+    original_bytes: "E8 5D 77 13 00"   # UNIT TYPES title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_units.d528_4AB69C
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_units
+    virtual_addr: 0x004ab69c
+    length: 5
+    original_bytes: "E8 32 77 13 00"   # UNIT TYPES body d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_units.d528_4ABCDF
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_units
+    virtual_addr: 0x004abcdf
+    length: 5
+    original_bytes: "E8 EF 70 13 00"   # AUTOMATE UNITS title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_units.d528_4ABD0A
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_units
+    virtual_addr: 0x004abd0a
+    length: 5
+    original_bytes: "E8 C4 70 13 00"   # AUTOMATE UNITS body d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_score.d528_4ABED8
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_score
+    virtual_addr: 0x004abed8
+    length: 5
+    original_bytes: "E8 F6 6E 13 00"   # left d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_score.d528_4AC10C
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_score
+    virtual_addr: 0x004ac10c
+    length: 5
+    original_bytes: "E8 C2 6C 13 00"   # right d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_intel.d528_4AC224
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_intel
+    virtual_addr: 0x004ac224
+    length: 5
+    original_bytes: "E8 AA 6B 13 00"   # left title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_intel.d528_4AC2E4
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_intel
+    virtual_addr: 0x004ac2e4
+    length: 5
+    original_bytes: "E8 EA 6A 13 00"   # left body d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_intel.d528_4AC693
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_intel
+    virtual_addr: 0x004ac693
+    length: 5
+    original_bytes: "E8 3B 67 13 00"   # right title d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_intel.d528_4AC752
+    status: confirmed
+    group: rw_scale_kinds
+    function: ReportIf_console_intel
+    virtual_addr: 0x004ac752
+    length: 5
+    original_bytes: "E8 7C 66 13 00"   # right body d528: half-open exact-fill helper (was inclusive via hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_rowframe}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.scroll_small
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7114
+    length: 5
+    original_bytes: "E8 B7 12 0E 00"   # g_scrollbar_w 12 -> s(12) inside the list attach; inlist=1
+    new_bytes:      "E8 {rel32:t_rw_scrollsmall}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.scroll_normal
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a75c9
+    length: 5
+    original_bytes: "E8 72 0D 0E 00"   # inlist=0
+    new_bytes:      "E8 {rel32:t_rw_scrollnormal}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_hide_labs_widgets.listbox_close
+    status: confirmed
+    group: rw_scale_shared
+    function: ReportIf_hide_labs_widgets
+    virtual_addr: 0x004a8479
+    length: 5
+    original_bytes: "E8 A2 1A 16 00"   # drop the bar stashes
+    new_bytes:      "E8 {rel32:t_rw_lbclose}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_paint.tech_page_496d3e
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_painter
+    virtual_addr: 0x00496d3e
+    length: 5
+    original_bytes: "E8 ED 1D 00 00"   # tech bracket: DL tech imms + g_dl_exec around the call, header restripe after
+    new_bytes:      "E8 {rel32:t_rw_techpage}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_paint.tech_page_496eef
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_painter
+    virtual_addr: 0x00496eef
+    length: 5
+    original_bytes: "E8 3C 1C 00 00"   # tech bracket: DL tech imms + g_dl_exec around the call, header restripe after
+    new_bytes:      "E8 {rel32:t_rw_techpage}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_paint.tech_page_496f58
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_painter
+    virtual_addr: 0x00496f58
+    length: 5
+    original_bytes: "E8 D3 1B 00 00"   # tech bracket: DL tech imms + g_dl_exec around the call, header restripe after
+    new_bytes:      "E8 {rel32:t_rw_techpage}"
+    pattern: call_target_redirect
+
+  - id: tech_page.hdr_band
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_tech_page
+    virtual_addr: 0x00498c99
+    length: 9
+    original_bytes: "8D 78 46 83 C0 03 83 C3 43"   # band h 0x46 / +3 / +0x43 -> s() (E9 -> t_rw_hdr1)
+    new_bytes:      "E9 C2 76 59 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: tech_page.hdr_wide
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_tech_page
+    virtual_addr: 0x00498ccf
+    length: 5
+    original_bytes: "83 E0 62 6A 00"   # wide extension 0x62 mask -> s() (E9 -> t_rw_hdr2)
+    new_bytes:      "E9 DC 76 59 00"
+    pattern: detour_inplace
+
+  - id: tech_page.hdr_icon
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_tech_page
+    virtual_addr: 0x00498e43
+    length: 6
+    original_bytes: "6A 40 50 8B 45 CC"   # brain icon target 0x40 -> s() (E9 -> t_rw_hdr3)
+    new_bytes:      "E9 98 75 59 00 90"
+    pattern: detour_inplace
+
+  - id: tech_page.hdr_band_frame
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_tech_page
+    virtual_addr: 0x00498d9b
+    length: 5
+    original_bytes: "E8 33 A0 14 00"   # outer band frame -> K stroke (bracket exec=1)
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: tech_page.hdr_textbox_frame
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_tech_page
+    virtual_addr: 0x00498e6c
+    length: 5
+    original_bytes: "E8 62 9F 14 00"   # text box frame -> K stroke (+restripe in t_rw_techpage)
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.title_inset
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a75ff
+    length: 5
+    original_bytes: "83 E0 4C 03 C8"   # and eax,0x4C mask -> s(0x4C) (imm8 overflow) (E9 -> t_rw_title)
+    new_bytes:      "E9 0C 8E 58 00"
+    pattern: detour_inplace
+
+  - id: ReportIf_activate.crest_size
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_activate
+    virtual_addr: 0x004a5b43
+    length: 6
+    original_bytes: "83 C1 46 83 C0 46"   # crest 0x46 -> s() (imm8 overflow) (E9 -> t_rw_crest)
+    new_bytes:      "E9 F8 A8 58 00 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_labs.enter
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7000
+    length: 9
+    original_bytes: "55 8B EC 81 EC 80 02 00 00"   # ret-swap -> t_rw_labs_leave: restripe the recorded bar rects (E9 -> t_rw_labs_enter)
+    new_bytes:      "E9 BB 94 58 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ReportIf_console_labs.bar_4a7df2
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7df2
+    length: 5
+    original_bytes: "E8 DC AF 13 00"   # research bar: record + NATIVE 9-slice (bypass hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_bar}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.bar_4a7e31
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7e31
+    length: 5
+    original_bytes: "E8 9D AF 13 00"   # research bar: record + NATIVE 9-slice (bypass hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_bar}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.bar_4a7f8f
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7f8f
+    length: 5
+    original_bytes: "E8 3F AE 13 00"   # research bar: record + NATIVE 9-slice (bypass hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_bar}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.bar_4a7fce
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a7fce
+    length: 5
+    original_bytes: "E8 00 AE 13 00"   # research bar: record + NATIVE 9-slice (bypass hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_bar}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.bar_4a812c
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a812c
+    length: 5
+    original_bytes: "E8 A2 AC 13 00"   # research bar: record + NATIVE 9-slice (bypass hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_bar}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.bar_4a816b
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a816b
+    length: 5
+    original_bytes: "E8 63 AC 13 00"   # research bar: record + NATIVE 9-slice (bypass hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_bar}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.bar_4a82c8
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a82c8
+    length: 5
+    original_bytes: "E8 06 AB 13 00"   # research bar: record + NATIVE 9-slice (bypass hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_bar}"
+    pattern: call_target_redirect
+
+  - id: ReportIf_console_labs.bar_4a8307
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_console_labs
+    virtual_addr: 0x004a8307
+    length: 5
+    original_bytes: "E8 C7 AA 13 00"   # research bar: record + NATIVE 9-slice (bypass hud_boxframe)
+    new_bytes:      "E8 {rel32:t_rw_bar}"
+    pattern: call_target_redirect
+
+  - id: ReportWin_vtbl.tech_hover
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportWin_vtbl
+    virtual_addr: 0x0066d7f4
+    length: 4
+    original_bytes: "20 B2 49 00"   # ReportWin_tech_hover slot (+0xA0): F2 hover/un-hover frame draws bracketed like the paint (DL tech imms g + g_dl_exec) -> K strokes, no stray native ring
+    new_bytes:      "{abs32:t_rw_techhover}"
+    pattern: vtable_repoint
+
+  - id: ReportIf_activate.kindtab_h
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_activate
+    virtual_addr: 0x004a42e0
+    length: 6
+    original_bytes: "8B 8E B0 4F 00 00"   # mov ecx,[esi+0x4FB0] -> mov ecx,imm32 (native 0x24; scaled by the g_rw_immtab row)
+    new_bytes:      "B9 24 00 00 00 90"
+    pattern: inplace_rewrite
+
+  - id: ReportIf_activate.kindtab_w
+    status: confirmed
+    group: rw_scale_tech
+    function: ReportIf_activate
+    virtual_addr: 0x004a42e6
+    length: 6
+    original_bytes: "8B 96 AC 4F 00 00"   # mov edx,[esi+0x4FAC] -> mov edx,imm32 (native 0x1E; scaled by the g_rw_immtab row)
+    new_bytes:      "BA 1E 00 00 00 90"
+    pattern: inplace_rewrite
+
+  - id: ListBox_set_hover.grid_row_clamp
+    status: confirmed
+    group: listbox_hover_clamp
+    function: ListBox_set_hover
+    virtual_addr: 0x0060cc29
+    length: 9
+    original_bytes: "F7 FE 03 D8 E9 12 01 00 00"   # VANILLA bug: grid path row >= rows -> un-hover (was: item beyond the visible rows drawn clipped) (E9 -> t_lb_hover_grid)
+    new_bytes:      "E9 C2 3C 42 00 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: ListBox_set_hover.slot_clamp
+    status: confirmed
+    group: listbox_hover_clamp
+    function: ListBox_set_hover
+    virtual_addr: 0x0060cd44
+    length: 8
+    original_bytes: "8B 4D 00 8B 47 D0 03 C3"   # VANILLA bug: slot >= rows*cols -> un-hover via ListBox_clear_hover (E9 -> t_lb_hover_slot)
+    new_bytes:      "E9 E7 3B 42 00 90 90 90"
+    pattern: detour_inplace

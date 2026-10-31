@@ -1,0 +1,17 @@
+# sprite_stripes: NO new exe sites.  The hooks are the jmp tails of two existing pcave2 cave entries
+# (apply by hand; 0 byte delta each; rationale in work/briefs/stripes_spr_findings.md).  The new bytes are a
+# literal rel32 to t_spr_stripes at pcave2 0xf9e4: re-run this module if the thunk moves.
+#
+#   - id: thunk_se_sd2          (pcave2 0x16880, 22 B; the jmp is its last 5 bytes, at 0x16891)
+#       old: E9 B4 22 BC FF        (jmp Sprite_draw_2)
+#       new: E9 4E 91 FF FF        (jmp t_spr_stripes)
+#
+#   - id: t_dp_sd2_logo          (pcave2 0x11b74, 127 B; the jmp is its last 5 bytes, at 0x11bee)
+#       old: E9 57 6F BC FF        (jmp Sprite_draw_2)
+#       new: E9 F1 DD FF FF        (jmp t_spr_stripes)
+#
+# and the group to add:
+#
+#   - id: sprite_stripes
+#     members: []            # no sites; reached via the two jmp tails above
+#     code_caves: [pcave2]

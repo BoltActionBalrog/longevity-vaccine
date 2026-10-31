@@ -1,0 +1,30 @@
+      - id: g_tech_immtab
+        offset: 0x17100
+        bytes: "59 73 48 00 0A 00 00 00 00 00 00 00 01 00 00 00 98 7C 48 00 14 00 00 00 00 00 00 00 00 00 00 00 A3 7C 48 00 00 00 00 00 14 00 00 00 00 00 00 00 0E 7D 48 00 1D 00 00 00 00 00 00 00 00 00 00 00 1E 7D 48 00 28 00 00 00 00 00 00 00 00 00 00 00 4A 7D 48 00 1E 00 00 00 00 00 00 00 00 00 00 00 72 7D 48 00 1D 00 00 00 00 00 00 00 01 00 00 00 A7 7D 48 00 03 00 00 00 00 00 00 00 01 00 00 00 BF 7D 48 00 1A 00 00 00 03 00 00 00 00 00 00 00 DD 7D 48 00 03 00 00 00 00 00 00 00 01 00 00 00 51 64 48 00 1E 00 00 00 00 00 00 00 00 00 00 00 8D 64 48 00 00 00 00 00 03 00 00 00 00 00 00 00 99 64 48 00 1D 00 00 00 00 00 00 00 01 00 00 00 AE 64 48 00 00 00 00 00 03 00 00 00 01 00 00 00 CF 5F 48 00 1D 00 00 00 00 00 00 00 00 00 00 00 4A 4E 48 00 02 00 00 00 00 00 00 00 00 00 00 00 80 4E 48 00 02 00 00 00 00 00 00 00 00 00 00 00 C5 4E 48 00 02 00 00 00 00 00 00 00 00 00 00 00 56 4F 48 00 04 00 00 00 00 00 00 00 00 00 00 00 78 4F 48 00 04 00 00 00 00 00 00 00 00 00 00 00 90 4F 48 00 02 00 00 00 00 00 00 00 00 00 00 00 B0 4F 48 00 06 00 00 00 00 00 00 00 00 00 00 00 B4 4F 48 00 02 00 00 00 00 00 00 00 00 00 00 00 7C 50 48 00 02 00 00 00 00 00 00 00 00 00 00 00 DE 50 48 00 B4 00 00 00 00 00 00 00 01 00 00 00 EE 50 48 00 8C 00 00 00 00 00 00 00 01 00 00 00 E8 53 48 00 08 00 00 00 00 00 00 00 00 00 00 00 EB 53 48 00 04 00 00 00 00 00 00 00 00 00 00 00 21 4C 48 00 02 00 00 00 00 00 00 00 00 00 00 00 49 4C 48 00 02 00 00 00 00 00 00 00 00 00 00 00 E5 50 48 00 06 00 00 00 F0 FF FF FF 03 F6 FF FF F8 50 48 00 02 00 00 00 00 00 00 00 02 02 00 00 FB 50 48 00 02 00 00 00 F0 FF FF FF 02 F2 FF FF 46 51 48 00 00 00 00 00 00 01 00 00 03 10 00 00 85 51 48 00 00 00 00 00 08 00 00 00 02 04 00 00 15 52 48 00 00 00 00 00 08 00 00 00 02 04 00 00 00 00 00 00"
+      - id: thunk_tech_enter
+        offset: 0x17400
+        bytes: "51 52 E8 {rel32:thunk_tech_immfix} 5A 59 E9 02 31 A6 FF"
+      - id: thunk_tech_immfix
+        offset: 0x17410
+        bytes: "56 83 3D {abs32:g_tech_vpdone} 00 75 4C 68 {abs32:g_ed_str_k32} FF 15 20 91 66 00 85 C0 0F 84 B2 00 00 00 68 {abs32:g_ed_str_vp} 50 FF 15 24 91 66 00 85 C0 0F 84 9E 00 00 00 68 {abs32:g_tech_vpold} 6A 40 68 00 40 00 00 68 00 40 48 00 FF D0 85 C0 0F 84 83 00 00 00 C7 05 {abs32:g_tech_vpdone} 01 00 00 00 83 3D {abs32:g_tech_vpdone} 00 74 70 BE {abs32:g_tech_immtab} 8B 06 85 C0 74 65 F7 46 0C 02 00 00 00 75 2C 8B 4E 04 0F AF 0D {abs32:g_popup_scale_num} 8D 0C 4D 0F 00 00 00 C1 F9 05 8B 56 08 0F AF 15 {abs32:g_popup_scale_num} 8D 14 55 0F 00 00 00 C1 FA 05 29 D1 EB 1A 8B 0D {abs32:g_popup_scale_num} 83 F9 10 7F 08 8B 4E 0C C1 F9 08 EB 07 0F AF 4E 04 03 4E 08 8B 06 F7 46 0C 01 00 00 00 75 04 88 08 EB 02 89 08 83 C6 10 EB 95 5E C3"
+      - id: thunk_tech_inset
+        offset: 0x174f0
+        bytes: "B8 04 00 00 00 0F AF 05 {abs32:g_popup_scale_num} 8D 04 45 0F 00 00 00 C1 F8 05 48 29 C3 29 C2 B8 03 00 00 00 0F AF 05 {abs32:g_popup_scale_num} 8D 04 45 0F 00 00 00 C1 F8 05 39 C1 C3"
+      - id: thunk_tech_n8
+        offset: 0x17530
+        bytes: "BE 0A 00 00 00 C7 45 08 0C 00 00 00 C3"
+      - id: thunk_tech_n8ch
+        offset: 0x17540
+        bytes: "51 B9 45 00 00 00 0F AF 0D {abs32:g_popup_scale_num} 8D 0C 4D 0F 00 00 00 C1 F9 05 29 C8 59 99 F7 F9 C3"
+      - id: thunk_tech_rb1
+        offset: 0x17560
+        bytes: "83 3D {abs32:g_popup_scale_num} 10 7E 36 50 52 8B 54 24 0C 8B 02 A3 {abs32:g_tech_rbrect} 8B 42 04 A3 14 2E A2 00 8B 42 08 48 A3 18 2E A2 00 8B 42 0C 48 A3 1C 2E A2 00 C7 44 24 0C {abs32:g_tech_rbrect} 5A 58 E9 01 CD FE FF E9 2F F8 BB FF"
+      - id: thunk_tech_calib
+        offset: 0x175b0
+        bytes: "55 89 E5 53 56 57 8B 45 18 85 C0 75 17 FF 75 14 FF 75 10 FF 75 0C 8B 4D 08 E8 {rel32:Font_init} 8B 4D 08 8B 41 0C 0F AF 05 {abs32:g_popup_scale_num} C1 F8 04 89 C7 8B 5D 10 0F AF 1D {abs32:g_popup_scale_num} 8D 1C 5D 0F 00 00 00 C1 FB 05 8D 73 F8 83 C3 10 3B 75 10 7D 03 8B 75 10 FF 75 14 56 FF 75 0C 8B 4D 08 E8 {rel32:Font_init} 8B 4D 08 39 79 0C 7D 28 46 39 DE 7E E4 8B 75 10 0F AF 35 {abs32:g_popup_scale_num} 8D 34 75 0F 00 00 00 C1 FE 05 FF 75 14 56 FF 75 0C 8B 4D 08 E8 {rel32:Font_init} 89 F0 5F 5E 5B 5D C2 14 00"
+      - id: thunk_tech_fi
+        offset: 0x17650
+        bytes: "83 3D {abs32:g_popup_scale_num} 10 0F 8E 85 00 00 00 55 89 E5 53 56 57 89 CB 8B 75 0C 8B 7D 10 B9 {abs32:g_tech_ficache} BA 08 00 00 00 39 31 75 14 39 79 04 75 0F A1 {abs32:g_popup_scale_num} 39 41 08 75 05 8B 41 0C EB 4C 83 C1 10 4A 75 E2 6A 00 57 56 FF 75 08 68 {abs32:g_tech_scratchfont} E8 {rel32:thunk_tech_calib} B9 {abs32:g_tech_ficache} BA 08 00 00 00 83 79 08 00 74 14 39 31 75 05 39 79 04 74 0B 83 C1 10 4A 75 EB B9 {abs32:g_tech_ficache} 89 31 89 79 04 8B 15 {abs32:g_popup_scale_num} 89 51 08 89 41 0C 89 45 0C 89 D9 5F 5E 5B 5D E9 59 58 BF FF"
+      - id: thunk_tech_ff
+        offset: 0x176f0
+        bytes: "83 3D {abs32:g_popup_scale_num} 10 0F 8E A8 00 00 00 55 89 E5 53 56 57 8B 75 08 8B 7D 0C B9 {abs32:g_tech_ffcache} BA 06 00 00 00 39 31 75 14 39 79 04 75 0F A1 {abs32:g_popup_scale_num} 39 41 08 75 05 8D 41 10 EB 75 83 C1 40 4A 75 E2 B9 {abs32:g_tech_ffcache} BA 06 00 00 00 83 79 08 00 74 14 39 31 75 05 39 79 04 74 0B 83 C1 40 4A 75 EB B9 {abs32:g_tech_ffcache} 89 CB 89 33 89 7B 04 A1 {abs32:g_popup_scale_num} 89 43 08 57 56 E8 {rel32:find_font} 83 C4 08 8B 40 0C 8B 0D 2C 1B 69 00 31 D2 83 FE 0C 7E 0B 8B 0D 30 1B 69 00 BA 01 00 00 00 0B 14 BD 50 F2 68 00 50 52 56 51 8D 43 10 50 E8 {rel32:thunk_tech_calib} 8D 43 10 5F 5E 5B 5D C3 E9 46 4B B6 FF"

@@ -1,0 +1,649 @@
+  - id: DiploTalkWin_init.font_a
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440a57
+    length: 5
+    original_bytes: "E8 E4 84 1D 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_init.font_b
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440a6d
+    length: 5
+    original_bytes: "E8 CE 84 1D 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_init.font_c
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440aa9
+    length: 5
+    original_bytes: "E8 92 84 1D 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_init.font_a800
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440a7e
+    length: 5
+    original_bytes: "E8 BD 84 1D 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_init.font_b800
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440a94
+    length: 5
+    original_bytes: "E8 A7 84 1D 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_init.rect_table
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440bd9
+    length: 5
+    original_bytes: "E8 32 66 1C 00"
+    new_bytes:      "E8 {rel32:t_dp_table}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_strip.frame_centre
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_strip
+    virtual_addr: 0x004402f3
+    length: 5
+    original_bytes: "E8 DB 2A 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_box_centre}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_strip.frame_hqunion
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_strip
+    virtual_addr: 0x00440352
+    length: 5
+    original_bytes: "E8 7C 2A 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_box_hqunion}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_status_panels.panel
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_status_panels
+    virtual_addr: 0x0043fb0a
+    length: 5
+    original_bytes: "E8 C4 32 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_box_panel}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_hq_panel.panel
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_hq_panel
+    virtual_addr: 0x00440108
+    length: 5
+    original_bytes: "E8 C6 2C 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_box_hq}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_bioscan_panel.header_text
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_bioscan_panel
+    virtual_addr: 0x0043f6d8
+    length: 5
+    original_bytes: "E8 53 DA 19 00"
+    new_bytes:      "E8 {rel32:t_dp_c7_bio}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_hq_panel.name_text
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_hq_panel
+    virtual_addr: 0x00440233
+    length: 5
+    original_bytes: "E8 F8 CE 19 00"
+    new_bytes:      "E8 {rel32:t_dp_c7_hq}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_bioscan_panel.colour_bar
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_bioscan_panel
+    virtual_addr: 0x0043f778
+    length: 5
+    original_bytes: "E8 CD 53 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_sd2_bar}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_status_panels.logo
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_status_panels
+    virtual_addr: 0x0043fbfb
+    length: 5
+    original_bytes: "E8 4A 4F 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_sd2_logo}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_hq_panel.picture
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_hq_panel
+    virtual_addr: 0x00440277
+    length: 5
+    original_bytes: "E8 CE 48 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_sd2_hqpic}"
+    pattern: call_target_redirect
+
+  - id: slide_show.diplo_bezel
+    status: confirmed
+    group: diplo_talk_scale
+    function: slide_show
+    virtual_addr: 0x0045d8e9
+    length: 5
+    original_bytes: "E8 5C 72 18 00"
+    new_bytes:      "E8 {rel32:t_dp_sd2_bezel}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_status_panels.name
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_status_panels
+    virtual_addr: 0x0043fca2
+    length: 5
+    original_bytes: "E8 09 DE 19 00"
+    new_bytes:      "E8 {rel32:t_dp_cent6}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_status_panels.status_wrap
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_status_panels
+    virtual_addr: 0x0043fe07
+    length: 5
+    original_bytes: "E8 24 D9 19 00"
+    new_bytes:      "E8 {rel32:t_dp_status_fit}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_status_panels.infil_wrap
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_status_panels
+    virtual_addr: 0x0043fe97
+    length: 5
+    original_bytes: "E8 94 D8 19 00"
+    new_bytes:      "E8 {rel32:t_dp_txt_wrap3}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_status_panels.energy
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_status_panels
+    virtual_addr: 0x0043ff53
+    length: 5
+    original_bytes: "E8 48 CF 19 00"
+    new_bytes:      "E8 {rel32:t_dp_txt_wl3}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_status_panels.might_label
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_status_panels
+    virtual_addr: 0x0043ffc7
+    length: 5
+    original_bytes: "E8 D4 CE 19 00"
+    new_bytes:      "E8 {rel32:t_dp_txt_wl3}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_news_panel.sep_pixel
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_news_panel
+    virtual_addr: 0x0043f801
+    length: 5
+    original_bytes: "E8 0A 2A 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_news_sep}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_news_panel.sep_line
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_news_panel
+    virtual_addr: 0x0043f818
+    length: 5
+    original_bytes: "E8 63 22 1A 00"
+    new_bytes:      "E8 {rel32:t_dp_news_hline}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_news_panel.name
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_news_panel
+    virtual_addr: 0x0043f8d1
+    length: 5
+    original_bytes: "E8 CA D5 19 00"
+    new_bytes:      "E8 {rel32:t_dp_news_t1}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_news_panel.reputation
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_news_panel
+    virtual_addr: 0x0043f9ba
+    length: 5
+    original_bytes: "E8 E1 D4 19 00"
+    new_bytes:      "E8 {rel32:t_dp_news_t2}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_draw_news_panel.mood
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_draw_news_panel
+    virtual_addr: 0x0043fa82
+    length: 5
+    original_bytes: "E8 19 D4 19 00"
+    new_bytes:      "E8 {rel32:t_dp_news_t3}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_open.flic_bio
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_open
+    virtual_addr: 0x0043f45e
+    length: 5
+    original_bytes: "E8 ED A9 1E 00"
+    new_bytes:      "E8 {rel32:thunk_art_bioinit}"   # popup_art_reblit 2026-09-21: wraps t_dp_flinit_bio (was {rel32:t_dp_flinit_bio}); fills the flic canvas with key 9 + captures the device save-under
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_open.flic_news
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_open
+    virtual_addr: 0x0043f4dd
+    length: 5
+    original_bytes: "E8 6E A9 1E 00"
+    new_bytes:      "E8 {rel32:t_dp_flinit_news}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_open.flic_news_fallback
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_open
+    virtual_addr: 0x0043f504
+    length: 5
+    original_bytes: "E8 47 A9 1E 00"
+    new_bytes:      "E8 {rel32:t_dp_flinit_news}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_open.news_first_draw
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_open
+    virtual_addr: 0x0043f596
+    length: 5
+    original_bytes: "E8 D5 AA 1E 00"
+    new_bytes:      "E8 {rel32:thunk_art_flic}"   # popup_art_reblit 2026-09-20: wraps t_dp_flicdraw (was {rel32:t_dp_flicdraw})
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_bioscan_tick.draw
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_bioscan_tick
+    virtual_addr: 0x0043f22c
+    length: 5
+    original_bytes: "E8 3F AE 1E 00"
+    new_bytes:      "E8 {rel32:thunk_art_flic}"   # popup_art_reblit 2026-09-20: wraps t_dp_flicdraw (was {rel32:t_dp_flicdraw})
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_news_tick.draw
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_news_tick
+    virtual_addr: 0x0043f26f
+    length: 5
+    original_bytes: "E8 FC AD 1E 00"
+    new_bytes:      "E8 {rel32:thunk_art_flic}"   # popup_art_reblit 2026-09-20: wraps t_dp_flicdraw (was {rel32:t_dp_flicdraw})
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_41e7ad
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x0041e7ad
+    length: 5
+    original_bytes: "E8 DE DA 03 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_422cf2
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x00422cf2
+    length: 5
+    original_bytes: "E8 99 95 03 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_426ad2
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x00426ad2
+    length: 5
+    original_bytes: "E8 B9 57 03 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_431e98
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x00431e98
+    length: 5
+    original_bytes: "E8 F3 A3 02 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_4379d2
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x004379d2
+    length: 5
+    original_bytes: "E8 B9 48 02 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_4400cb
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x004400cb
+    length: 5
+    original_bytes: "E8 C0 C1 01 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_4402b1
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x004402b1
+    length: 5
+    original_bytes: "E8 DA BF 01 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_4436d2
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x004436d2
+    length: 5
+    original_bytes: "E8 B9 8B 01 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_45bc73
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x0045bc73
+    length: 5
+    original_bytes: "E8 18 06 00 00"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_45d90e
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x0045d90e
+    length: 5
+    original_bytes: "E8 7D E9 FF FF"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_45de3c
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x0045de3c
+    length: 5
+    original_bytes: "E8 4F E4 FF FF"
+    new_bytes:      "E8 {rel32:t_cr_tile_exit}"
+    pattern: call_target_redirect
+
+  - id: tile_panels_wrap.site_4b19d2
+    status: confirmed
+    group: diplo_talk_scale
+    function: tile_panels_wrap
+    virtual_addr: 0x004b19d2
+    length: 5
+    original_bytes: "E8 B9 A8 FA FF"
+    new_bytes:      "E8 {rel32:t_cr_tile}"
+    pattern: call_target_redirect
+
+  - id: Popup_on_draw_background.diplo_fill
+    status: confirmed
+    group: diplo_talk_scale
+    function: Popup_on_draw_background
+    virtual_addr: 0x00405d0b
+    length: 5
+    original_bytes: "E8 40 F6 1C 00"
+    new_bytes:      "E8 {rel32:t_dp_fill}"
+    pattern: call_target_redirect
+
+  - id: Popup_on_draw_background.diplo_backdrop
+    status: confirmed
+    group: diplo_talk_scale
+    function: Popup_on_draw_background
+    virtual_addr: 0x00405d39
+    length: 5
+    original_bytes: "E8 95 D0 1D 00"
+    new_bytes:      "E8 {rel32:thunk_box_thick_devfill}"
+    pattern: call_target_redirect
+
+  - id: Popup_on_draw_background.diplo_title_outer
+    status: confirmed
+    group: diplo_talk_scale
+    function: Popup_on_draw_background
+    virtual_addr: 0x00405d91
+    length: 5
+    original_bytes: "E8 3D D0 1D 00"
+    new_bytes:      "E8 {rel32:t_dp_title_outer}"
+    pattern: call_target_redirect
+
+  - id: Popup_on_draw_background.diplo_title_inner
+    status: confirmed
+    group: diplo_talk_scale
+    function: Popup_on_draw_background
+    virtual_addr: 0x00405dc6
+    length: 5
+    original_bytes: "E8 08 D0 1D 00"
+    new_bytes:      "E8 {rel32:t_dp_title_inner}"
+    pattern: call_target_redirect
+
+  - id: Popup_on_draw_background.diplo_title_text
+    status: confirmed
+    group: diplo_talk_scale
+    function: Popup_on_draw_background
+    virtual_addr: 0x00405e31
+    length: 5
+    original_bytes: "E8 FA 72 1D 00"
+    new_bytes:      "E8 {rel32:t_dp_title_text}"
+    pattern: call_target_redirect
+
+  - id: Popup_on_draw_background.diplo_textblock
+    status: confirmed
+    group: diplo_talk_scale
+    function: Popup_on_draw_background
+    virtual_addr: 0x00405e95
+    length: 5
+    original_bytes: "E8 39 CF 1D 00"
+    new_bytes:      "E8 {rel32:t_dp_textblock}"
+    pattern: call_target_redirect
+
+  - id: DiploTalkWin_init.gwinit_w
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440af2
+    length: 5
+    original_bytes: "68 BC 02 00 00"
+    new_bytes:      "E8 {rel32:t_dp_pushw}"
+    pattern: block_cut_thunk
+
+  - id: DiploTalkWin_init.gwinit_h
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440ae0
+    length: 5
+    original_bytes: "B9 C2 01 00 00"
+    new_bytes:      "E8 {rel32:t_dp_movh}"
+    pattern: block_cut_thunk
+
+  - id: DiploTalkWin_init.move_x
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440b32
+    length: 8
+    original_bytes: "83 C0 20 99 2B C2 D1 F8"
+    new_bytes:      "E8 {rel32:t_dp_movex} 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: DiploTalkWin_init.frame_left
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440b68
+    length: 5
+    original_bytes: "8B 02 83 C0 17"
+    new_bytes:      "E8 {rel32:t_dp_frameL}"
+    pattern: block_cut_thunk
+
+  - id: DiploTalkWin_init.frame_right
+    status: confirmed
+    group: diplo_talk_scale
+    function: DiploTalkWin_init
+    virtual_addr: 0x00440b7d
+    length: 6
+    original_bytes: "83 E9 37 8B 52 0C"
+    new_bytes:      "E8 {rel32:t_dp_frameR} 90"
+    pattern: block_cut_thunk
+
+  - id: BasePop_calculate_dimensions.anch_e4
+    status: confirmed
+    group: diplo_talk_scale
+    function: BasePop_calculate_dimensions
+    virtual_addr: 0x0060392b
+    length: 18
+    original_bytes: "89 AE E0 30 00 00 8B 96 C4 21 00 00 89 96 E4 30 00 00"
+    new_bytes:      "E8 {rel32:t_dp_calc_e4} 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BasePop_calculate_dimensions.anch_hdr
+    status: confirmed
+    group: diplo_talk_scale
+    function: BasePop_calculate_dimensions
+    virtual_addr: 0x00603999
+    length: 24
+    original_bytes: "8B 96 B8 21 00 00 89 96 E8 30 00 00 8B 86 BC 21 00 00 89 86 EC 30 00 00"
+    new_bytes:      "E8 {rel32:t_dp_calc_hdr} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: Popup_on_adjust_button_placement.anch_oky
+    status: confirmed
+    group: diplo_talk_scale
+    function: Popup_on_adjust_button_placement
+    virtual_addr: 0x0040507f
+    length: 6
+    original_bytes: "C7 01 E2 FF FF FF"
+    new_bytes:      "E8 {rel32:t_dp_oky} 90"
+    pattern: block_cut_thunk
+
+  - id: Dialog_type16_calc.fixed_arm_gap
+    status: confirmed
+    group: diplo_talk_scale
+    function: Dialog_type16_calc
+    virtual_addr: 0x0060d717
+    length: 11
+    original_bytes: "89 48 60 8B 16 8B 42 08 8D 0C 30"
+    new_bytes:      "E8 {rel32:t_dp_q16fixed} 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: Popup_on_draw_background.diplo_knest
+    status: confirmed
+    group: diplo_talk_scale
+    function: Popup_on_draw_background
+    virtual_addr: 0x00405ea6
+    length: 21
+    original_bytes: "83 E9 03 89 45 DC 89 4D E0 83 C0 FD 83 C2 03 8D 4D DC 83 C3 03"
+    new_bytes:      "E8 {rel32:t_dp_knest} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: vtbl_item_back_draw_0
+    status: confirmed
+    group: diplo_talk_scale
+    function: vtbl_item_back_draw_0
+    virtual_addr: 0x006695f4
+    length: 4
+    original_bytes: "20 5B 40 00"  # Popup_on_dialog_item_back_draw slot
+    new_bytes:      "{abs32:t_dp_itemrect}"
+    pattern: vtable_repoint
+
+  - id: vtbl_item_back_draw_1
+    status: confirmed
+    group: diplo_talk_scale
+    function: vtbl_item_back_draw_1
+    virtual_addr: 0x0066a8d4
+    length: 4
+    original_bytes: "20 5B 40 00"  # Popup_on_dialog_item_back_draw slot
+    new_bytes:      "{abs32:t_dp_itemrect}"
+    pattern: vtable_repoint
+
+  - id: vtbl_item_back_draw_2
+    status: confirmed
+    group: diplo_talk_scale
+    function: vtbl_item_back_draw_2
+    virtual_addr: 0x0066cb8c
+    length: 4
+    original_bytes: "20 5B 40 00"  # Popup_on_dialog_item_back_draw slot
+    new_bytes:      "{abs32:t_dp_itemrect}"
+    pattern: vtable_repoint
+
+  - id: vtbl_item_back_draw_3
+    status: confirmed
+    group: diplo_talk_scale
+    function: vtbl_item_back_draw_3
+    virtual_addr: 0x0066ddb0
+    length: 4
+    original_bytes: "20 5B 40 00"  # Popup_on_dialog_item_back_draw slot
+    new_bytes:      "{abs32:t_dp_itemrect}"
+    pattern: vtable_repoint
+
+  - id: iface_on_mode_saveunder
+    status: confirmed
+    group: diplo_talk_scale
+    function: iface_on_mode_saveunder
+    virtual_addr: 0x0066b424
+    length: 4
+    original_bytes: "80 03 44 00"  # DiploTalkIface_on_mode slot (console save-under snapshot)
+    new_bytes:      "{abs32:t_cr_snap}"
+    pattern: vtable_repoint

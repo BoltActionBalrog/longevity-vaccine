@@ -1,0 +1,236 @@
+  # ==== hud_widgets_scale — see group of same name. The complete v35 Frida lever set
+  # baked (prototype user-verified at 4K across hook_hudframes v8..v44). ====
+  - id: Font_init.hud_fontobj
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x00618F40
+    length: 5
+    original_bytes: "83 EC 74 53 56"
+    new_bytes:      "E8 {rel32:thunk_hud_fontobj}"
+    pattern: call_target_redirect
+    # sub esp,0x74; push ebx; push esi (Font_init prologue; object-gated A/F lever)
+  - id: veh_draw.hud_fcache
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x00559DE5
+    length: 5
+    original_bytes: "E8 E6 F4 FF FF"
+    new_bytes:      "E8 {rel32:thunk_hud_fcache}"
+    pattern: call_target_redirect
+    # call FontCache_get (unit-label font size mul 1/4 -> g/64 for HUD bufs)
+  - id: veh_draw.hud_args
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x005594F0
+    length: 6
+    original_bytes: "55 8B EC 83 EC 2C"
+    new_bytes:      "E8 {rel32:thunk_hud_vehargs} 90"
+    pattern: call_target_redirect
+    # veh_draw prologue (size sentinel + x-inset rewrite for HUD-buf calls)
+  - id: base_draw.hud_args
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x0055AF20
+    length: 9
+    original_bytes: "55 8B EC 81 EC 18 01 00 00"
+    new_bytes:      "E8 {rel32:thunk_hud_baseargs} 90 90 90 90"
+    pattern: call_target_redirect
+    # base_draw prologue (same C' rewrite; PRACX calls +0x42, untouched)
+  - id: StatusWin.slotw
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B4E23
+    length: 5
+    original_bytes: "BA 4B 00 00 00"
+    new_bytes:      "E8 {rel32:thunk_hud_slotw}"
+    pattern: call_target_redirect
+    # mov edx,75 fallback slot width (zoom path untouched)
+  - id: StatusWin.titley
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B4EA3
+    length: 5
+    original_bytes: "B8 38 00 00 00"
+    new_bytes:      "E8 {rel32:thunk_hud_titley}"
+    pattern: call_target_redirect
+    # mov eax,0x38 fallback title y (64*g/16-8)
+  - id: StatusWin.cellw
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B8156
+    length: 5
+    original_bytes: "B8 32 00 00 00"
+    new_bytes:      "E8 {rel32:thunk_hud_cellw}"
+    pattern: call_target_redirect
+    # mov eax,0x32 fallback unit-row cell width (61*g/16-11)
+  - id: hud.n01_box3_inset
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B4D84
+    length: 5
+    original_bytes: "68 F8 D7 78 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n01}"
+    pattern: call_target_redirect
+    # esi3 dual-purpose inset (box3)
+  - id: hud.n02_box4_inset
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B6A1F
+    length: 5
+    original_bytes: "68 F8 D7 78 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n02}"
+    pattern: call_target_redirect
+    # esi3 dual-purpose inset (box4)
+  - id: hud.n03_tile_x
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B6B82
+    length: 5
+    original_bytes: "25 64 EC 7A 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n03}"
+    pattern: call_target_redirect
+    # tile-info x +2
+  - id: hud.n04_tile_y
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B6B88
+    length: 5
+    original_bytes: "52 56 8B 75 14"
+    new_bytes:      "E8 {rel32:thunk_hud_n04}"
+    pattern: call_target_redirect
+    # tile-info y +1
+  - id: hud.n05_tile_row
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B6BCB
+    length: 6
+    original_bytes: "8B 82 A8 15 00 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n05} 90"
+    pattern: call_target_redirect
+    # tile-info row +3
+  - id: hud.n06_tile_wrap
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B6BF2
+    length: 5
+    original_bytes: "E8 B9 40 12 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n06}"
+    pattern: call_target_redirect
+    # tile-info wrap -4 (call-site tail-jmp)
+  - id: hud.n07_coord_x
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B7F05
+    length: 8
+    original_bytes: "74 1E 52 E8 D3 D4 18 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n07} 90 90 90"
+    pattern: call_target_redirect
+    # map-coord x +2
+  - id: hud.n08_coord_x2
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B8001
+    length: 8
+    original_bytes: "74 1B 52 E8 D7 D3 18 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n08} 90 90 90"
+    pattern: call_target_redirect
+    # map-coord x -2
+  - id: hud.n09_box9_text
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x0045BF86
+    length: 6
+    original_bytes: "89 45 EC 89 4D F0"
+    new_bytes:      "E8 {rel32:thunk_hud_n09} 90"
+    pattern: call_target_redirect
+    # box9 text innerL/T+3
+  - id: hud.n10_infowin_template
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004593A1
+    length: 6
+    original_bytes: "81 FA 20 03 00 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n10} 90"
+    pattern: call_target_redirect
+    # box5 InfoWin rects template +7/-39
+  - id: hud.n11_infowin_colgap
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004593CA
+    length: 6
+    original_bytes: "03 CA 03 C2 EB 0F"
+    new_bytes:      "E8 {rel32:thunk_hud_n11} 90"
+    pattern: call_target_redirect
+    # box5 colgap +3 (tail = displaced jmp)
+  - id: hud.n12_infowin_anchor
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x00456395
+    length: 6
+    original_bytes: "83 C3 05 83 C1 05"
+    new_bytes:      "E8 {rel32:thunk_hud_n12} 90"
+    pattern: call_target_redirect
+    # box5 line anchors +5
+  - id: hud.n13_box6_inset
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B80D9
+    length: 5
+    original_bytes: "8B 45 F4 03 D6"
+    new_bytes:      "E8 {rel32:thunk_hud_n13}"
+    pattern: call_target_redirect
+    # esi3 dual-purpose inset (box6 row)
+  - id: hud.n14_box6_pitch
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B8230
+    length: 5
+    original_bytes: "99 F7 FF 8B F8"
+    new_bytes:      "E8 {rel32:thunk_hud_n14}"
+    pattern: call_target_redirect
+    # slot pitch +5 before span idiv
+  - id: hud.n15_box6_slack
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B8295
+    length: 8
+    original_bytes: "89 45 18 A1 80 50 7B 00"
+    new_bytes:      "E8 {rel32:thunk_hud_n15} 90 90 90"
+    pattern: call_target_redirect
+    # row span slack -5
+  - id: hud.n16_box6_labely
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B86E6
+    length: 6
+    original_bytes: "2B C2 8D 54 08 01"
+    new_bytes:      "E8 {rel32:thunk_hud_n16} 90"
+    pattern: call_target_redirect
+    # 0-1-1 label y: 27 -> eax+19g/16+1
+  - id: Buffer_box_sprite.hud_frames
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x005E2DD3
+    length: 5
+    original_bytes: "51 53 55 56 57"
+    new_bytes:      "E8 {rel32:thunk_hud_boxframe}"
+    pattern: call_target_redirect
+    # Buffer_box_sprite prologue (HUD dests -> hollow_flat + NAT rect law)
+  - id: StatusWin.cell_highlight
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x004B8764
+    length: 5
+    original_bytes: "E8 9A AA 12 00"
+    new_bytes:      "E8 {rel32:thunk_hud_cellring}"
+    pattern: call_target_redirect
+    # call Buffer_box_2 core (box6 selected-cell ring thicken)
+  - id: FlatButton.hud_btnfont
+    status: confirmed
+    group: hud_widgets_scale
+    virtual_addr: 0x00607E50
+    length: 5
+    original_bytes: "83 EC 14 53 55"
+    new_bytes:      "E8 {rel32:thunk_hud_btnfont}"
+    pattern: call_target_redirect
+    # FlatButton draw prologue (M/I label font -> fA12)

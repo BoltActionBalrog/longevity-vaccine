@@ -1,0 +1,25 @@
+  g_council_active:              { cave: pcave2, offset: 0x12940, size: 4 }
+  g_cw_vpdone:                   { cave: pcave2, offset: 0x12944, size: 4 }
+  g_cw_vpold:                    { cave: pcave2, offset: 0x12948, size: 4 }
+  g_flag_ret:                    { cave: pcave2, offset: 0x1294c, size: 4 }
+  g_cw_chipscr:                  { cave: pcave2, offset: 0x129b0, size: 96 }
+  g_title_bottom:                { cave: pcave2, offset: 0x12a10, size: 4 }
+  g_fp_ornart:                   { cave: pcave2, offset: 0x12a14, size: 4 }
+  g_cw_seedtab:                  { cave: pcave2, offset: 0x12950, size: 84 }
+  g_flag_lut:                    { cave: pcave2, offset: 0x12c00, size: 512 }
+  g_cw_immtab:                   { cave: pcave2, offset: 0x12e00, size: 660 }
+  thunk_cw_enter:                { cave: pcave2, offset: 0x130a0 }   # council_scale (43B)
+  thunk_cw_immfix:               { cave: pcave2, offset: 0x130d0 }   # council_scale (160B)
+  thunk_cw_seeds:                { cave: pcave2, offset: 0x13170 }   # council_scale (405B)
+  thunk_cw_texty:                { cave: pcave2, offset: 0x13310 }   # council_scale (74B)
+  thunk_parity_reblit:           { cave: pcave2, offset: 0x13360 }   # council_scale (488B)
+  thunk_cw_portrait:             { cave: pcave2, offset: 0x13550 }   # council_scale (98B)
+  thunk_cw_logo:                 { cave: pcave2, offset: 0x135c0 }   # council_scale (121B)
+  thunk_cw_backdrop37:           { cave: pcave2, offset: 0x13640 }   # council_scale (35B)
+  thunk_cw_chip:                 { cave: pcave2, offset: 0x13670 }   # council_scale (225B)
+  thunk_gv_arthead:              { cave: pcave2, offset: 0x13790 }   # council_scale (111B)
+  thunk_gv_frameskip:            { cave: pcave2, offset: 0x13800 }   # council_scale (77B)
+  thunk_flag_restripe:           { cave: pcave2, offset: 0x13850 }   # council_scale (378B)
+  thunk_sd_reblit_wrap:          { cave: pcave2, offset: 0x139d0 }   # council_scale (81B)
+  thunk_popup_fieldpads:         { cave: pcave2, offset: 0x13a30 }   # council_scale (356B, RELOCATED from 0x4550 (old slot freed/zeros))
+  t_gv_artx:                     { cave: pcave2, offset: 0xff80 }   # council_scale (19B)

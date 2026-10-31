@@ -1,0 +1,24 @@
+      - id: g_ffn_keys
+        offset: 0x2e000
+        bytes: "0A 00 00 00 0B 00 00 00 0C 00 00 00 0C 01 00 00 0C 02 00 00 0E 00 00 00 0E 01 00 00 0E 02 00 00 10 00 00 00 10 01 00 00 10 02 00 00 12 02 00 00 16 00 00 00 1A 00 00 00 20 00 00 00"
+      - id: t_font_core
+        offset: 0x2e420
+        bytes: "55 89 E5 53 56 57 8B 75 08 8B 45 0C 8B 4D 10 C1 E1 08 09 C8 8B 4D 18 C1 E1 10 09 C8 8B 7D 14 39 7E 28 75 05 39 46 2C 74 34 89 C3 8B 45 0C 83 FF 10 7E 06 0F AF C7 C1 F8 04 8B 0D 2C 1B 69 00 83 7D 18 00 74 06 8B 0D 30 1B 69 00 FF 75 10 50 51 89 F1 E8 {rel32:Font_init} 89 7E 28 89 5E 2C 89 F0 5F 5E 5B 5D C3"
+      - id: t_ffn_at
+        offset: 0x2e490
+        bytes: "55 89 E5 8B 45 0C 31 D2 83 F8 0C 7E 05 BA 01 00 00 00 8B 4D 10 8B 0C 8D 50 F2 68 00 09 D1 52 FF 75 14 51 50 FF 75 08 E8 {rel32:t_font_core} 83 C4 14 5D C3"
+      - id: t_fdirect_at
+        offset: 0x2e4d0
+        bytes: "6A 00 FF 74 24 14 FF 74 24 14 FF 74 24 14 FF 74 24 14 E8 {rel32:t_font_core} 83 C4 14 C3"
+      - id: t_ffn_num
+        offset: 0x2e4f0
+        bytes: "55 89 E5 53 56 57 8B 75 08 8B 5D 0C 8B 4D 10 83 F9 10 7E 1E 89 F0 0F AF C1 C1 F8 04 83 FE 0C 7E 1D 83 F8 28 7F 18 53 50 E8 {rel32:find_font} 83 C4 08 EB 48 53 56 E8 {rel32:find_font} 83 C4 08 EB 3C 89 F2 89 D9 C1 E1 08 09 CA 31 FF 39 14 BD {abs32:g_ffn_keys} 74 11 47 83 FF 0F 7C F1 89 F0 0F AF 45 10 C1 F8 04 EB C3 6B FF 30 81 C7 {abs32:g_ffn_slots} FF 75 10 53 56 57 E8 {rel32:t_ffn_at} 83 C4 10 5F 5E 5B 5D C3"
+      - id: t_ffn
+        offset: 0x2e570
+        bytes: "FF 35 {abs32:g_popup_scale_num} FF 74 24 0C FF 74 24 0C E8 {rel32:t_ffn_num} 83 C4 0C C3"
+      - id: t_fdirect_a14b
+        offset: 0x2e590
+        bytes: "FF 35 {abs32:g_popup_scale_num} 6A 01 6A 0E 68 {abs32:g_font_a14b} E8 {rel32:t_fdirect_at} 83 C4 10 C3"
+      - id: t_se_labelfit
+        offset: 0x2e5b0
+        bytes: "51 83 3D {abs32:g_popup_scale_num} 10 0F 8E C9 00 00 00 53 56 57 C7 05 {abs32:g_se_fitflag} 00 00 00 00 BF 0E 00 00 00 0F AF 3D {abs32:g_popup_scale_num} C1 FF 04 BE 90 C2 8A 00 BB 23 00 00 00 81 BE 70 09 00 00 00 51 8C 00 75 29 8B 86 7C 0A 00 00 85 C0 74 1F 50 8D 8E 44 04 00 00 E8 8A 21 BA FF 8B 8E 7C 04 00 00 2B 8E 74 04 00 00 83 E9 06 39 C8 7F 0B 81 C6 4C 0B 00 00 4B 75 C2 EB 25 83 FF 08 7E 20 4F C7 05 {abs32:g_se_fitflag} 01 00 00 00 6A 01 57 FF 35 2C 1B 69 00 B9 00 51 8C 00 E8 {rel32:Font_init} EB 91 83 3D {abs32:g_se_fitflag} 00 74 32 BE 90 C2 8A 00 BB 23 00 00 00 81 BE 70 09 00 00 00 51 8C 00 75 13 83 BE 7C 0A 00 00 00 74 0A 8B 06 89 F1 FF 90 F8 00 00 00 81 C6 4C 0B 00 00 4B 75 D8 5F 5E 5B 59 8B 01 FF A0 E4 00 00 00"

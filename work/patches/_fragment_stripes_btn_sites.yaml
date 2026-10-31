@@ -1,0 +1,20 @@
+# button_grip_stripes: NO new exe sites.  The hooks are three token retargets inside two existing pcave2
+# cave entries (apply by hand; rationale and slack in work/briefs/stripes_btn_findings.md):
+#
+#   - id: thunk_btn_bandstripe
+#       old: E8 D7 FD C4 FF
+#       new: E8 {rel32:t_sbt_zoom}
+#
+#   - id: thunk_btn_bandstripe
+#       old: E8 89 26 00 00
+#       new: E8 {rel32:t_sbt_zoom}
+#
+#   - id: thunk_sb_thumb
+#       old: 68 {abs32:thunk_sprite_scale_nn} C3
+#       new: 68 {abs32:t_sbt_grip} C3
+#
+# and the group to add:
+#
+#   - id: button_grip_stripes
+#     members: []            # no sites; reached via the two retargets above
+#     code_caves: [pcave2]

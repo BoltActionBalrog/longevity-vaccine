@@ -1,0 +1,41 @@
+// Version resource for uimod.dll.
+//
+// The DLL shipped without a VERSIONINFO block until 2026-09-21, so Explorer's Details tab and
+// GetFileVersionInfo had nothing to report and a player could not tell which build they had.
+// Numbers come from src\version.h so this can never drift from the string Init() logs.
+
+#include <winver.h>
+#include "src/version.h"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    UIMOD_VERSION_MAJOR,UIMOD_VERSION_MINOR,UIMOD_VERSION_PATCH,0
+ PRODUCTVERSION UIMOD_VERSION_MAJOR,UIMOD_VERSION_MINOR,UIMOD_VERSION_PATCH,0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ // No VS_FF_DEBUG branch on purpose. This project has no ResourceCompile ItemDefinitionGroup, so
+ // rc.exe is invoked with only /D _UNICODE /D UNICODE -- neither _DEBUG nor NDEBUG reaches the
+ // resource compiler, and an `#ifdef _DEBUG` here would be dead code that silently claims Debug
+ // builds are marked when they are not. Add the defines to the vcxproj first if that is wanted.
+ FILEFLAGS      0x0L
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_DLL
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "Longevity Mods"
+            VALUE "FileDescription",  "Longevity Vaccine -- UI scaling and HD cinematics for Alpha Centauri"
+            VALUE "FileVersion",      UIMOD_VERSION_STRING
+            VALUE "InternalName",     "uimod"
+            VALUE "LegalCopyright",   "Longevity Mods"
+            VALUE "OriginalFilename", "uimod.dll"
+            VALUE "ProductName",      "Longevity Vaccine"
+            VALUE "ProductVersion",   UIMOD_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

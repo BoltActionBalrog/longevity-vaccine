@@ -1,0 +1,22 @@
+  - id: font_face_law
+    description: >
+      FONT FACE / WEIGHT LAW helpers (2026-09-17; brief work\FONT_FACE_WEIGHT_AUDIT.md; src
+      assemble_fontlaw.py; laws scaling_laws.font_face_law / font_direct_law; parity
+      tests\test_fontlaw_asm_parity.py).  The engine's find_font pool keys FACE and WEIGHT on the
+      NATIVE size (> 12 px = "Arial Narrow" bold for variants 0/1, <= 12 px = "Arial" with weight =
+      variant); asking the pool for a SCALED size crossed that boundary (tooltips, HQ report rows,
+      COMMLINK rows, PrefWin text, the MP lobby body font all rendered Arial Narrow bold where
+      vanilla is Arial regular/italic/bold).  t_ffn(S, v) is the find_font drop-in that takes the
+      NATIVE size + variant: the pool for S > 12 while fl(S*g/16) <= 40 (unchanged), else a
+      Font_init'd cave slot keyed (S, v) with the native face/style at fl(S*g/16).  t_fdirect_at /
+      t_fdirect_a14b keep the face of fonts vanilla Font_inits directly (the Arial 14 bold button
+      label 0x6E84B4).  t_se_labelfit = the SocialWin label fit at the build's Win_set_modal call
+      (site SocialWin_build.set_modal, owned by se_scale).  Otherwise no sites of its own: the
+      consumers are the retargeted font thunks of
+      popup_bubble_font_scaling, rw_scale_shared, commlink_menu_scale, prefwin_scale,
+      netwin_lobby_scale, basewin_strip_content, basewin_relayout, mon_scale and hof_scale.
+      Every helper is the vanilla lookup at g <= 16.
+    code_caves:
+      - pcave2
+      - menu_strip_thunks   # g_popup_scale_num
+    members: []

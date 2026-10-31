@@ -1,0 +1,37 @@
+---
+name: project-smac-faction-dither-layer
+description: Faction-quote dither bg banding FIXED (build 70bd8286): 24x24 tile StretchBlt'd by OUR d690/d528 box thunks; fix=thunk_box_thick_devfill device-res fill + asymmetric inset
+type: project
+---
+
+The dark dithered background behind the Faction-Select leader-quote text is a **24x24 texture TILE, tiled at NATIVE size into a scratch buffer, then StretchBlt-scaled up** (which bands it). It is NOT d690 (FILL empty), NOT any box frame, and NOT GraphicWin_fill/Buffer_map_colors (those do not produce it -- map_colors never fires for this box). FBUF = popup 0x9403e0 + 0x444 = 0x940824.
+
+DEFINITIVE pipeline (hook_dither_census v4, 1920x1080, a77a0495):
+1. Buffer_fill_2(FBUF, key 9) clears the element buffer.
+2. Box bg built in a NATIVE-size heap scratch (e.g. 0x73e5278): a 24x24 dither tile is tiled across it by Buffer_tile -> Buffer_copy_4 (ecx=src tile, arg1=dest; 240x for the 720x189 OUTER, tile 0x75f3e0; 120x for the 570x123 INNER, tile 0x75c218). Tiling at native res = clean dither.
+3. The hollow box FRAME (corners + tiled edges, FILL empty) is drawn over it (Buffer_box_sprite, key 9 interior) -- see v2.
+4. Buffer_copy_3 (GDI StretchBlt) scales the WHOLE native scratch up to the box display size (720x189 -> ~1012x266 @1920 / 1125x295 @1600), then Buffer_draw_2 keyed-9 composites it into FBUF.
+5. **The StretchBlt of the native-tiled dither = the BANDING**: FBUF vertical sample @1920 = 65,198,65,31,198,65,65,198,65,198,198,65,... -- blue(198)/black(65) dither with irregular DOUBLED scanlines (65,65 / 198,198) from the fractional NN row-scale. @1600 (1.5625) it landed cleaner (v3 looked fine), so the bug is resolution-dependent.
+
+CALLER-ID (hook_dither_census v5, Buffer_copy_3 backtrace @1920): the native->StretchBlt is OURS, not engine/PRACX. Chain: Buffer_copy_3 <- thunk_keyed_stretch_blit (0x6686a7, menu_strip_thunks) <- thunk_frame_enlarge (0xa0c2e7, pcave2) <- thunk_box_thick_hollow[_flat] (0xa0c213 / 0xa0c0d3, pcave2) <- the three frame draw sites in Popup_on_draw_background: d690 0x405f7c (group popup_outer_backdrop_scale), d528 0x406159 (thunk_d528_inset), d5a0 0x40623d. Each renders its box-sprite (frame border + the tiled 24x24 dither center-fill) at NATIVE 720x189 / 570x123 / 576x129 into g_frame_buf, then StretchBlt-enlarges (990x259 etc @1920) -> bands the dither. d5a0 (576x129) had no tile-fill in v4 (hollow); d690 + d528 carry the dither.
+
+GOTCHA (v1 failed): a border-ONLY render renders the bevel WHITE -- the 9-slice edges tile params[8] as a MASK alongside the bevel sprite, so the bevel look DEPENDS on the fill; stripping it exposes the raw highlight (index ~192 = light gray/white). build d0a0d4de (v1: STEP1 fill-only + STEP2 border-only) killed the banding but drew white frames. Do NOT render a faction box border without its fill.
+
+GOTCHA (v2 ring): inset N=6*g/16 (full edge-sprite width) over-shot -- Frida-measured each stroke is only ~2px GREEN (idx 26 d690 / 34 d528) then ~7px banded fill-MASK (idx 198/196) then clean. Insetting by the full edge width left that 7px fill-mask banded = "banded ring inside the inner stroke". FIX v3 (build 49a550d9): N=ceil(g/16)=(g+15)>>4 = the GREEN-stroke width only (~2px@g25), so STEP2's clean fill covers the fill-mask region while preserving the green line. Same N works for both d690 and d528 (both: 2px green + 7px mask + clean). asm change: imul eax,eax,6 -> add eax,15.
+
+FIX v4 (build 70bd8286, ASYMMETRIC inset, DONE/CONFIRMED 2026-06-20, MD5 LOCKED + changelog added): v3 ate 1px off the RIGHT and BOTTOM innermost green stroke (pixel-measured on a 1600x1200 cap: innermost G~59 line = 2px on TOP/LEFT but 1px on RIGHT/BOTTOM -- StretchBlt rounds those strokes 1px toward the box edge, so a symmetric R-N/B-N clip eats their outer pixel). Fix: asymmetric inset -- top/left = N, right/bottom = N+1 (clean fill stops 1px earlier on right/bottom so STEP1's green survives; that 1px reverts to STEP1's stroke, not banded fill). asm: `lea edx,[ebx+1]` then R/B use `sub eax,edx`. 168 bytes.
+
+IMPLEMENTED v2 2026-06-21 (build 1c2fd9c8, center-overwrite; PENDING in-game confirm @1920+1600+4K -- do NOT lock MD5): thunk_box_thick_devfill (pcave2 0xE00, 165B; scratches g_devfill_params 0xEC0 + g_devfill_rect 0xEF0; keystone src scripts\assemble_box_devfill.py). Drop-in for a Buffer_box_sprite call (contract as thunk_box_thick_hollow_flat). STEP1: call thunk_box_thick_hollow_flat(dest,rect,params) = the proven full thick render (correct fill-blended bevel + banded center). STEP2: Buffer_box_sprite(dest, INSET_rect, scratch[slices0..7=0]) tiles params[8] at DEVICE res across rect inset by N=6*g/16 (scaled bevel thickness) -> overwrites the banded center with a clean dither, bevel band untouched. Wired: d690 0x405f77 (group popup_outer_backdrop_scale) + d528 via thunk_channel_adjust tail. Reusable for any dithered box-sprite modal bg. d5a0 (hollow) left on thunk_box_thick_hollow.
+
+FIX (target = our box-thickening thunks): split the render so the 24x24 dither center-fill is tiled at DEVICE/scaled resolution directly into the dest (no StretchBlt -> no banding) while ONLY the frame BORDER is rendered-small + StretchBlt-enlarged (to keep the thick bevel). This is the same idea as the failed thunk_d690_backdrop attempt, but (a) aimed at the box-sprite center-fill (NOT d690's own +0x20 FILL, which is empty) and (b) without nulling a fill into a hollow render (that was the white-strip bug). Verify @1920x1080 AND 1600x1200 (and 4K). Binary currently at clean baseline a77a0495.
+
+Frida-confirmed (hook_dither_census v1-v3, 2026-06-20, a77a0495 @1600x1200):
+- FPOP=0x9403e0, FBUF=0x940824 (popup+0x444). Faction popup is the **ELSE branch** of Popup_on_draw_background ([+0xa14]==0), so its d690 backdrop draws at 0x405f77 (the site I patched), NOT 0x405d39.
+- The box is 3 nine-slice frames (d690 outer + d528/d5a0 around text), each rendered NATIVE into a heap scratch, StretchBlt-scaled (Buffer_copy_3) up, then keyed-9 composited into FBUF via Buffer_draw_2. **All three frames are HOLLOW**: their FILL sprite (BoxSpriteParams +0x20) is w=0/null, so they paint borders only and composite with key 9 (transparent interior). They do NOT carry the dither.
+- The ONLY thing that writes FBUF's interior is GraphicWin_fill. Sampling FBUF after redraw: interior = alternating horizontal scanlines of palette index **196** (dark blue ~13,23,36) and **65** (black) = the dither.
+
+(SUPERSEDED detour: GraphicWin_fill 0x5d5250 was investigated as the dither source but ruled out -- it copies/clears, and Buffer_map_colors 0x5da330 never fires for this box. The dither is the tiled-tile-then-StretchBlt pipeline above.)
+
+**Why the d690 fix failed (do not retry):** redirecting 0x405f77 to a custom d690 thunk could never affect this dither (wrong layer; d690 FILL is empty). Zeroing the d690 param[8] (+0x20) for a border-only render = the documented "attempt #1 white-strip bug" (transparent interior smears white on the wide faction-LIST panel, which shares the 0x405f77 generic-branch backdrop). See [[project-smac-frame-strip-key]], (a private note).
+
+OPEN: pin where the banding enters the source bg surface (trace Buffer_copy_4's src param at 1920x1080 where the maintainer saw banding); likely interacts with our box-grow patches changing [0x4c4]/[0x4c8] client size. Trace harness: work\scripts\hook_dither_census.js (+ run-frida-dither-census.bat, desktop "SMACX Frida Trace").

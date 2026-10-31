@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Win32 (x86) ONLY by design: terranx.exe is a 32-bit process, so uimod.dll must be x86.
+       Deliberately no x64 platform here, so the IDE can't build the wrong bitness. -->
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{C7E9F1A2-3B4D-4E5F-8A6B-9C0D1E2F3A4B}</ProjectGuid>
+    <RootNamespace>uimod</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <!-- Tidy, git-ignored output: build\Debug\uimod.dll  /  build\Release\uimod.dll -->
+    <OutDir>$(ProjectDir)build\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)build\$(Configuration)\obj\</IntDir>
+    <TargetName>uimod</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <WarningLevel>Level4</WarningLevel>
+      <ConformanceMode>true</ConformanceMode>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- libav (x86 LGPL-shared) headers; see third_party\ffmpeg (gitignored). -->
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <!-- Exports Init @1 + clean name; strips the __stdcall _Init@4 decoration. -->
+      <ModuleDefinitionFile>uimod.def</ModuleDefinitionFile>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <!-- Link the libav import libs (DLLs shipped beside uimod.dll in the game dir). -->
+      <AdditionalLibraryDirectories>$(ProjectDir)third_party\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>avformat.lib;avcodec.lib;avutil.lib;swscale.lib;swresample.lib;delayimp.lib;ddraw.lib;dxguid.lib;windowscodecs.lib;ole32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <!-- The codec DLLs are DELAY-loaded: a missing or quarantined one must not stop uimod.dll itself from
+           loading (the whole mod silently gone). movie.cpp probes them at Init (codecs.h) and keeps the movie
+           hook out when one is wrong; its __pfnDliFailureHook2 logs any bind that still fails. -->
+      <DelayLoadDLLs>avformat-62.dll;avcodec-62.dll;avutil-60.dll;swscale-9.dll;swresample-6.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <!-- ffmpeg's mingw-built import libs carry asm objects with no SAFESEH data; x86 MSVC
+           defaults to /SAFESEH, so disable it for this image. -->
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <!-- Static CRT so uimod.dll has no VC++ redistributable dependency in the game dir. -->
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\aivis.cpp" />
+    <ClCompile Include="src\caption.cpp" />
+    <ClCompile Include="src\dllmain.cpp" />
+    <ClCompile Include="src\dragdelay.cpp" />
+    <ClCompile Include="src\gpuscale.cpp" />
+    <ClCompile Include="src\modernctl.cpp" />
+    <ClCompile Include="src\init.cpp" />
+    <ClCompile Include="src\movie.cpp" />
+    <ClCompile Include="src\portrait.cpp" />
+    <ClCompile Include="src\portrait_files.cpp" />
+    <ClCompile Include="src\prewarm.cpp" />
+    <ClCompile Include="src\praxdrag.cpp" />
+    <ClCompile Include="src\mapscroll.cpp" />
+    <ClCompile Include="src\prefs.cpp" />
+    <ClCompile Include="src\pssphere.cpp" />
+    <ClCompile Include="src\debugdump.cpp" />
+    <ClCompile Include="src\techwin.cpp" />
+    <ClCompile Include="src\thinkercompat.cpp" />
+    <ClCompile Include="src\thinkeraivis.cpp" />
+    <ClCompile Include="src\thinkertext.cpp" />
+    <ClCompile Include="src\thinkerversion.cpp" />
+    <ClCompile Include="src\interludekey.cpp" />
+    <ClCompile Include="src\blinkfix.cpp" />
+    <ClCompile Include="src\cursorscale.cpp" />
+    <ClCompile Include="src\hudmovesfix.cpp" />
+    <ClCompile Include="src\hudsync.cpp" />
+    <ClCompile Include="src\viewdragfix.cpp" />
+    <ClCompile Include="src\musicfix.cpp" />
+    <ClCompile Include="src\riotfix.cpp" />
+    <ClCompile Include="src\rowindent.cpp" />
+    <ClCompile Include="src\update.cpp" />
+    <ClCompile Include="src\vidmode.cpp" />
+    <ClCompile Include="src\vidwatch.cpp" />
+    <ClCompile Include="src\wheel.cpp" />
+    <ClCompile Include="src\winlines.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\codecs.h" />
+    <ClInclude Include="src\mapscroll.h" />
+    <ClInclude Include="src\movieaudio.h" />
+    <ClInclude Include="src\update_core.h" />
+    <ClInclude Include="src\thinkerversion.h" />
+    <ClInclude Include="src\version.h" />
+    <ClInclude Include="src\vidsafety.h" />
+    <ClInclude Include="src\vidwatch.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="uimod.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="uimod.def" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

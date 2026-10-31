@@ -1,0 +1,22 @@
+  g_se_vpdone:                   { cave: pcave2, offset: 0x14000, size: 4 }
+  g_se_vpold:                    { cave: pcave2, offset: 0x14004, size: 4 }
+  g_se_sprg:                     { cave: pcave2, offset: 0x14008, size: 4 }
+  g_se_sprsave:                  { cave: pcave2, offset: 0x14600, size: 932 }
+  g_se_lockplane:                { cave: pcave2, offset: 0x14a00, size: 4608 }
+  g_se_yph:                      { cave: pcave2, offset: 0x2fffc, size: 4 }
+  g_se_immtab:                   { cave: pcave2, offset: 0x14010, size: 1204 }
+  thunk_se_enter:                { cave: pcave2, offset: 0x15c00 }   # se_scale (12B)
+  thunk_se_immfix:               { cave: pcave2, offset: 0x15c10 }   # se_scale (301B)
+  thunk_se_stripe_top:           { cave: pcave2, offset: 0x15d40 }   # se_scale (31B)
+  thunk_se_sprites:              { cave: pcave2, offset: 0x15d60 }   # se_scale (110B)
+  thunk_se_tiles:                { cave: pcave2, offset: 0x15dd0 }   # se_scale (314B)
+  thunk_se_locks:                { cave: pcave2, offset: 0x15f10 }   # se_scale (879B)
+  thunk_se_transform:            { cave: pcave2, offset: 0x16280 }   # se_scale (1522B)
+  thunk_se_sd2:                  { cave: pcave2, offset: 0x16880 }   # se_scale (22B)
+  thunk_se_rr_row:               { cave: pcave2, offset: 0x168a0 }   # se_scale (66B)
+  thunk_se_rr_col:               { cave: pcave2, offset: 0x168f0 }   # se_scale (70B)
+  thunk_se_stripe_px:            { cave: pcave2, offset: 0x16940 }   # se_scale (16B)
+  thunk_se_rowdraw:              { cave: pcave2, offset: 0x16950 }   # se_scale (1094B)
+  thunk_se_rowdraw_ph:           { cave: pcave2, offset: 0x2ffa0 }   # se_scale (64B, fixed slot)
+  thunk_se_stripe_px_ph:         { cave: pcave2, offset: 0x2ffe0 }   # se_scale (11B, fixed slot)
+  thunk_se_btnrun:               { cave: pcave2, offset: 0x30380 }   # se_scale (305B, fixed slot)

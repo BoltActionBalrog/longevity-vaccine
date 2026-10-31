@@ -1,0 +1,31 @@
+  thunk_hud_fontobj:            { cave: pcave2, offset: 0x5000 }   # 90B hud_widgets_scale
+  thunk_hud_fcache:             { cave: pcave2, offset: 0x5060 }   # 66B hud_widgets_scale
+  thunk_hud_vehargs:            { cave: pcave2, offset: 0x50B0 }   # 106B hud_widgets_scale
+  thunk_hud_slotw:              { cave: pcave2, offset: 0x51B0 }   # 13B hud_widgets_scale
+  thunk_hud_titley:             { cave: pcave2, offset: 0x51C0 }   # 12B hud_widgets_scale
+  thunk_hud_cellw:              { cave: pcave2, offset: 0x51D0 }   # 15B hud_widgets_scale
+  thunk_hud_n01:                { cave: pcave2, offset: 0x51E0 }   # 36B hud_widgets_scale
+  thunk_hud_n02:                { cave: pcave2, offset: 0x5210 }   # 36B hud_widgets_scale
+  thunk_hud_n03:                { cave: pcave2, offset: 0x5240 }   # 34B hud_widgets_scale
+  thunk_hud_n04:                { cave: pcave2, offset: 0x5270 }   # 34B hud_widgets_scale
+  thunk_hud_n05:                { cave: pcave2, offset: 0x52A0 }   # 35B hud_widgets_scale
+  thunk_hud_n06:                { cave: pcave2, offset: 0x52D0 }   # 26B hud_widgets_scale
+  thunk_hud_n07:                { cave: pcave2, offset: 0x5300 }   # 41B hud_widgets_scale
+  thunk_hud_n08:                { cave: pcave2, offset: 0x5340 }   # 41B hud_widgets_scale
+  thunk_hud_n09:                { cave: pcave2, offset: 0x5380 }   # 38B hud_widgets_scale
+  thunk_hud_n10:                { cave: pcave2, offset: 0x53B0 }   # 59B hud_widgets_scale
+  thunk_hud_n11:                { cave: pcave2, offset: 0x5400 }   # 32B hud_widgets_scale
+  thunk_hud_n12:                { cave: pcave2, offset: 0x5430 }   # 37B hud_widgets_scale
+  thunk_hud_n13:                { cave: pcave2, offset: 0x5460 }   # 36B hud_widgets_scale
+  thunk_hud_n14:                { cave: pcave2, offset: 0x5490 }   # 35B hud_widgets_scale
+  thunk_hud_n15:                { cave: pcave2, offset: 0x54C0 }   # 38B hud_widgets_scale
+  thunk_hud_n16:                { cave: pcave2, offset: 0x5510 }   # 40B hud_widgets_scale
+  g_hud_nat_table:              { cave: pcave2, offset: 0x5600 }   # 280B hud_widgets_scale
+  thunk_hud_boxframe:           { cave: pcave2, offset: 0x5740 }   # 210B hud_widgets_scale
+  thunk_hud_cellring:           { cave: pcave2, offset: 0x5820 }   # 127B hud_widgets_scale
+  thunk_btn_gate_v4:            { cave: pcave2, offset: 0x58A0 }   # 111B hud_widgets_scale
+  thunk_btn_fillcap_v2:         { cave: pcave2, offset: 0x5920 }   # 96B hud_widgets_scale
+  thunk_hud_btnfont:            { cave: pcave2, offset: 0x5990 }   # 69B hud_widgets_scale
+  thunk_hud_baseargs:           { cave: pcave2, offset: 0x13D20 }   # 136B hud_widgets_scale
+  g_hud_rect:                   { cave: pcave2, offset: 0x5720 }   # 16B scratch RECT
+  g_hud_rect2:                  { cave: pcave2, offset: 0x5730 }   # 16B scratch RECT

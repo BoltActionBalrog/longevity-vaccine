@@ -1,0 +1,189 @@
+  - id: tech_pick.exec
+    status: confirmed
+    group: tech_scale
+    function: tech_pick
+    virtual_addr: 0x005bebb7
+    length: 5
+    original_bytes: "E8 54 79 EC FF"   # call TechWin_exec (the only caller) -> immfix (36 imms, VirtualProtect bootstrap), then the exec
+    new_bytes:      "E8 {rel32:thunk_tech_enter}"
+    pattern: call_target_redirect
+
+  - id: TechWin_exec.backdrop_d690
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x00487d9e
+    length: 5
+    original_bytes: "E8 30 B0 15 00"   # Buffer_box_sprite d690 backdrop {0,0,W,H} -> thick chrome / device-density fill (gates g<=16 itself)
+    new_bytes:      "E8 {rel32:thunk_box_thick_devfill}"
+    pattern: call_target_redirect
+
+  - id: TechWin_exec.strip_d618
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x00487dd1
+    length: 5
+    original_bytes: "E8 FD AF 15 00"   # Buffer_box_sprite d618 caption strip -> devfill with R-1/B-1 (measured 1px R/B spill)
+    new_bytes:      "E8 {rel32:thunk_tech_rb1}"
+    pattern: call_target_redirect
+
+  - id: TechWin_draw_cell.frame_d528
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell
+    virtual_addr: 0x004864d8
+    length: 5
+    original_bytes: "E8 F6 C8 15 00"   # Buffer_box_sprite d528/d578 cell frame -> devfill with R-1/B-1 (measured 1px R/B spill)
+    new_bytes:      "E8 {rel32:thunk_tech_rb1}"
+    pattern: call_target_redirect
+
+  - id: TechWin_exec.font_init_0
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x00487999
+    length: 5
+    original_bytes: "E8 A2 15 19 00"   # call Font_init F0 -> size rewritten to the cell-calibrated nominal (g<=16: untouched)
+    new_bytes:      "E8 {rel32:thunk_tech_fi}"
+    pattern: call_target_redirect
+
+  - id: TechWin_exec.font_init_1
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x004879ae
+    length: 5
+    original_bytes: "E8 8D 15 19 00"   # call Font_init F1 -> size rewritten to the cell-calibrated nominal (g<=16: untouched)
+    new_bytes:      "E8 {rel32:thunk_tech_fi}"
+    pattern: call_target_redirect
+
+  - id: TechWin_exec.font_init_2
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x004879c2
+    length: 5
+    original_bytes: "E8 79 15 19 00"   # call Font_init F2 -> size rewritten to the cell-calibrated nominal (g<=16: untouched)
+    new_bytes:      "E8 {rel32:thunk_tech_fi}"
+    pattern: call_target_redirect
+
+  - id: TechWin_exec.font_init_3
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x004879da
+    length: 5
+    original_bytes: "E8 61 15 19 00"   # call Font_init F3 -> size rewritten to the cell-calibrated nominal (g<=16: untouched)
+    new_bytes:      "E8 {rel32:thunk_tech_fi}"
+    pattern: call_target_redirect
+
+  - id: tech.find_font_0
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell_content
+    virtual_addr: 0x00484d4f
+    length: 5
+    original_bytes: "E8 9C 35 10 00"   # find_font(20,2) name italic -> dedicated cell-calibrated Font (pool face/flags law); g<=16: the pool
+    new_bytes:      "E8 {rel32:thunk_tech_ff}"
+    pattern: call_target_redirect
+
+  - id: tech.find_font_1
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell_content
+    virtual_addr: 0x00484d5c
+    length: 5
+    original_bytes: "E8 8F 35 10 00"   # find_font(20,1) name -> dedicated cell-calibrated Font (pool face/flags law); g<=16: the pool
+    new_bytes:      "E8 {rel32:thunk_tech_ff}"
+    pattern: call_target_redirect
+
+  - id: tech.find_font_2
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell_content
+    virtual_addr: 0x00484d6d
+    length: 5
+    original_bytes: "E8 7E 35 10 00"   # find_font(18,2) name (800 branch) -> dedicated cell-calibrated Font (pool face/flags law); g<=16: the pool
+    new_bytes:      "E8 {rel32:thunk_tech_ff}"
+    pattern: call_target_redirect
+
+  - id: tech.find_font_3
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell_content
+    virtual_addr: 0x00484d7a
+    length: 5
+    original_bytes: "E8 71 35 10 00"   # find_font(18,1) name (800 branch) -> dedicated cell-calibrated Font (pool face/flags law); g<=16: the pool
+    new_bytes:      "E8 {rel32:thunk_tech_ff}"
+    pattern: call_target_redirect
+
+  - id: tech.find_font_4
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell_content
+    virtual_addr: 0x00484d8e
+    length: 5
+    original_bytes: "E8 5D 35 10 00"   # find_font(12,2) name (n>8) -> dedicated cell-calibrated Font (pool face/flags law); g<=16: the pool
+    new_bytes:      "E8 {rel32:thunk_tech_ff}"
+    pattern: call_target_redirect
+
+  - id: tech.find_font_5
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell_content
+    virtual_addr: 0x00484d9b
+    length: 5
+    original_bytes: "E8 50 35 10 00"   # find_font(12,1) name (n>8) -> dedicated cell-calibrated Font (pool face/flags law); g<=16: the pool
+    new_bytes:      "E8 {rel32:thunk_tech_ff}"
+    pattern: call_target_redirect
+
+  - id: tech.find_font_6
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell_content
+    virtual_addr: 0x00484da8
+    length: 5
+    original_bytes: "E8 43 35 10 00"   # find_font(S,1) name shared tail -> dedicated cell-calibrated Font (pool face/flags law); g<=16: the pool
+    new_bytes:      "E8 {rel32:thunk_tech_ff}"
+    pattern: call_target_redirect
+
+  - id: tech.find_font_7
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x00487e3a
+    length: 5
+    original_bytes: "E8 B1 04 10 00"   # find_font(18,1) caption title -> dedicated cell-calibrated Font (pool face/flags law); g<=16: the pool
+    new_bytes:      "E8 {rel32:thunk_tech_ff}"
+    pattern: call_target_redirect
+
+  - id: TechWin_draw_cell.inset
+    status: confirmed
+    group: tech_scale
+    function: TechWin_draw_cell
+    virtual_addr: 0x0048646c
+    length: 11
+    original_bytes: "B8 03 00 00 00 2B D8 2B D0 3B C8"   # mov eax,3 / sub ebx,eax / sub edx,eax / cmp ecx,eax -> R/B -= s(4)-1, L-clamp s(3) (cmp flags reach the jg)
+    new_bytes:      "E8 {rel32:thunk_tech_inset} 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: TechWin_exec.n8_fontsize
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x00487981
+    length: 9
+    original_bytes: "8B F7 C7 45 08 0C 00 00 00"   # mov esi,edi / mov [ebp+8],12 (n>8) -> esi = native 10 (edi = pad is imm-scaled)
+    new_bytes:      "E8 {rel32:thunk_tech_n8} 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: TechWin_exec.n8_overflow
+    status: confirmed
+    group: tech_scale
+    function: TechWin_exec
+    virtual_addr: 0x00487d21
+    length: 6
+    original_bytes: "83 C0 BB 99 F7 F9"   # add eax,-0x45 / cdq / idiv ecx (n>8 overflow ch) -> eax -= s(0x45) (imm8 overflows at g>=30)
+    new_bytes:      "E8 {rel32:thunk_tech_n8ch} 90"
+    pattern: block_cut_thunk

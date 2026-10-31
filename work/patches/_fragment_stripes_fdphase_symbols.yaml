@@ -1,0 +1,2 @@
+# stripes_fdphase: no new symbol. The two thunks keep their ids and offsets; only the trailing
+# comments change (sizes 63B/65B are stale in the symbols block: now 75B / 79B).

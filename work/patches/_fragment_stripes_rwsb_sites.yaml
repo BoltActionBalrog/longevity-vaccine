@@ -1,0 +1,21 @@
+  - id: ReportWin_draw_energy.list_bar_begin
+    status: confirmed
+    group: report_energy_list_bar
+    function: ReportWin_draw_energy
+    virtual_addr: 0x0049cc58
+    length: 5
+    original_bytes: "E8 13 C8 16 00"   # call Dialog_init_3 (the energy list's rect) -> open the bar-width bracket, then the same call
+    new_bytes:      "E8 {rel32:t_rwsb_begin}"
+    pattern: call_target_redirect
+    rationale: "The energy report's own list builds the Win layer's heap V scrollbar outside every scale gate (no console bracket, no popup / file-dialog gate): 20 px wide with native art at every resolution. The pair brackets the list build with g_scrollbar_w x g/16 (law listbox_bar_reserve), exactly like the console lists' scroll_small .. scroll_normal bracket; g<=16 and gated contexts are untouched."
+
+  - id: ReportWin_draw_energy.list_bar_end
+    status: confirmed
+    group: report_energy_list_bar
+    function: ReportWin_draw_energy
+    virtual_addr: 0x0049d475
+    length: 5
+    original_bytes: "8B CE FF 50 04"   # mov ecx,esi / call [eax+4] (show the list window, the painter's last call) -> the same, then close the bracket; resumes 0x49D47A
+    new_bytes:      "E8 {rel32:t_rwsb_end}"
+    pattern: call_helper
+    rationale: "The energy report's own list builds the Win layer's heap V scrollbar outside every scale gate (no console bracket, no popup / file-dialog gate): 20 px wide with native art at every resolution. The pair brackets the list build with g_scrollbar_w x g/16 (law listbox_bar_reserve), exactly like the console lists' scroll_small .. scroll_normal bracket; g<=16 and gated contexts are untouched."

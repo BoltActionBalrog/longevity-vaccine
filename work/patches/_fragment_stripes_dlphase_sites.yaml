@@ -1,0 +1,22 @@
+# stripes_dlphase (2026-10-06, scripts/assemble_dl.py + tests/test_stripes_dlphase_asm_parity.py).
+# No new site: the two existing redirects change their new_bytes only (original_bytes / length / pattern unchanged).
+  - id: list_bg.tile
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_list_bg_fill
+    virtual_addr: 0x0042a140
+    length: 5
+    original_bytes: "E8 1B 07 1B 00"   # tile + P-law restripe on the parent grid (phase = list top in DatalinkWin)
+    new_bytes:      "E8 {rel32:t_dl_tile_ph}"
+    pattern: call_target_redirect
+
+  - id: list_row.tile
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_list_row_bg
+    virtual_addr: 0x0042a1f7
+    length: 5
+    original_bytes: "E8 64 06 1B 00"   # row tile + restripe on the parent grid (canonical pair order)
+    new_bytes:      "E8 {rel32:t_dl_tile_ph}"
+    pattern: call_target_redirect
+

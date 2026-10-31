@@ -1,0 +1,74 @@
+#!/bin/sh
+# SmacxUi pre-commit: guard the scaling laws mechanically.
+#
+# WHY. The scaling laws are counter-intuitive and the "obvious" simplification of each one is a bug
+# that is invisible at 4K and only fails at 1600x1200 or 1920x1080 (a stroke width that must NOT be
+# derived from the thing it strokes; a chrome edge that must NOT be scaled; rounding that must NOT be
+# half-up). Prose in CLAUDE.md or a skill can be skimmed. A failing commit cannot.
+#
+# Install (once per clone):   git config core.hooksPath .githooks
+# Bypass for a genuine emergency:  SKIP_SCALING_TESTS=1 git commit ...   (say so in the message)
+#
+# Cost: the guards are ~0.05s and always run (serially: a named file this cheap starts no xdist workers). The
+# full sweep (~1.5 min on 64 xdist workers) runs only when a staged file can
+# actually change scaling behaviour.
+
+set -e
+
+if [ -n "$SKIP_SCALING_TESTS" ]; then
+    echo "pre-commit: SKIP_SCALING_TESTS set - scaling laws NOT verified" >&2
+    exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel)
+tests="$repo_root/work/tests"
+
+# No test tree (shallow/partial checkout) -> nothing to enforce.
+[ -d "$tests" ] || exit 0
+
+if command -v py >/dev/null 2>&1; then PY="py"
+elif command -v python >/dev/null 2>&1; then PY="python"
+else
+    echo "pre-commit: no python on PATH - scaling laws NOT verified" >&2
+    exit 0
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# Files whose contents can move a pixel: the reference module and its ports, the patch set,
+# the assemblers, and the tests themselves.
+touches_scaling=$(printf '%s\n' "$staged" | grep -E \
+    'work/scripts/scaling_laws\.(py|js)|work/scripts/assemble_.*\.py|work/scripts/hook_.*\.js|work/patches/patches\.yaml|work/tests/test_scaling|work/tests/test_bandmap|work/tests/golden_scaling_vectors\.json' \
+    || true)
+
+cd "$tests"
+
+# Always: the process tripwires (source of truth exists, stroke_width takes only g, g=16 is the
+# identity, no screen literals, hooks carry no private copy of the math). Fast enough to be free.
+echo "pre-commit: scaling law guards..."
+$PY -m pytest test_scaling_law_guards.py -q -p no:cacheprovider -p no:faulthandler >/dev/null || {
+    echo "" >&2
+    echo "pre-commit: SCALING LAW GUARDS FAILED. Run:" >&2
+    echo "    cd work/tests && py -m pytest test_scaling_law_guards.py -q" >&2
+    echo "  These guard the laws in work/scripts/scaling_laws.py (the SOURCE OF TRUTH)." >&2
+    echo "  Read work/WHY.md before 'fixing' one of them - the obvious change is usually" >&2
+    echo "  an approach that was already tried and failed." >&2
+    exit 1
+}
+
+if [ -n "$touches_scaling" ]; then
+    echo "pre-commit: staged files touch scaling - running the full sweep (~1.5 min, parallel)..."
+    $PY -m pytest -k scaling -q -p no:cacheprovider -p no:faulthandler >/dev/null || {
+        echo "" >&2
+        echo "pre-commit: SCALING SWEEP FAILED. Run:" >&2
+        echo "    cd work/tests && py -m pytest -k scaling -q" >&2
+        echo "  Every assertion there is named after an on-screen defect it prevents." >&2
+        echo "  If you changed a law deliberately, regenerate the golden vectors:" >&2
+        echo "    py work/scripts/gen_scaling_vectors.py --write   # then REVIEW the diff" >&2
+        echo "  Every changed integer is a pixel that moves." >&2
+        exit 1
+    }
+fi
+
+echo "pre-commit: scaling laws verified."
+exit 0

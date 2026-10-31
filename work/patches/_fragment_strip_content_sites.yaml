@@ -1,0 +1,789 @@
+  - id: BaseWin_draw_production.font_a
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e62d
+    length: 5
+    original_bytes: "E8 0E A9 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_production.font_b
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e643
+    length: 5
+    original_bytes: "E8 F8 A8 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_flash.font_a
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_flash
+    virtual_addr: 0x0040d4e5
+    length: 5
+    original_bytes: "E8 56 BA 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_flash.font_b
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_flash
+    virtual_addr: 0x0040d4fb
+    length: 5
+    original_bytes: "E8 40 BA 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_queue.font_800
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x00415158
+    length: 5
+    original_bytes: "E8 E3 3D 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_queue.font_a
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x0041517d
+    length: 5
+    original_bytes: "E8 BE 3D 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_queue.font_b
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x0041519b
+    length: 5
+    original_bytes: "E8 A0 3D 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_pop.font
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414c12
+    length: 5
+    original_bytes: "E8 29 43 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_garrison.font
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x00410445
+    length: 5
+    original_bytes: "E8 F6 8A 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_supported.font
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040c916
+    length: 5
+    original_bytes: "E8 25 C6 20 00"
+    new_bytes:      "E8 {rel32:t_fontinit}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_queue.sf_hdr
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x0041521a
+    length: 5
+    original_bytes: "E8 51 5A 1C 00"
+    new_bytes:      "E8 {rel32:t_sf_strip}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_supported.sf_hdr
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040c98f
+    length: 5
+    original_bytes: "E8 DC E2 1C 00"
+    new_bytes:      "E8 {rel32:t_sf_strip}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_info.findfont_a
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_info
+    virtual_addr: 0x00415d17
+    length: 5
+    original_bytes: "E8 D4 25 17 00"
+    new_bytes:      "E8 {rel32:t_findfont}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_info.findfont_b
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_info
+    virtual_addr: 0x00415d5d
+    length: 5
+    original_bytes: "E8 8E 25 17 00"
+    new_bytes:      "E8 {rel32:t_findfont}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_pop.ratio_a
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414d90
+    length: 5
+    original_bytes: "E8 B5 FD 1C 00"
+    new_bytes:      "E8 {rel32:t_pop_ratio}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_pop.ratio_b
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414e23
+    length: 5
+    original_bytes: "E8 22 FD 1C 00"
+    new_bytes:      "E8 {rel32:t_pop_ratio}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_pop.ratio_c
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414f38
+    length: 5
+    original_bytes: "E8 0D FC 1C 00"
+    new_bytes:      "E8 {rel32:t_pop_ratio}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_pop.ratio_d
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414fcd
+    length: 5
+    original_bytes: "E8 78 FB 1C 00"
+    new_bytes:      "E8 {rel32:t_pop_ratio}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_hover.spotck_nat
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_hover
+    virtual_addr: 0x00416c72
+    length: 5
+    original_bytes: "E8 89 3E 1E 00"
+    new_bytes:      "E8 {rel32:t_spotck_nat}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_lbdown.spotck_nat
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_lbdown
+    virtual_addr: 0x0041b1ab
+    length: 5
+    original_bytes: "E8 50 F9 1D 00"
+    new_bytes:      "E8 {rel32:t_spotck_nat}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_lbup.spotck_nat
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_lbup
+    virtual_addr: 0x0041b305
+    length: 5
+    original_bytes: "E8 F6 F7 1D 00"
+    new_bytes:      "E8 {rel32:t_spotck_nat}"
+    pattern: call_target_redirect
+
+  - id: BaseWin_draw_production.ghost5
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e478
+    length: 50
+    original_bytes: "8B 02 89 45 E4 8B 42 04 83 E8 05 8B 4A 08 83 C1 05 8B 52 0C 89 55 F0 8B 55 E4 83 EA 05 89 55 E4 8B 55 F0 83 C2 05 83 C0 0A 89 55 F0 89 45 E8 83 E9 0A"
+    new_bytes:      "E8 {rel32:t_prod_ghost5} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.union3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e4ef
+    length: 5
+    original_bytes: "B8 03 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_eax_s3}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.union6
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e50f
+    length: 6
+    original_bytes: "03 F0 6A 06 6A 06"
+    new_bytes:      "E8 {rel32:t_prod_union6} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.inner3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e582
+    length: 44
+    original_bytes: "8B 06 83 C0 03 8B 4E 04 89 45 E4 83 C1 03 8D 45 E4 8B 56 08 89 4D E8 83 EA 03 50 8B 76 0C B9 64 EC 7A 00 83 EE 03 89 55 EC 89 75 F0"
+    new_bytes:      "E8 {rel32:t_prod_inner3} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.post3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e5b9
+    length: 5
+    original_bytes: "B8 03 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_eax_s3}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.pic28
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e685
+    length: 10
+    original_bytes: "8B 55 E8 8B D8 83 C2 28 D1 FB"
+    new_bytes:      "E8 {rel32:t_prod_pic28} 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.name41_veh
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e7fd
+    length: 9
+    original_bytes: "8B 4D E8 8D 14 76 83 C1 41"
+    new_bytes:      "E8 {rel32:t_prod_name41c} 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.pad2_veh
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040e965
+    length: 5
+    original_bytes: "BA 02 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_edx_s2}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.iconsz
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040ea46
+    length: 6
+    original_bytes: "6A 28 50 8B 45 E0"
+    new_bytes:      "E8 {rel32:t_prod_iconsz} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.iconxy
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040ea4c
+    length: 6
+    original_bytes: "83 C0 EC 83 C3 EC"
+    new_bytes:      "E8 {rel32:t_prod_iconxy} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.name41_fac
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040ea60
+    length: 12
+    original_bytes: "8B 5D E8 8D 34 7F C1 E6 04 83 C3 41"
+    new_bytes:      "E8 {rel32:t_prod_name41b} 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.pad2_fac
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040eadc
+    length: 5
+    original_bytes: "BA 02 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_edx_s2}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.bar2a
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040eb77
+    length: 5
+    original_bytes: "8D 14 3F 3B D3"
+    new_bytes:      "E8 {rel32:t_bar2a}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.bar2b
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040eb8b
+    length: 7
+    original_bytes: "89 7D D8 D1 E0 3B C6"
+    new_bytes:      "E8 {rel32:t_bar2b} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.bar2c
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040eb98
+    length: 7
+    original_bytes: "99 F7 FF D1 E0 3B C6"
+    new_bytes:      "E8 {rel32:t_bar2c} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.barthresh
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040ec28
+    length: 23
+    original_bytes: "83 FB 08 7D 06 49 89 4D C0 EB 0C 40 49 46 89 45 B8 89 4D C0 89 75 BC"
+    new_bytes:      "E8 {rel32:t_barthresh} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_production.bardec
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040ec3f
+    length: 6
+    original_bytes: "8B 5D A0 4A 85 DB"
+    new_bytes:      "E8 {rel32:t_bardec} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_flash.ghost5
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_flash
+    virtual_addr: 0x0040d399
+    length: 54
+    original_bytes: "8B 17 83 EA 05 8B 47 04 89 55 E0 83 E8 05 8D 55 E0 8B 4F 08 83 C0 0A 83 C1 05 89 45 E4 8B 7F 0C 83 E9 0A 89 4D E8 8D 4D A4 83 C7 05 51 52 B9 64 EC 7A 00 89 7D EC"
+    new_bytes:      "E8 {rel32:t_flash_ghost5} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_flash.union3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_flash
+    virtual_addr: 0x0040d3ef
+    length: 5
+    original_bytes: "BB 03 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_ebx_s3}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_flash.union6
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_flash
+    virtual_addr: 0x0040d412
+    length: 6
+    original_bytes: "03 FB 6A 06 6A 06"
+    new_bytes:      "E8 {rel32:t_flash_union6} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_flash.pic28
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_flash
+    virtual_addr: 0x0040d517
+    length: 6
+    original_bytes: "8D 04 49 8D 5A 28"
+    new_bytes:      "E8 {rel32:t_flash_pic28} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_flash.name41
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_flash
+    virtual_addr: 0x0040d593
+    length: 9
+    original_bytes: "8B 45 E4 8D 34 8F 83 C0 41"
+    new_bytes:      "E8 {rel32:t_flash_name41} 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_flash.pad2
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_flash
+    virtual_addr: 0x0040d622
+    length: 5
+    original_bytes: "B9 02 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_ecx_s2}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_queue.hdr3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x004151ec
+    length: 5
+    original_bytes: "B8 03 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_eax_s3}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_queue.listx5
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x004152e8
+    length: 5
+    original_bytes: "B8 05 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_eax_s5}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_queue.listy2
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x0041530b
+    length: 5
+    original_bytes: "B8 02 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_eax_s2}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_queue.rowh
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x00415371
+    length: 17
+    original_bytes: "8B 45 8C 85 C0 7C 07 8B 4D 9C 03 C8 EB 03 8B 4D 98"
+    new_bytes:      "E8 {rel32:t_qrow_h_ecx} 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_queue.rowadv
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_queue
+    virtual_addr: 0x00415695
+    length: 17
+    original_bytes: "8B 45 8C 85 C0 7C 07 8B 4D 9C 03 C1 EB 03 8B 45 98"
+    new_bytes:      "E8 {rel32:t_qrow_h_eax} 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_pop.inner3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414c27
+    length: 44
+    original_bytes: "8B 06 83 C0 03 8B 4E 04 89 45 B8 83 C1 03 8D 45 B8 8B 56 08 89 4D BC 83 EA 03 50 8B 76 0C B9 64 EC 7A 00 83 EE 03 89 55 C0 89 75 C4"
+    new_bytes:      "E8 {rel32:t_pop_inner3} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_pop.c30_a
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414d65
+    length: 6
+    original_bytes: "89 45 E8 83 C0 D0"
+    new_bytes:      "E8 {rel32:t_pop_c30} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_pop.c30_b
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414dfa
+    length: 6
+    original_bytes: "89 45 E8 83 C0 D0"
+    new_bytes:      "E8 {rel32:t_pop_c30} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_pop.c30_c
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414ef7
+    length: 6
+    original_bytes: "89 45 E8 83 C0 D0"
+    new_bytes:      "E8 {rel32:t_pop_c30} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_pop.c30_d
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_pop
+    virtual_addr: 0x00414fa7
+    length: 6
+    original_bytes: "89 45 E8 83 C0 D0"
+    new_bytes:      "E8 {rel32:t_pop_c30} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_garrison.inner3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x004104b1
+    length: 5
+    original_bytes: "B8 03 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_eax_s3}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_garrison.cell38
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x004104fb
+    length: 7
+    original_bytes: "C7 45 E0 38 00 00 00"
+    new_bytes:      "E8 {rel32:t_garr_cell38} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_garrison.fitdiv
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x0041056d
+    length: 6
+    original_bytes: "99 83 C1 05 F7 F9"
+    new_bytes:      "E8 {rel32:t_garr_fitdiv} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_garrison.sq1
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x004105b4
+    length: 6
+    original_bytes: "8D 48 01 8D 42 FF"
+    new_bytes:      "E8 {rel32:t_garr_sq1} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_garrison.sq5
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x004105ca
+    length: 6
+    original_bytes: "83 E8 05 89 45 E0"
+    new_bytes:      "E8 {rel32:t_garr_sq5} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_garrison.stats38
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x00410768
+    length: 7
+    original_bytes: "C7 45 CC 38 00 00 00"
+    new_bytes:      "E8 {rel32:t_garr_stats38} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_garrison.statsy6
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x00410777
+    length: 5
+    original_bytes: "2B CA 83 C1 06"
+    new_bytes:      "E8 {rel32:t_garr_statsy}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_garrison.adv5
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_garrison
+    virtual_addr: 0x004107b8
+    length: 6
+    original_bytes: "8B C8 8D 44 17 05"
+    new_bytes:      "E8 {rel32:t_garr_adv5} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.hdr3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040c964
+    length: 5
+    original_bytes: "B8 03 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_eax_s3}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.list3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040ca56
+    length: 5
+    original_bytes: "B8 03 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_eax_s3}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.scale_a
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040caa4
+    length: 20
+    original_bytes: "C7 05 18 6D 69 00 0A 00 00 00 C7 05 1C 6D 69 00 10 00 00 00"
+    new_bytes:      "E8 {rel32:t_sup_scale} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.cell3e
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040cacd
+    length: 7
+    original_bytes: "C7 45 C8 3E 00 00 00"
+    new_bytes:      "E8 {rel32:t_sup_cell} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.row2e
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040cae9
+    length: 7
+    original_bytes: "C7 45 B4 2E 00 00 00"
+    new_bytes:      "E8 {rel32:t_sup_row} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.icon1
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040cb04
+    length: 7
+    original_bytes: "C7 45 A4 0D 00 00 00"
+    new_bytes:      "E8 {rel32:t_sup_icon1} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.icon2
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040cb1f
+    length: 7
+    original_bytes: "C7 45 9C 0D 00 00 00"
+    new_bytes:      "E8 {rel32:t_sup_icon2} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.fit1
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040cb65
+    length: 5
+    original_bytes: "2B C1 83 E8 0C"
+    new_bytes:      "E8 {rel32:t_sup_fit1}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.fit2
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040cbd2
+    length: 6
+    original_bytes: "83 E8 0C 83 C7 F4"
+    new_bytes:      "E8 {rel32:t_sup_fit2} 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_supported.scale_b
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_supported
+    virtual_addr: 0x0040cd8b
+    length: 20
+    original_bytes: "C7 05 18 6D 69 00 0A 00 00 00 C7 05 1C 6D 69 00 10 00 00 00"
+    new_bytes:      "E8 {rel32:t_sup_scale} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_info.pad3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_info
+    virtual_addr: 0x00415b2b
+    length: 5
+    original_bytes: "BB 03 00 00 00"
+    new_bytes:      "E8 {rel32:t_mov_ebx_s3}"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_info.chevpad
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_info
+    virtual_addr: 0x00415c01
+    length: 7
+    original_bytes: "B8 FA FF FF FF 2B C1"
+    new_bytes:      "E8 {rel32:t_info_pad} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_init.chev_btn2
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_init
+    virtual_addr: 0x0041f9f5
+    length: 34
+    original_bytes: "83 C1 03 8B 86 EC CA 00 00 83 C2 03 03 C1 89 4D DC 89 45 E4 8B 86 F0 CA 00 00 03 C2 89 55 E0 89 45 E8"
+    new_bytes:      "E8 {rel32:t_chev_btn2} 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_init.chev_btn3
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_init
+    virtual_addr: 0x0041fac0
+    length: 9
+    original_bytes: "8B 86 EC CA 00 00 83 E9 03"
+    new_bytes:      "E8 {rel32:t_chev_btn3} 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_info.titleb
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_info
+    virtual_addr: 0x00415c15
+    length: 7
+    original_bytes: "03 F3 2B D3 89 55 FC"
+    new_bytes:      "E8 {rel32:t_info_titleb} 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_draw_info.btnframe
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_draw_info
+    virtual_addr: 0x00415b4f
+    length: 18
+    original_bytes: "03 D3 B9 64 EC 7A 00 8B 7F 0C 89 55 F8 03 FB 89 7D FC"
+    new_bytes:      "E8 {rel32:t_info_btnframe} 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: block_cut_thunk
+
+  - id: BaseWin_map_to_tile.entry
+    status: confirmed
+    group: basewin_strip_content
+    function: BaseWin_map_to_tile
+    virtual_addr: 0x00409100
+    length: 9
+    original_bytes: "55 8B EC 8B 81 94 0B 04 00"
+    new_bytes:      "E8 {rel32:t_tilepick_nat} 90 90 90 90"
+    pattern: block_cut_thunk

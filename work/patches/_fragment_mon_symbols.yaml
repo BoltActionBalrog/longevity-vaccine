@@ -1,0 +1,66 @@
+  t_mon_build:                   { cave: pcave2, offset: 0x2b000 }   # mon_scale (556B)
+  t_mon_rects:                   { cave: pcave2, offset: 0x2b230 }   # mon_scale (139B)
+  t_mon_btn:                     { cave: pcave2, offset: 0x2b2c0 }   # mon_scale (244B)
+  t_mon_bd_far:                  { cave: pcave2, offset: 0x2b3c0 }   # mon_scale (171B)
+  t_mon_bd_near:                 { cave: pcave2, offset: 0x2b470 }   # mon_scale (186B)
+  t_mon_pic:                     { cave: pcave2, offset: 0x2b530 }   # mon_scale (121B)
+  t_mon_spr_nn:                  { cave: pcave2, offset: 0x2b5b0 }   # mon_scale (48B)
+  t_mon_spr_pic:                 { cave: pcave2, offset: 0x2b5e0 }   # mon_scale (172B)
+  t_mon_font:                    { cave: pcave2, offset: 0x2b690 }   # mon_scale (46B)
+  t_mon_gate:                    { cave: pcave2, offset: 0x2b6d0 }   # mon_scale (53B)
+  t_mon_restripe:                { cave: pcave2, offset: 0x2b710 }   # mon_scale (82B)
+  t_mon_face:                    { cave: pcave2, offset: 0x2b770 }   # mon_scale (512B)
+  t_mon_lut:                     { cave: pcave2, offset: 0x2b970 }   # mon_scale (175B)
+  t_mon_resample:                { cave: pcave2, offset: 0x2ba20 }   # mon_scale (1272B)
+  t_mon_panel:                   { cave: pcave2, offset: 0x2bf20 }   # mon_scale (895B)
+  t_hof_build:                   { cave: pcave2, offset: 0x2c2a0 }   # hof_scale (666B)
+  t_hof_rects:                   { cave: pcave2, offset: 0x2c540 }   # hof_scale (82B)
+  t_hof_icons:                   { cave: pcave2, offset: 0x2c5a0 }   # hof_scale (219B)
+  t_hof_btn:                     { cave: pcave2, offset: 0x2c680 }   # hof_scale (244B)
+  t_hof_fonts:                   { cave: pcave2, offset: 0x2c780 }   # hof_scale (239B)
+  t_hof_bd_frame:                { cave: pcave2, offset: 0x2c870 }   # hof_scale (162B)
+  t_hof_bd_hof:                  { cave: pcave2, offset: 0x2c920 }   # hof_scale (68B)
+  t_hof_bd_map:                  { cave: pcave2, offset: 0x2c970 }   # hof_scale (194B)
+  t_hof_spr_pic:                 { cave: pcave2, offset: 0x2ca40 }   # hof_scale (78B)
+  t_hof_face:                    { cave: pcave2, offset: 0x2ca90 }   # hof_scale (196B)
+  t_hof_pairnn:                  { cave: pcave2, offset: 0x2cb60 }   # hof_scale (479B)
+  t_hof_pairtex:                 { cave: pcave2, offset: 0x2cd40 }   # hof_scale (103B)
+  t_hof_luma:                    { cave: pcave2, offset: 0x2cdb0 }   # hof_scale (44B)
+  t_hof_font_448e3f:             { cave: pcave2, offset: 0x2cde0 }   # hof_scale (32B)
+  t_hof_font_449e7a:             { cave: pcave2, offset: 0x2ce00 }   # hof_scale (34B)
+  t_hof_font_449f97:             { cave: pcave2, offset: 0x2ce30 }   # hof_scale (32B)
+  t_hof_font_449fee:             { cave: pcave2, offset: 0x2ce50 }   # hof_scale (32B)
+  t_hof_font_44a169:             { cave: pcave2, offset: 0x2ce70 }   # hof_scale (34B)
+  t_hof_bd_field:                { cave: pcave2, offset: 0x1af00 }   # hof_scale (56B)
+  t_hof_pairfld:                 { cave: pcave2, offset: 0x1af40 }   # hof_scale (97B)
+  g_hof_field:                   { cave: pcave2, offset: 0x1aff0, size: 4 }
+  g_mon_lut_lo:                  { cave: pcave2, offset: 0xdee0, size: 4 }   # mon_scale DATA (t_mon_lut range)
+  g_mon_lut_hi:                  { cave: pcave2, offset: 0xdee4, size: 4 }   # mon_scale DATA (t_mon_lut range)
+  g_mon_lz:                      { cave: pcave2, offset: 0x2cea0, size: 768 }   # mon_scale DATA
+  g_hof_rects:                   { cave: pcave2, offset: 0x2d1a0, size: 96 }   # hof_scale DATA
+  g_hof_immtab:                  { cave: pcave2, offset: 0x2d200, size: 372 }   # hof_scale DATA
+  g_mon_num:                     { cave: pcave2, offset: 0x2d380, size: 4 }
+  g_mon_armed:                   { cave: pcave2, offset: 0x2d384, size: 4 }
+  g_mon_lx:                      { cave: pcave2, offset: 0x2d388, size: 4 }
+  g_mon_ly:                      { cave: pcave2, offset: 0x2d38c, size: 4 }
+  g_mon_ox:                      { cave: pcave2, offset: 0x2d390, size: 4 }
+  g_mon_oy:                      { cave: pcave2, offset: 0x2d394, size: 4 }
+  g_mon_sw:                      { cave: pcave2, offset: 0x2d398, size: 4 }
+  g_mon_sh:                      { cave: pcave2, offset: 0x2d39c, size: 4 }
+  g_mon_scratch:                 { cave: pcave2, offset: 0x2d3a0, size: 4 }
+  g_mon_lut_ok:                  { cave: pcave2, offset: 0x2d3a4, size: 4 }
+  g_hof_num:                     { cave: pcave2, offset: 0x2d3a8, size: 4 }
+  g_hof_armed:                   { cave: pcave2, offset: 0x2d3ac, size: 4 }
+  g_hof_lx:                      { cave: pcave2, offset: 0x2d3b0, size: 4 }
+  g_hof_ly:                      { cave: pcave2, offset: 0x2d3b4, size: 4 }
+  g_hof_ox:                      { cave: pcave2, offset: 0x2d3b8, size: 4 }
+  g_hof_oy:                      { cave: pcave2, offset: 0x2d3bc, size: 4 }
+  g_hof_sw:                      { cave: pcave2, offset: 0x2d3c0, size: 4 }
+  g_hof_sh:                      { cave: pcave2, offset: 0x2d3c4, size: 4 }
+  g_hof_f14:                     { cave: pcave2, offset: 0x2d3c8, size: 4 }
+  g_hof_f16:                     { cave: pcave2, offset: 0x2d3cc, size: 4 }
+  g_hof_f22:                     { cave: pcave2, offset: 0x2d3d0, size: 4 }
+  g_hof_fonts_num:               { cave: pcave2, offset: 0x2d3d4, size: 4 }
+  g_hof_gsave:                   { cave: pcave2, offset: 0x2d3d8, size: 4 }
+  g_hof_immg_save:               { cave: pcave2, offset: 0x2d3dc, size: 4 }
+  g_hof_fontscratch:             { cave: pcave2, offset: 0x2d3e0, size: 120 }

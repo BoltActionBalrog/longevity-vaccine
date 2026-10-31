@@ -1,0 +1,719 @@
+  - id: DatalinkWin_build.enter
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_build
+    virtual_addr: 0x00429300
+    length: 5
+    original_bytes: "55 8B EC 6A FF"   # prologue replay + ret swap -> t_dl_build_leave: immfix(MAIN) once, netwin bracket, faces, canvas restripe (E9 -> t_dl_build_enter)
+    new_bytes:      "E9 9B 4E 60 00"
+    pattern: detour_inplace
+
+  - id: DatalinkWin_open.enter
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_open
+    virtual_addr: 0x00429180
+    length: 8
+    original_bytes: "55 8B EC A1 1C 7B 9B 00"   # prologue replay + ret swap -> t_dl_exec_leave: immfix(TECH) applied/REVERTED (ReportWin-shared range), netwin + g_dl_exec bracket (E9 -> t_dl_exec_enter)
+    new_bytes:      "E9 FB 50 60 00 90 90 90"
+    pattern: detour_inplace
+
+  - id: DatalinkWin_render_topic.cu_restripe
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_render_topic
+    virtual_addr: 0x0042c094
+    length: 6
+    original_bytes: "8B 45 FC 83 F8 0F"   # content_union restripe after the three frames, before the painter switch (cmp replayed last) (E9 -> t_dl_cu)
+    new_bytes:      "E9 A7 24 60 00 90"
+    pattern: detour_inplace
+
+  - id: Win_init.dl_listbox_bracket
+    status: confirmed
+    group: dl_scale
+    function: Win_init
+    virtual_addr: 0x005ebd80
+    length: 6
+    original_bytes: "64 A1 00 00 00 00"   # ecx==DL ListBox -> g_popup_active++ bracket (scrollbar geometry at attach) (E9 -> t_dl_wininit)
+    new_bytes:      "E9 9B 30 44 00 90"
+    pattern: detour_inplace
+
+  - id: terraform.diamond_y75
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_terraform_painter
+    virtual_addr: 0x00431238
+    length: 6
+    original_bytes: "83 C0 4B 89 4D A8"   # imm8 overflow: y+75 -> +s(75) (E9 -> t_dl_rf1)
+    new_bytes:      "E9 E3 DC 5F 00 90"
+    pattern: detour_inplace
+
+  - id: terraform.diamond_x100
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_terraform_painter
+    virtual_addr: 0x00431250
+    length: 6
+    original_bytes: "8D 56 64 83 F8 10"   # imm8 overflow: x+100 -> +s(100) (E9 -> t_dl_rf2)
+    new_bytes:      "E9 FB DC 5F 00 90"
+    pattern: detour_inplace
+
+  - id: terraform.stats_x103
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_terraform_painter
+    virtual_addr: 0x004316b3
+    length: 6
+    original_bytes: "83 C6 67 89 75 C4"   # imm8 overflow: x+103 -> +s(103) (E9 -> t_dl_rf3)
+    new_bytes:      "E9 C8 D8 5F 00 90"
+    pattern: detour_inplace
+
+  - id: terraform.lower_x103
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_terraform_painter
+    virtual_addr: 0x0043196f
+    length: 5
+    original_bytes: "2B C1 53 50 52"   # imm8 overflow: cond x+103 -> +s(103) (E9 -> t_dl_rf4)
+    new_bytes:      "E9 3C D6 5F 00"
+    pattern: detour_inplace
+
+  - id: tech.icon_span52
+    status: confirmed
+    group: dl_scale
+    function: ReportWin_tech_page
+    virtual_addr: 0x0049a2b1
+    length: 5
+    original_bytes: "83 E8 34 52 99"   # imm8 overflow (g_dl_exec-gated): span 52 (E9 -> t_dl_rf5)
+    new_bytes:      "E9 3A 4D 59 00"
+    pattern: detour_inplace
+
+  - id: tech.icon_yadv58
+    status: confirmed
+    group: dl_scale
+    function: ReportWin_tech_page
+    virtual_addr: 0x0049a2da
+    length: 6
+    original_bytes: "83 C0 3A 89 45 F8"   # imm8 overflow (g_dl_exec-gated): y+58 (E9 -> t_dl_rf6)
+    new_bytes:      "E9 41 4D 59 00 90"
+    pattern: detour_inplace
+
+  - id: frame_429a5b
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00429a5b
+    length: 5
+    original_bytes: "E8 73 93 1B 00"   # d690 window backdrop [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_429a6e
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00429a6e
+    length: 5
+    original_bytes: "E8 60 93 1B 00"   # d5a0 panel_outer [HF]
+    new_bytes:      "E8 {rel32:t_dl_bm}"
+    pattern: call_target_redirect
+
+  - id: frame_429abb
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00429abb
+    length: 5
+    original_bytes: "E8 13 93 1B 00"   # d5a0 BACK+EXIT container [HF]
+    new_bytes:      "E8 {rel32:t_dl_bm}"
+    pattern: call_target_redirect
+
+  - id: frame_429ace
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00429ace
+    length: 5
+    original_bytes: "E8 00 93 1B 00"   # d618 list_title [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_429b1b
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00429b1b
+    length: 5
+    original_bytes: "E8 B3 92 1B 00"   # d5a0 list+title [HF]
+    new_bytes:      "E8 {rel32:t_dl_bm}"
+    pattern: call_target_redirect
+
+  - id: frame_429b4f
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00429b4f
+    length: 5
+    original_bytes: "E8 7F 92 1B 00"   # d618 title_rect [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42a589
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042a589
+    length: 5
+    original_bytes: "E8 45 88 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42a6f6
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042a6f6
+    length: 5
+    original_bytes: "E8 D8 86 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42a85c
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042a85c
+    length: 5
+    original_bytes: "E8 72 85 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42a9c2
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042a9c2
+    length: 5
+    original_bytes: "E8 0C 84 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42ab22
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042ab22
+    length: 5
+    original_bytes: "E8 AC 82 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42ac82
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042ac82
+    length: 5
+    original_bytes: "E8 4C 81 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42ade2
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042ade2
+    length: 5
+    original_bytes: "E8 EC 7F 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42af41
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042af41
+    length: 5
+    original_bytes: "E8 8D 7E 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42b0f7
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042b0f7
+    length: 5
+    original_bytes: "E8 D7 7C 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42b260
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042b260
+    length: 5
+    original_bytes: "E8 6E 7B 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42b3ef
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042b3ef
+    length: 5
+    original_bytes: "E8 DF 79 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42b592
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042b592
+    length: 5
+    original_bytes: "E8 3C 78 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42b743
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042b743
+    length: 5
+    original_bytes: "E8 8B 76 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42b89c
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042b89c
+    length: 5
+    original_bytes: "E8 32 75 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42ba0b
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042ba0b
+    length: 5
+    original_bytes: "E8 C3 73 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42bc1e
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042bc1e
+    length: 5
+    original_bytes: "E8 B0 71 1B 00"   # d618 [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_42c03e
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042c03e
+    length: 5
+    original_bytes: "E8 90 6D 1B 00"   # d528 content_union [HF]
+    new_bytes:      "E8 {rel32:t_dl_bm}"
+    pattern: call_target_redirect
+
+  - id: frame_42c051
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0042c051
+    length: 5
+    original_bytes: "E8 7D 6D 1B 00"   # d618 title_rect [DF]
+    new_bytes:      "E8 {rel32:t_dl_bmdf}"
+    pattern: call_target_redirect
+
+  - id: frame_4999a7
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x004999a7
+    length: 5
+    original_bytes: "E8 27 94 14 00"   # d5a0 prereq btn frame [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_499add
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00499add
+    length: 5
+    original_bytes: "E8 F1 92 14 00"   # d5a0 prereq btn frame [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_499c55
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00499c55
+    length: 5
+    original_bytes: "E8 79 91 14 00"   # d5a0 leads-to btn frame [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_499e2c
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00499e2c
+    length: 5
+    original_bytes: "E8 A2 8F 14 00"   # d5a0 leads-to btn frame [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_499fb2
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00499fb2
+    length: 5
+    original_bytes: "E8 1C 8E 14 00"   # d5a0 btn frame [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_49a0c6
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049a0c6
+    length: 5
+    original_bytes: "E8 08 8D 14 00"   # d5a0 card outer [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_49a0fb
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049a0fb
+    length: 5
+    original_bytes: "E8 D3 8C 14 00"   # d528 card inner [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_49b36a
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049b36a
+    length: 5
+    original_bytes: "E8 64 7A 14 00"   # d5f0 hover card [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_49b39c
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049b39c
+    length: 5
+    original_bytes: "E8 32 7A 14 00"   # d5f0 hover btn [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_49b3d7
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049b3d7
+    length: 5
+    original_bytes: "E8 F7 79 14 00"   # d5a0 card [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_49b409
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049b409
+    length: 5
+    original_bytes: "E8 C5 79 14 00"   # d5a0 btn [HF]
+    new_bytes:      "E8 {rel32:t_dl_bmt}"
+    pattern: call_target_redirect
+
+  - id: frame_4991c8
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x004991c8
+    length: 5
+    original_bytes: "E8 06 9C 14 00"   # tech bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: frame_499253
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00499253
+    length: 5
+    original_bytes: "E8 7B 9B 14 00"   # tech bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: frame_499328
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x00499328
+    length: 5
+    original_bytes: "E8 A6 9A 14 00"   # tech bracket [HC]
+    new_bytes:      "E8 {rel32:t_rw_br1}"   # 2026-10-25 W6C (was {rel32:t_dl_bmxt})
+    pattern: call_target_redirect
+
+  - id: frame_4993ec
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x004993ec
+    length: 5
+    original_bytes: "E8 E2 99 14 00"   # tech bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: frame_49b558
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049b558
+    length: 5
+    original_bytes: "E8 76 78 14 00"   # conn bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: frame_49b56e
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049b56e
+    length: 5
+    original_bytes: "E8 60 78 14 00"   # conn bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: frame_49b61f
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049b61f
+    length: 5
+    original_bytes: "E8 AF 77 14 00"   # conn bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: frame_49b6b1
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049b6b1
+    length: 5
+    original_bytes: "E8 1D 77 14 00"   # conn bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: frame_49bbbf
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049bbbf
+    length: 5
+    original_bytes: "E8 0F 72 14 00"   # conn bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: frame_49bcae
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_frames
+    virtual_addr: 0x0049bcae
+    length: 5
+    original_bytes: "E8 20 71 14 00"   # conn bracket [HC]
+    new_bytes:      "E8 {rel32:t_dl_bmxt}"
+    pattern: call_target_redirect
+
+  - id: list_bg.tile
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_list_bg_fill
+    virtual_addr: 0x0042a140
+    length: 5
+    original_bytes: "E8 1B 07 1B 00"   # tile + P-law restripe on the parent grid (phase = list top in DatalinkWin)
+    new_bytes:      "E8 {rel32:t_dl_tile_ph}"
+    pattern: call_target_redirect
+
+  - id: list_row.tile
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_list_row_bg
+    virtual_addr: 0x0042a1f7
+    length: 5
+    original_bytes: "E8 64 06 1B 00"   # row tile + restripe on the parent grid (canonical pair order)
+    new_bytes:      "E8 {rel32:t_dl_tile_ph}"
+    pattern: call_target_redirect
+
+  - id: arrow_49b702
+    status: confirmed
+    group: dl_scale
+    function: tech_connector
+    virtual_addr: 0x0049b702
+    length: 5
+    original_bytes: "E8 93 94 14 00"   # chevron zoom g:16 (g_dl_exec-gated)
+    new_bytes:      "E8 {rel32:t_dl_arrowzoom}"
+    pattern: call_target_redirect
+
+  - id: arrow_49b7b4
+    status: confirmed
+    group: dl_scale
+    function: tech_connector
+    virtual_addr: 0x0049b7b4
+    length: 5
+    original_bytes: "E8 E1 93 14 00"   # chevron zoom g:16 (g_dl_exec-gated)
+    new_bytes:      "E8 {rel32:t_dl_arrowzoom}"
+    pattern: call_target_redirect
+
+  - id: arrow_49b917
+    status: confirmed
+    group: dl_scale
+    function: tech_connector
+    virtual_addr: 0x0049b917
+    length: 5
+    original_bytes: "E8 7E 92 14 00"   # chevron zoom g:16 (g_dl_exec-gated)
+    new_bytes:      "E8 {rel32:t_dl_arrowzoom}"
+    pattern: call_target_redirect
+
+  - id: arrow_49ba3d
+    status: confirmed
+    group: dl_scale
+    function: tech_connector
+    virtual_addr: 0x0049ba3d
+    length: 5
+    original_bytes: "E8 58 91 14 00"   # chevron zoom g:16 (g_dl_exec-gated)
+    new_bytes:      "E8 {rel32:t_dl_arrowzoom}"
+    pattern: call_target_redirect
+
+  - id: arrow_49bb63
+    status: confirmed
+    group: dl_scale
+    function: tech_connector
+    virtual_addr: 0x0049bb63
+    length: 5
+    original_bytes: "E8 32 90 14 00"   # chevron zoom g:16 (g_dl_exec-gated)
+    new_bytes:      "E8 {rel32:t_dl_arrowzoom}"
+    pattern: call_target_redirect
+
+  - id: tech.mono_icon
+    status: confirmed
+    group: dl_scale
+    function: ReportWin_tech_page
+    virtual_addr: 0x0049a2cf
+    length: 5
+    original_bytes: "E8 2C 9B 14 00"   # scaled icon + mono recolour to the category text colour
+    new_bytes:      "E8 {rel32:t_dl_mono}"
+    pattern: call_target_redirect
+
+  - id: flatbutton.face_rect
+    status: confirmed
+    group: dl_scale
+    function: FlatButton_content_draw
+    virtual_addr: 0x00607f60
+    length: 5
+    original_bytes: "E8 6E AE FD FF"   # native-sized face rect when g_btn_pending (BACK/EXIT hover clip)
+    new_bytes:      "E8 {rel32:t_dl_btnrect}"
+    pattern: call_target_redirect
+
+  - id: techpage_wrap_42c1f2
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_dispatch
+    virtual_addr: 0x0042c1f2
+    length: 5
+    original_bytes: "E8 39 C9 06 00"   # RW textB/lineH scale + iface mode-8 force bracket
+    new_bytes:      "E8 {rel32:t_dl_techwrap}"
+    pattern: call_target_redirect
+
+  - id: techpage_wrap_430bf0
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_dispatch
+    virtual_addr: 0x00430bf0
+    length: 5
+    original_bytes: "E8 3B 7F 06 00"   # RW textB/lineH scale + iface mode-8 force bracket
+    new_bytes:      "E8 {rel32:t_dl_techwrap}"
+    pattern: call_target_redirect
+
+  - id: tech.hover_rb3
+    status: confirmed
+    group: dl_scale
+    function: tech_hover
+    virtual_addr: 0x0049b2f1
+    length: 7
+    original_bytes: "03 D0 83 C1 FD 03 D8"   # frame R/B +s(3), T -s(3) (call t_dl_hover; eax=3 stays the k<3 compare)
+    new_bytes:      "E8 CA 36 59 00 90 90"
+    pattern: inplace_rewrite
+
+  - id: render_topic.restore_rect
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_render_topic
+    virtual_addr: 0x0042bff0
+    length: 6
+    original_bytes: "8D 86 C4 03 01 00"   # lea eax,[esi+0x103C4] -> [esi+0x474] (canvas space; the mixed-space vanilla accident)
+    new_bytes:      "8D 86 74 04 00 00"
+    pattern: inplace_rewrite
+
+  - id: dl_iface_vtbl.on_mode_saveunder
+    status: confirmed
+    group: dl_scale
+    function: DatalinkIface_vtbl
+    virtual_addr: 0x0066af30
+    length: 4
+    original_bytes: "60 20 43 00"   # console save-under snapshot on DL enter (t_cr_tile restores at exit)
+    new_bytes:      "{abs32:t_cr_snap_dl}"
+    pattern: vtable_repoint
+
+  - id: faction.portrait_scale
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_draw_faction
+    virtual_addr: 0x00430da3
+    length: 5
+    original_bytes: "E8 A2 3D 1B 00"   # num/den 1:1 -> g:16 + thunk_portrait_avg dest-gate poke (bilinear enlarge)
+    new_bytes:      "E8 {rel32:t_dl_portrait}"
+    pattern: call_target_redirect
+
+  - id: faction.portrait_text_x
+    status: confirmed
+    group: dl_scale
+    function: DatalinkWin_draw_faction
+    virtual_addr: 0x00430da8
+    length: 6
+    original_bytes: "8B 9B E4 EE 78 00"   # profile-text x advance: native sprite width -> drawn width fl(w*g/16) (E9 -> t_dl_portw)
+    new_bytes:      "E9 E3 E2 5F 00 90"
+    pattern: detour_inplace
+
+  - id: ts.flowdraw
+    status: confirmed
+    group: dl_scale
+    function: TextScroll_draw
+    virtual_addr: 0x00629c26
+    length: 5
+    original_bytes: "E8 15 14 FB FF"   # DL article scroll: start the flow at the containing PARAGRAPH head, y0=cum-k*lineH; bar range -> wrapped lines
+    new_bytes:      "E8 {rel32:t_ts_flowdraw}"
+    pattern: call_target_redirect

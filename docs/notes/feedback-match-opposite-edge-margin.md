@@ -1,0 +1,13 @@
+---
+name: feedback-match-opposite-edge-margin
+description: When a scaled element abuts a fixed neighbor and its vanilla gap is ~0 (butting), match the OPPOSITE edge's inset, not vanilla×g/16
+type: feedback
+---
+
+When a UI element's vanilla margin against a fixed-position neighbor is degenerate — it BUTTS (~0-1px) — strict `vanilla × g/16` magnifies to a near-zero gap that the maintainer reads as "too tight / too small" at hi-res. In that case, scale this edge to MATCH the symmetric OPPOSITE edge's inset (the edge that has a real vanilla gap and shares the same g-derived lever), so the frame is equidistant from both sides by construction.
+
+**Why:** The proportionate invariant ([[feedback-proportionate-scaling]]) assumes a meaningful vanilla magnitude. A butting/zero reference is degenerate, and faithfully scaling it produces a value the maintainer rejects when magnified. Concrete case (faction quote box, A1): the portrait side butts the outer stroke (~1px). First I removed the un-butt push to be "faithful" (gap ~3px @g40) → user said "too small at 4K". Pushing by the same `extra` the right side uses made the LEFT inset EQUAL the box-right inset (17px @g40, 10px @g25) — symmetric by construction, and correct. The original over-shot (push = popup_scale(4), inset 20 vs 17 = "very slightly too large"); the bracket 20 / 10 / 17 pinned the target as the opposite-edge value.
+
+**How to apply:** Measure the OPPOSITE edge's inset at the live g (read the engine's computed rect global — see [[feedback-frida-trace-rect-and-sprite-capture]] — don't pixel-infer). Place this edge at the same inset using the SHARED g-derived term so both scale together; never a constant pull (it breaks the g16 native no-op). Verify symmetric at 4K + a non-4K res. Applies to any element abutting a fixed neighbor: portraits, icons, fixed-position checkboxes/controls inside a scaled frame. See [[feedback-proportionate-scaling]], (a private note).
+
+**Extension (2026-07-21f, GOVERNOR chevrons):** the law also covers SYMMETRIC SATELLITE PAIRS with a real (non-degenerate) vanilla gap. Elements that flank one anchor with EQUAL vanilla gaps must render EQUAL device gaps — independent per-edge flooring quantizes the two flanks on different phases (3px left / 4px right at g=25) and the maintainer reads ±1px as misalignment there, where the same jitter between unrelated neighbors is invisible/lawful. Fix = derive the second satellite's position from the anchor edge + the FIRST flank's rendered gap (law `basewin_chev2_x` in scaling_laws.py, the positive-law form). Gap jitter between UNRELATED elements stays the plain per-edge law — only symmetric pairs mirror.

@@ -1,0 +1,3 @@
+      - id: thunk_orn_childx
+        offset: 0xfb90
+        bytes: "52 A1 {abs32:g_popup_scale_num} 83 F8 10 7E 38 8B 96 AC 30 00 00 81 EA 20 4E 00 00 81 FA 10 27 00 00 72 0E 81 EA 40 9C 00 00 81 FA 10 27 00 00 73 16 83 BE E0 30 00 00 00 74 0D 8D 14 40 C1 FA 04 83 EA 03 01 54 24 18 5A 83 BE 50 23 00 00 FF C3"

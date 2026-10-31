@@ -1,0 +1,4 @@
+# stripes_dlphase (2026-10-06, scripts/assemble_dl.py + tests/test_stripes_dlphase_asm_parity.py).
+# NEW symbols (append to the dl_bake symbols block; t_dl_tile_bg / t_dl_tile_row keep their entries as dead bytes).
+  g_dl_rs_phi:                   { cave: pcave2, offset: 0x27ed0, size: 4 }   # t_dl_tile_ph phase cell: the list's parent-local top (Win +0x140 + +0x150); 0 outside the call
+  t_dl_tile_ph:                  { cave: pcave2, offset: 0x23ac0 }   # dl_scale (127B) both list tile sites: tile + restripe on the DatalinkWin grid

@@ -1,0 +1,17 @@
+---
+name: project-smac-movie-caption
+description: Secret-project post-movie caption (title + typewriter benefit text) — vanilla feature PRACX and our movie hook both bypass; restored in uimod caption.cpp; CLOSED user-verified PRACX 4K+1600x1200, DLL 1138eab7, commit a31c4e1; pristine exe also verified
+type: project
+---
+
+Vanilla draws a caption over the held last cinematic frame: `movie_caption` 0x4BEF00, sole caller 0x4BED47 inside `set_video_mode` 0x4BEA50 — i.e. INSIDE the `amovie_project_2` body that PRACX's (and our) entry JMP replaces, so it was lost. PRACX has no caption handling at all (PRACX regression of a vanilla feature → gets a CHANGELOG line once verified).
+
+Data: `movlist.txt` section `#<MOVIENAME>` (no movlistx.txt in GOG): 3×(font line `face,style,size` + colour line `fg,shadow,dx,dy`, indices +10 into game palette `[0x9B8174]`), rect in 640x480 movie-surface px, `delay_ms, hold_ms`, blank, text (`^` blank line, `^^` centred, `[..]` font2, `$LINK<text=id>` plain). `transcend`/`theyTranscend` have no section → no caption in vanilla either. Skipped movie → no caption.
+
+Layout law (derived from 0x5DAD70/0x5DB040, reproduces all 8 measured numbers at 0px; reference `work\tests\movie_caption\caption_layout.py`): every line advances by FONT0's line height; block centred in rect (trunc); TextOut y = line y + max(ascent−internalLeading over fonts 0..2) drawn **TA_TOP** (engine intends baseline, but the DDraw-wrapped Buffer's fresh GetDC loses TA_BASELINE → text sits ~11px low; that IS vanilla). Vanilla ~145 ms/char seen in captures is ENVIRONMENTAL (DDrawCompat GetDC/ReleaseDC per char); code law = max(10 ms, draw cost).
+
+Our port (design C): `src\uimod\src\caption.cpp` + stage at end of `DecodeAndPlay` (movie.cpp), after a decoder DRAIN at EOF (frame-threaded decoder used to drop the tail frames). Lay out in NATIVE 640x480 with native fonts, map through the movie's own scale `k = dstW / nativeClipW` (native size probed from movies\<name>.wve so the HD pack works), baseline = vanilla×k, centred lines keep vanilla's CENTRE×k (ink edges are not k-linear: [[feedback-font-metric-sublinearity]]). Does NOT use g_popup_scale_num (cave global, absent on pristine). Typewriter/hold pump messages; skip keys end the caption (vanilla ignores input there). Offline harness + pytest: `work\tests\movie_caption\test_caption_render.py` (5 screen sizes, no game).
+
+**Why:** user noticed the missing flow 2026-09-19; `terranx_vanilla.exe` (cc659f + win11 fix only, 552bfdad, launcher shortcut "SMACX Vanilla") was built to capture it.
+**HUD bleed over the movie (2026-09-19):** Pump() dispatches WM_TIMER -> game timers (event log, unit blink) flip dirty rects over our frames via Win_flip_rect 0x5EFD20. `g_flip_enabled` 0x9B7A50 is NOT a gate (engine sets/clears it per dirty flush). Fix = `FlipBlock` in movie.cpp: RET-stub the Win_flip_rect entry (expects byte 0xA1) while playing, then mirror vanilla exit Win_update_screen(0,0)+Win_flip_rect(0). Caption verified by user screenshots 4K + 1600x1200 (crisp ClearType, layout matches).
+**How to apply:** CLOSED 2026-09-19 user-verified ("It works perfectly") PRACX 4K + 1600x1200; DLL 1138eab7; committed + pushed a31c4e1; CHANGELOG line under Cinematics (PRACX regression). Pristine terranx.exe pass user-verified 2026-09-19 (DDraw presenter path + FlipBlock exit order OK). Nothing open. Reuse FlipBlock for ANY future uimod code that owns the screen while pumping messages. Related: [[project-smac-movie-player]], [[project-smac-movie-impl-progress]].

@@ -1,0 +1,73 @@
+  g_dw_vpdone:                   { cave: pcave2, offset: 0x1a000, size: 4 }
+  g_dw_vpold:                    { cave: pcave2, offset: 0x1a004, size: 4 }
+  g_dw_fitw:                     { cave: pcave2, offset: 0x1a008, size: 4 }
+  g_dw_fitoff:                   { cave: pcave2, offset: 0x1a00c, size: 4 }
+  g_dw_pickcanvas:               { cave: pcave2, offset: 0x1a010, size: 4 }
+  g_dw_ssaaw:                    { cave: pcave2, offset: 0x1a014, size: 4 }
+  g_dw_gated:                    { cave: pcave2, offset: 0x1a018, size: 4 }
+  g_dw_fpgated:                  { cave: pcave2, offset: 0x1a01c, size: 4 }
+  g_dw_ovl:                      { cave: pcave2, offset: 0x1a020, size: 16 }
+  g_dw_fp:                       { cave: pcave2, offset: 0x1a030, size: 48 }
+  g_dw_pk_ret:                   { cave: pcave2, offset: 0x1a060, size: 4 }
+  g_dw_pk_armed:                 { cave: pcave2, offset: 0x1a064, size: 4 }
+  g_dw_ret1:                     { cave: pcave2, offset: 0x1a068, size: 4 }
+  g_dw_ret2:                     { cave: pcave2, offset: 0x1a06c, size: 4 }
+  g_dw_ret3:                     { cave: pcave2, offset: 0x1a070, size: 4 }
+  g_dw_ret4:                     { cave: pcave2, offset: 0x1a074, size: 4 }
+  g_dw_active:                   { cave: pcave2, offset: 0x1a078, size: 4 }
+  g_dw_exec_ret:                 { cave: pcave2, offset: 0x1a07c, size: 4 }
+  g_dw_bmrect:                   { cave: pcave2, offset: 0x1a080, size: 16 }
+  g_dw_rect2:                    { cave: pcave2, offset: 0x1a090, size: 16 }
+  g_dw_busy:                     { cave: pcave2, offset: 0x1a0a0, size: 4 }
+  g_dw_cv:                       { cave: pcave2, offset: 0x1a0a4, size: 4 }
+  g_dw_zoom:                     { cave: pcave2, offset: 0x1a0a8, size: 4 }
+  g_dw_ecx:                      { cave: pcave2, offset: 0x1a0ac, size: 4 }
+  g_dw_ss:                       { cave: pcave2, offset: 0x1a0b0, size: 80 }
+  g_dw_snap:                     { cave: pcave2, offset: 0x1a100, size: 256 }
+  g_dw_cands:                    { cave: pcave2, offset: 0x1aa00, size: 1024 }
+  g_dw_present:                  { cave: pcave2, offset: 0x1ae00, size: 256 }
+  g_dw_bd:                       { cave: pcave2, offset: 0x1b000, size: 6144 }
+  g_dw_cache:                    { cave: pcave2, offset: 0x1d000, size: 16384 }
+  g_dw_immtab:                   { cave: pcave2, offset: 0x1a200, size: 1828 }
+  thunk_dw_enter:                { cave: pcave2, offset: 0x177c0 }   # dw_scale (40B)
+  thunk_dw_immfix:               { cave: pcave2, offset: 0x177f0 }   # dw_scale (285B)
+  thunk_dw_leave:                { cave: pcave2, offset: 0x17910 }   # dw_scale (16B)
+  thunk_dw_pk_enter:             { cave: pcave2, offset: 0x17920 }   # dw_scale (63B)
+  thunk_dw_pk_leave:             { cave: pcave2, offset: 0x17960 }   # dw_scale (62B)
+  thunk_dw_cell:                 { cave: pcave2, offset: 0x179a0 }   # dw_scale (113B)
+  thunk_dw_click:                { cave: pcave2, offset: 0x17a20 }   # dw_scale (72B)
+  thunk_dw_frame:                { cave: pcave2, offset: 0x17a70 }   # dw_scale (31B)
+  thunk_dw_bm:                   { cave: pcave2, offset: 0x17a90 }   # dw_scale (68B)
+  thunk_dw_restripe:             { cave: pcave2, offset: 0x17ae0 }   # dw_scale (316B)
+  thunk_dw_pickcell:             { cave: pcave2, offset: 0x17c20 }   # dw_scale (150B)
+  thunk_dw_container:            { cave: pcave2, offset: 0x17cc0 }   # dw_scale (100B)
+  thunk_dw_tilecell:             { cave: pcave2, offset: 0x17d30 }   # dw_scale (98B)
+  thunk_dw_slotcell:             { cave: pcave2, offset: 0x17da0 }   # dw_scale (152B)
+  thunk_dw_btndraw:              { cave: pcave2, offset: 0x17e40 }   # dw_scale (46B)
+  thunk_dw_btnface:              { cave: pcave2, offset: 0x17e70 }   # dw_scale (1094B)
+  thunk_dw_ssaa:                 { cave: pcave2, offset: 0x182c0 }   # dw_scale (1223B)
+  thunk_dw_shim:                 { cave: pcave2, offset: 0x18790 }   # dw_scale (173B)
+  thunk_dw_ovl:                  { cave: pcave2, offset: 0x18840 }   # dw_scale (55B)
+  thunk_dw_ewin:                 { cave: pcave2, offset: 0x18880 }   # dw_scale (38B)
+  thunk_dw_eovl:                 { cave: pcave2, offset: 0x188b0 }   # dw_scale (19B)
+  thunk_dw_ehalfa:               { cave: pcave2, offset: 0x188d0 }   # dw_scale (33B)
+  thunk_dw_ehalfb:               { cave: pcave2, offset: 0x18900 }   # dw_scale (21B)
+  thunk_dw_fp:                   { cave: pcave2, offset: 0x18920 }   # dw_scale (125B)
+  thunk_dw_fp2:                  { cave: pcave2, offset: 0x189a0 }   # dw_scale (105B)
+  thunk_dw_fpset:                { cave: pcave2, offset: 0x18a10 }   # dw_scale (257B)
+  thunk_dw_clip:                 { cave: pcave2, offset: 0x18b20 }   # dw_scale (65B)
+  thunk_dw_resetguard:           { cave: pcave2, offset: 0x18b70 }   # dw_scale (87B)
+  thunk_dw_fit:                  { cave: pcave2, offset: 0x18bd0 }   # dw_scale (702B)
+  thunk_dw_axismap:              { cave: pcave2, offset: 0x18e90 }   # dw_scale (215B)
+  thunk_dw_backdrop:             { cave: pcave2, offset: 0x18f70 }   # dw_scale (1296B)
+  thunk_dw_build:                { cave: pcave2, offset: 0x19480 }   # dw_scale (16B)
+  thunk_dw_build2:               { cave: pcave2, offset: 0x19490 }   # dw_scale (22B)
+  thunk_dw_gridleave:            { cave: pcave2, offset: 0x194b0 }   # picker_grid_leave_present (28B)
+  thunk_lbres_ecx:               { cave: pcave2, offset: 0x194d0 }   # popup_listbox_reserve (42B)
+  thunk_lbres_eax:               { cave: pcave2, offset: 0x19500 }   # popup_listbox_reserve (41B)
+  thunk_lbres_ebp:               { cave: pcave2, offset: 0x19530 }   # popup_listbox_reserve (42B)
+  thunk_lbres_edx:               { cave: pcave2, offset: 0x19560 }   # popup_listbox_reserve (42B)
+  thunk_dw_sbv:                  { cave: pcave2, offset: 0x19590 }   # popup_listbox_reserve (41B)
+  thunk_dw_hide:                 { cave: pcave2, offset: 0x195c0 }   # popup_listbox_reserve (33B)
+  thunk_wheel_down:              { cave: pcave2, offset: 0x195f0 }   # wheel_scroll (236B)
+  thunk_wheel_up:                { cave: pcave2, offset: 0x196e0 }   # wheel_scroll (203B)

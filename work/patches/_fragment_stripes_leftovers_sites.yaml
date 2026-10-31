@@ -1,0 +1,10 @@
+  - id: MainWin_build.console_backdrop
+    status: confirmed
+    group: hud_backdrop_stripes
+    function: MainWin_build
+    virtual_addr: 0x00459f65
+    length: 5
+    original_bytes: "E8 A6 F6 17 00"   # call Buffer_copy_3 (console2_A.pcx 1024x257 -> the strip window buffer at window dims, GDI StretchBlt) -> the same stretch, then the art's vertical 1-row dither (panel-edge dotted separators) regenerated on the stripe law
+    new_bytes:      "E8 {rel32:t_hud_backdrop}"
+    pattern: call_target_redirect
+    rationale: "The console backdrop is a GDI StretchBlt (centre-aligned NN) of native 1-row dither art, and nothing restripes the columns the panel tiles do not cover; the drop-in runs the native blit unchanged, then rewrites every dest pixel mapped from a vertical A,B,A,B texel of the pcx to the pair's top on stripe-top rows of the strip buffer and its mate below (scaling_laws.stripe_top / pair_top). g<=16: tail-jump to the native callee."

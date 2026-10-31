@@ -1,0 +1,2 @@
+  Buffer_tile_2:                 { va: 0x005da9f0 }                           # __thiscall(destBuf, sprite, a3, a4, x, y, W, H); RET 0x1C; tiles a Sprite 1:1
+  t_sb_tile2:                    { cave: pcave2, offset: 0x27d00 }   # base_cell_stripes (235B) Buffer_tile_2 drop-in (RET 0x1C, device args): g<=16 native; else tile, then if (rect & clip) is a strict 1-row two-index parity dither rewrite it to the stripe law (even-row member on top)

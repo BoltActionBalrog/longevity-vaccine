@@ -1,0 +1,5 @@
+# No line-ending conversion, on any platform: every working file is byte-for-byte the blob that
+# SOURCE-MANIFEST.json hashes and that the release was built from.
+* -text
+# Except the batch launchers, which cmd.exe wants with CRLF: stored LF, checked out CRLF.
+*.bat text eol=crlf

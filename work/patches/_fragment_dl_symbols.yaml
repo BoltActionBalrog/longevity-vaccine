@@ -1,0 +1,54 @@
+  g_dl_exec:                     { cave: pcave2, offset: 0x27e00, size: 4 }
+  g_dl_exec_ret:                 { cave: pcave2, offset: 0x27e04, size: 4 }
+  g_dl_build_ret:                { cave: pcave2, offset: 0x27e08, size: 4 }
+  g_dl_wret:                     { cave: pcave2, offset: 0x27e0c, size: 4 }
+  g_dl_immg:                     { cave: pcave2, offset: 0x27e10, size: 4 }
+  g_dl_vpdone:                   { cave: pcave2, offset: 0x27e14, size: 4 }
+  g_dl_vpold:                    { cave: pcave2, offset: 0x27e18, size: 4 }
+  g_dl_fscr:                     { cave: pcave2, offset: 0x27e1c, size: 4 }
+  g_dl_rs:                       { cave: pcave2, offset: 0x27e20, size: 64 }
+  g_dl_ts:                       { cave: pcave2, offset: 0x27e60, size: 16 }
+  g_dl_sv:                       { cave: pcave2, offset: 0x27e70, size: 8 }
+  g_dl_snapbuf:                  { cave: pcave2, offset: 0x27e78, size: 4 }
+  g_dl_bx:                       { cave: pcave2, offset: 0x27e80, size: 64 }
+  g_dl_mono:                     { cave: pcave2, offset: 0x27ec0, size: 16 }
+  g_dl_rs_phi:                   { cave: pcave2, offset: 0x27ed0, size: 4 }
+  g_dl_immtab_main:              { cave: pcave2, offset: 0x28100, size: 3028 }
+  g_dl_immtab_tech:              { cave: pcave2, offset: 0x28cd4, size: 2724 }
+  g_ts_flowcache:                { cave: pcave2, offset: 0x2a000, size: 4096 }
+  t_dl_immfix:                   { cave: pcave2, offset: 0x22000 }   # dl_scale (372B)
+  t_dl_immfix_main:              { cave: pcave2, offset: 0x22180 }   # dl_scale (13B)
+  t_dl_immfix_tech:              { cave: pcave2, offset: 0x22190 }   # dl_scale (13B)
+  t_dl_build_enter:              { cave: pcave2, offset: 0x221a0 }   # dl_scale (50B)
+  t_dl_build_leave:              { cave: pcave2, offset: 0x221e0 }   # dl_scale (150B)
+  t_dl_exec_enter:               { cave: pcave2, offset: 0x22280 }   # dl_scale (63B)
+  t_dl_exec_leave:               { cave: pcave2, offset: 0x222c0 }   # dl_scale (47B)
+  t_dl_restripe:                 { cave: pcave2, offset: 0x222f0 }   # dl_scale (591B)
+  t_dl_cu:                       { cave: pcave2, offset: 0x22540 }   # dl_scale (76B)
+  t_dl_bm:                       { cave: pcave2, offset: 0x22590 }   # dl_scale (68B)
+  t_dl_bmdf:                     { cave: pcave2, offset: 0x225e0 }   # dl_scale (68B)
+  t_dl_bmt:                      { cave: pcave2, offset: 0x22630 }   # dl_scale (77B)
+  t_dl_bmxt:                     { cave: pcave2, offset: 0x22680 }   # dl_scale (599B)
+  t_dl_tile_bg:                  { cave: pcave2, offset: 0x228e0 }   # dl_scale (103B)
+  t_dl_tile_row:                 { cave: pcave2, offset: 0x22950 }   # dl_scale (103B)
+  t_dl_hover:                    { cave: pcave2, offset: 0x229c0 }   # dl_scale (40B)
+  t_dl_arrowzoom:                { cave: pcave2, offset: 0x229f0 }   # dl_scale (107B)
+  t_dl_mono:                     { cave: pcave2, offset: 0x22a60 }   # dl_scale (650B)
+  t_dl_btnrect:                  { cave: pcave2, offset: 0x22cf0 }   # dl_scale (99B)
+  t_dl_techwrap:                 { cave: pcave2, offset: 0x22d60 }   # dl_scale (186B)
+  t_dl_wininit:                  { cave: pcave2, offset: 0x22e20 }   # dl_scale (45B)
+  t_dl_wininit_leave:            { cave: pcave2, offset: 0x22e50 }   # dl_scale (12B)
+  t_cr_snap_dl:                  { cave: pcave2, offset: 0x22e60 }   # dl_scale (181B)
+  t_dl_rf1:                      { cave: pcave2, offset: 0x22f20 }   # dl_scale (34B)
+  t_dl_rf2:                      { cave: pcave2, offset: 0x22f50 }   # dl_scale (35B)
+  t_dl_rf3:                      { cave: pcave2, offset: 0x22f80 }   # dl_scale (34B)
+  t_dl_rf4:                      { cave: pcave2, offset: 0x22fb0 }   # dl_scale (49B)
+  t_dl_rf5:                      { cave: pcave2, offset: 0x22ff0 }   # dl_scale (47B)
+  t_dl_rf6:                      { cave: pcave2, offset: 0x23020 }   # dl_scale (48B)
+  t_dl_portrait:                 { cave: pcave2, offset: 0x23050 }   # dl_scale (62B)
+  t_dl_portw:                    { cave: pcave2, offset: 0x23090 }   # dl_scale (27B)
+  t_dl_wheel_down:               { cave: pcave2, offset: 0x13db0 }   # dl_scale (415B)
+  t_dl_wheel_up:                 { cave: pcave2, offset: 0x23210 }   # dl_scale (59B)
+  t_ts_cache:                    { cave: pcave2, offset: 0x23250 }   # dl_scale (276B)
+  t_ts_flowdraw:                 { cave: pcave2, offset: 0x23370 }   # dl_scale (195B)
+  t_dl_tile_ph:                  { cave: pcave2, offset: 0x23ac0 }   # dl_scale (127B)

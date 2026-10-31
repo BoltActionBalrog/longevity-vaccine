@@ -1,0 +1,33 @@
+# REPLACES the three existing filedlg_rows entries of the same ids (new_bytes only changes).
+  - id: FUN_00614c50.icon_folder
+    status: confirmed
+    group: filedlg_rows
+    function: FUN_00614c50
+    virtual_addr: 0x00614cc8
+    length: 5
+    original_bytes: "E8 7D FE FC FF"                       # call Sprite_draw_2 (param_2==2 icon, this=0x9b9078)
+    new_bytes:      "E8 {rel32:t_fdicon_checker}"
+    pattern: call_target_redirect
+    rationale: "The icon face is a 2-D checker dither (A3/47) that the g/16 nearest-neighbour enlarge turns into uneven blocks; the drop-in runs thunk_checkbox_scale unchanged, then rewrites the checker as TxT device cells (T = stripe_rows(g)) on the dest grid inside the drawn rect. g<=16: tail-jump to thunk_checkbox_scale."
+
+  - id: FUN_00614c50.icon_drive
+    status: confirmed
+    group: filedlg_rows
+    function: FUN_00614c50
+    virtual_addr: 0x00614d24
+    length: 5
+    original_bytes: "E8 21 FE FC FF"                       # call Sprite_draw_2 (param_2==1 icon, this=0x9b9018)
+    new_bytes:      "E8 {rel32:t_fdicon_checker}"
+    pattern: call_target_redirect
+    rationale: "The icon face is a 2-D checker dither (A3/47) that the g/16 nearest-neighbour enlarge turns into uneven blocks; the drop-in runs thunk_checkbox_scale unchanged, then rewrites the checker as TxT device cells (T = stripe_rows(g)) on the dest grid inside the drawn rect. g<=16: tail-jump to thunk_checkbox_scale."
+
+  - id: FUN_00614c50.icon_file
+    status: confirmed
+    group: filedlg_rows
+    function: FUN_00614c50
+    virtual_addr: 0x00614d7e
+    length: 5
+    original_bytes: "E8 C7 FD FC FF"                       # call Sprite_draw_2 (param_2==0 icon, this=0x9b9048)
+    new_bytes:      "E8 {rel32:t_fdicon_checker}"
+    pattern: call_target_redirect
+    rationale: "The icon face is a 2-D checker dither (A3/47) that the g/16 nearest-neighbour enlarge turns into uneven blocks; the drop-in runs thunk_checkbox_scale unchanged, then rewrites the checker as TxT device cells (T = stripe_rows(g)) on the dest grid inside the drawn rect. g<=16: tail-jump to thunk_checkbox_scale."

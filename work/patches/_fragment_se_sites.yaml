@@ -1,0 +1,259 @@
+  - id: SocialWin_build.caller_a
+    status: confirmed
+    group: se_scale
+    function: social_open(0x4BB3xx)
+    virtual_addr: 0x004bb3a9
+    length: 5
+    original_bytes: "E8 92 73 FF FF"   # call SocialWin_build (thiscall RET 4; caller 1 of 2) -> immfix, then the builder
+    new_bytes:      "E8 {rel32:thunk_se_enter}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_build.caller_b
+    status: confirmed
+    group: se_scale
+    function: social_select
+    virtual_addr: 0x005b565b
+    length: 5
+    original_bytes: "E8 E0 D0 EF FF"   # call SocialWin_build (thiscall RET 4; caller 2 of 2) -> immfix, then the builder
+    new_bytes:      "E8 {rel32:thunk_se_enter}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_build.model_reset
+    status: confirmed
+    group: se_scale
+    function: SocialWin_build
+    virtual_addr: 0x004b338c
+    length: 5
+    original_bytes: "E8 4F B9 FF FF"   # call SocialWin_model_reset (tables seeded natively, buttons not yet created) -> table transform x g/16 + sprites/locks/tiles, then model_reset
+    new_bytes:      "E8 {rel32:thunk_se_transform}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_band.digit_sd2
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af7d3
+    length: 5
+    original_bytes: "E8 72 53 13 00"   # call Sprite_draw_2 (1,1) -> num=g den=16
+    new_bytes:      "E8 {rel32:thunk_se_sd2}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_band.icon_sd2
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af84d
+    length: 5
+    original_bytes: "E8 F8 52 13 00"   # call Sprite_draw_2 (1,1) -> num=g den=16
+    new_bytes:      "E8 {rel32:thunk_se_sd2}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_faction_box.icon_sd2
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_faction_box
+    virtual_addr: 0x004afb1d
+    length: 5
+    original_bytes: "E8 28 50 13 00"   # call Sprite_draw_2 (1,1) -> num=g den=16
+    new_bytes:      "E8 {rel32:thunk_se_sd2}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_hover_panel.icon_sd2
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_hover_panel
+    virtual_addr: 0x004b16a1
+    length: 5
+    original_bytes: "E8 A4 34 13 00"   # call Sprite_draw_2 (1,1) -> num=g den=16
+    new_bytes:      "E8 {rel32:thunk_se_sd2}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_society_row.state_sd2
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_society_row
+    virtual_addr: 0x004b1878
+    length: 5
+    original_bytes: "E8 CD 32 13 00"   # call Sprite_draw_2 (1,1) -> num=g den=16
+    new_bytes:      "E8 {rel32:thunk_se_sd2}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_society_panel.d5a0
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_society_panel
+    virtual_addr: 0x004af226
+    length: 5
+    original_bytes: "E8 A8 3B 13 00"   # Buffer_box_sprite d5a0 -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_hf}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_society_panel.d618
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_society_panel
+    virtual_addr: 0x004af26f
+    length: 5
+    original_bytes: "E8 5F 3B 13 00"   # Buffer_box_sprite d618 -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_df}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_band.d5a0
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af35f
+    length: 5
+    original_bytes: "E8 6F 3A 13 00"   # Buffer_box_sprite d5a0 -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_hf}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_band.d618_title
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af3a8
+    length: 5
+    original_bytes: "E8 26 3A 13 00"   # Buffer_box_sprite d618_title -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_df}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_band.d618_lock_a
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af47e
+    length: 5
+    original_bytes: "E8 50 39 13 00"   # Buffer_box_sprite d618_lock_a -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_df}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_band.d618_lock_b
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af4a7
+    length: 5
+    original_bytes: "E8 27 39 13 00"   # Buffer_box_sprite d618_lock_b -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_df}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_band.d618_lock_c
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af4e9
+    length: 5
+    original_bytes: "E8 E5 38 13 00"   # Buffer_box_sprite d618_lock_c -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_df}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_faction_box.d5a0
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_faction_box
+    virtual_addr: 0x004af904
+    length: 5
+    original_bytes: "E8 CA 34 13 00"   # Buffer_box_sprite d5a0 -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_hf}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_faction_box.d618
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_faction_box
+    virtual_addr: 0x004af94a
+    length: 5
+    original_bytes: "E8 84 34 13 00"   # Buffer_box_sprite d618 -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_df}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_draw_faction_box.d618_b
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_faction_box
+    virtual_addr: 0x004afa13
+    length: 5
+    original_bytes: "E8 BB 33 13 00"   # Buffer_box_sprite d618_b -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_df}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_build.backdrop_d690
+    status: confirmed
+    group: se_scale
+    function: SocialWin_build
+    virtual_addr: 0x004b3315
+    length: 5
+    original_bytes: "E8 B9 FA 12 00"   # Buffer_box_sprite backdrop_d690 -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_df}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_repaint.union_frame
+    status: confirmed
+    group: se_scale
+    function: SocialWin_repaint
+    virtual_addr: 0x004b1a8f
+    length: 5
+    original_bytes: "E8 3F 13 13 00"   # Buffer_box_sprite union_frame -> thick chrome / device-density fill
+    new_bytes:      "E8 {rel32:t_bm_ho_hf}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_show_hide.railarm_show
+    status: confirmed
+    group: se_scale
+    function: SocialWin_show_hide
+    virtual_addr: 0x004b2192
+    length: 5
+    original_bytes: "E8 A9 B2 FA FF"   # call slide_show (0x45d440); args: push 0 / push esi(win) -> arm the rail-scale gate around the call
+    new_bytes:      "E8 {rel32:thunk_popup_railshow}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_show_hide.railarm_hide
+    status: confirmed
+    group: se_scale
+    function: SocialWin_show_hide
+    virtual_addr: 0x004b21b3
+    length: 5
+    original_bytes: "E8 B8 B7 FA FF"   # call slide_hide (0x45d970); args: push 0 / push esi(win) -> arm the rail-scale gate around the call
+    new_bytes:      "E8 {rel32:thunk_popup_railhide}"
+    pattern: call_target_redirect
+
+  - id: SocialWin_build.set_modal
+    status: confirmed
+    group: se_scale
+    function: SocialWin_build
+    virtual_addr: 0x004b3c4a
+    length: 6
+    original_bytes: "FF 90 E4 00 00 00"   # call [vtbl+0xE4] = Win_set_modal (blocks until the screen closes) -> t_se_labelfit: label fit + repaint, then Win_set_modal
+    new_bytes:      "E8 {rel32:t_se_labelfit} 90"   # fonts v3 2026-09-17 (thunk in font_face_law, assemble_fontlaw.py)
+    pattern: call_target_redirect
+
+  - id: SocialWin_vtbl.draw_society_row
+    status: confirmed
+    group: se_scale
+    function: SocialWin_vtbl
+    virtual_addr: 0x0066dab8
+    length: 4
+    original_bytes: "A0 17 4B 00"  # SocialWin_draw_society_row slot (+0x14; fires per FlatButton draw after the face compose)
+    new_bytes:      "{abs32:thunk_se_rowdraw_ph}"
+    pattern: vtable_repoint
+
+  - id: SocialWin_draw_band.digitw_advance
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af7d8
+    length: 6
+    original_bytes: "8B 87 70 2C 00 00"   # mov EAX,[edi+0x2C70] = the digit[4] blit-w ALIAS (native 7, stays native for the sd2 ratio)
+    new_bytes:      "B8 07 00 00 00 90"   # mov EAX,imm32 7 (+nop); the imm is rewritten to s(7) by g_se_immtab
+    pattern: inplace_rewrite
+
+  - id: SocialWin_draw_band.digitw_rowwidth
+    status: confirmed
+    group: se_scale
+    function: SocialWin_draw_band
+    virtual_addr: 0x004af633
+    length: 6
+    original_bytes: "8B 97 70 2C 00 00"   # mov EDX,[edi+0x2C70] = the digit[4] blit-w ALIAS (native 7, stays native for the sd2 ratio)
+    new_bytes:      "BA 07 00 00 00 90"   # mov EDX,imm32 7 (+nop); the imm is rewritten to s(7) by g_se_immtab
+    pattern: inplace_rewrite

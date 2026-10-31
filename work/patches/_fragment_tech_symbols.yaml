@@ -1,0 +1,16 @@
+  g_tech_vpdone:                 { cave: pcave2, offset: 0x16e00, size: 4 }
+  g_tech_vpold:                  { cave: pcave2, offset: 0x16e04, size: 4 }
+  g_tech_rbrect:                 { cave: pcave2, offset: 0x16e10, size: 16 }
+  g_tech_ficache:                { cave: pcave2, offset: 0x16e20, size: 128 }
+  g_tech_scratchfont:            { cave: pcave2, offset: 0x16ea0, size: 40 }
+  g_tech_ffcache:                { cave: pcave2, offset: 0x16f00, size: 384 }
+  g_tech_immtab:                 { cave: pcave2, offset: 0x17100, size: 580 }
+  thunk_tech_enter:              { cave: pcave2, offset: 0x17400 }   # tech_scale (14B)
+  thunk_tech_immfix:             { cave: pcave2, offset: 0x17410 }   # tech_scale (209B)
+  thunk_tech_inset:              { cave: pcave2, offset: 0x174f0 }   # tech_scale (52B)
+  thunk_tech_n8:                 { cave: pcave2, offset: 0x17530 }   # tech_scale (13B)
+  thunk_tech_n8ch:               { cave: pcave2, offset: 0x17540 }   # tech_scale (30B)
+  thunk_tech_rb1:                { cave: pcave2, offset: 0x17560 }   # tech_scale (68B)
+  thunk_tech_calib:              { cave: pcave2, offset: 0x175b0 }   # tech_scale (154B)
+  thunk_tech_fi:                 { cave: pcave2, offset: 0x17650 }   # tech_scale (151B)
+  thunk_tech_ff:                 { cave: pcave2, offset: 0x176f0 }   # tech_scale (186B)

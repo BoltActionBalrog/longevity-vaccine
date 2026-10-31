@@ -1,0 +1,160 @@
+# PRACX prax.dll fix — bottom-edge scroll console exemption
+#
+# Binary target  : MD5 89a0037b705278f6ead8526ea2dc734d
+#                  (prax.dll shipped with the GOG Planetary Pack, 305,152 bytes,
+#                   imagebase 0x10000000, .text raw 0x400 -> VA 0x1000)
+#
+# Apply with the standard patcher (no exe-side counterpart; independent of patches.yaml):
+#   py -3 work\scripts\apply_patches.py --target "<GAME_DIR>\prax.dll" --patches work\patches\patches_prax.yaml          (dry-run)
+#   py -3 work\scripts\apply_patches.py --target "<GAME_DIR>\prax.dll" --patches work\patches\patches_prax.yaml --apply
+# The patcher writes prax.dll.bak beside the target on first apply.
+#
+# ROOT CAUSE (diagnosed 2026-07-05, hook_hudframes34-39 + pracx source refs\pracx\shared\pracx.cpp):
+# PRACXCheckScroll (pracx.cpp:991, compiled @VA ~0x100051xx..0x10005620) runs from the game's
+# main loop (thunk call written at exe 0x522C25 at prax load) and, while the cursor sits inside
+# the edge-scroll zone, spins in a do{DoScroll/Sleep(0)}while() loop that never pumps Windows
+# messages (PRACX's own "TODO Fix #3" hang). Queued WM_LBUTTONDOWN/UP are only processed when
+# the cursor LEAVES the zone -> clicks on HUD buttons inside the zone appear "deferred until the
+# mouse moves off" (SMACX planet/minimap WORLD+DETAIL buttons at 4K). The bottom-edge zone
+# (iScrollArea = ScrollArea_ini(40) * w / 1024 = 150px at 4K) carves out only a HARDCODED
+# CENTERED 1024px-wide console band (pracx.cpp:1067-1070) — wrong at every width > 1024, where
+# the game's console spans the FULL width.
+#
+# FIX: neuter the two band disjuncts (jle/jge -> NOP) so the bottom-edge scroll trigger reduces
+# to PRACX's own over-console rule: only the bottom sliver h-p.y < (windowed?8:5)*h/756 (~14px
+# at 4K) scrolls. Resolution-independent by arithmetic: at width <= 1024 the band spanned the
+# whole screen so the disjuncts were already dead (exact no-op); at any wider res the exemption
+# now covers the full-width console. Planet buttons end 27px above the screen bottom at 4K
+# (sliver 14px) and the margin/sliver ratio is g-proportional, so clearance holds at every res.
+# Left/right/top edge zones are untouched (faithful PRACX behavior; no console carve-out existed
+# there at ANY width, including vanilla 1024x768).
+#
+# NOTE: prac.dll (SMAC-classic twin in the same dir, same size/code layout) is NOT covered; the
+# project targets terranx (SMACX). Port = same two sites re-anchored if ever needed.
+#
+# ROUND 2 (2026-07-06): LEFT/RIGHT edge-scroll zones (pracx.cpp:1047 / 1053) had NO console
+# carve-out at all (only the bottom edge did). On 4:3 / 5:4 screens the scaled HUD strip is
+# full-width, so MENU (top-left) and COMMLINK (top-right) reach the screen edges and land inside
+# the left/right scroll zones -> the same message-starving spin -> deferred/eaten MENU/COMMLINK
+# clicks. A bare 2-site NOP can't fix these (the zones are simple `if (p.x <= iScrollArea ...)`;
+# NOPing kills edge-scroll entirely) so we ADD a guard via a code cave (pracx_scroll_lr_cave in
+# the .text zero-fill slack @0x10033830): each zone's body-entry (`mov [ebp-0x1c],1` = fScrolled
+# =true) is detoured to a routine that suppresses the scroll when the cursor is over the console
+# strip's screen rect at that edge (strip_left=(3w-4h)/6, strip_top=h-257h/768, both from the
+# PRACXCheckScroll frame; strip_left<=iScrollArea exactly identifies "strip reaches this edge",
+# so 16:9/16:10 are never exempted = zero regression). Exempt -> fScrolled stays 0 -> the do{}while
+# loop exits its first iteration -> the pump is never starved -> the click lands. Src +
+# derivation: work\scripts\assemble_prax_scroll_lr.py.
+
+target:
+  file: prax.dll
+  md5: 89a0037b705278f6ead8526ea2dc734d
+  size: 305152
+  description: PRACX dll from the GOG Planetary Pack repack (loaded by terranx_PRACX.exe via the _SELFMOD stub @0x668160)
+  patched_md5: 0f189a32a713171282fa218b3582c455   # round 2 (bottom + L/R exemption); VERIFIED RELEASE LOCK 2026-07-06 (user "Perfect!" in-game, CHANGELOG'd, committed)
+
+code_caves:
+  - id: pracx_scroll_lr_cave
+    description: >
+      Left/right edge-scroll console-exemption routines, in the .text zero-fill slack
+      (VA valid content ends 0x10033821; raw backs the page through 0x10033a00 and the
+      section maps RX through the page-rounded end 0x10034000, so this region is
+      executable without a VirtualSize bump). Layout: strip_metrics @+0x00 (eax=strip_left
+      =(3w-4h)/6, edx=strip_top=h-257h/768), cave_left @+0x2F, cave_right @+0x53. Assembled
+      by work\scripts\assemble_prax_scroll_lr.py (all rel8/rel32 static).
+    virtual_addr: 0x10033830
+    length: 122
+    expected_padding: [0x00]
+    contents:
+      - id: scroll_lr_routines
+        offset: 0
+        bytes: >
+          8B 45 C0 8D 04 40 8B 4D D4 C1 E1 02 2B C1 99 B9 06 00 00 00 F7 F9 50
+          8B 45 D4 69 C0 01 01 00 00 99 B9 00 03 00 00 F7 F9 8B 55 D4 2B D0 58 C3
+          E8 CC FF FF FF 8B 4D F8 3B CA 7C 0C 8B 4D F4 3B C8 7C 05 E9 59 1B FD FF
+          C7 45 E4 01 00 00 00 E9 72 1A FD FF
+          E8 A8 FF FF FF 8B 4D F8 3B CA 7C 0F 8B 4D C0 2B 4D F4 3B C8 7C 05 E9 32 1B FD FF
+          C7 45 E4 01 00 00 00 E9 C4 1A FD FF
+
+sites:
+  - id: PRACXCheckScroll.left_console_exempt
+    description: >
+      pracx.cpp:1047 LEFT edge-scroll body-entry (the `mov [ebp-0x1c],1` that sets
+      fScrolled=true once p.x is in [0,iScrollArea]). Detoured to cave_left, which
+      suppresses the scroll when the cursor is over the console strip at the left edge
+      (MENU button), else re-runs the displaced mov and continues.
+    status: confirmed
+    group: pracx_scroll_lr_console_exemption
+    virtual_addr: 0x100052EE
+    length: 7
+    anchor_before: "00 7C 66"
+    anchor_before_length: 3
+    original_bytes: "C7 45 E4 01 00 00 00"
+    new_bytes: "E9 6C E5 02 00 90 90"
+
+  - id: PRACXCheckScroll.right_console_exempt
+    description: >
+      pracx.cpp:1053 RIGHT edge-scroll body-entry (`mov [ebp-0x1c],1` once (w-p.x) is in
+      [0,iScrollArea]). Detoured to cave_right (console strip at the right edge = COMMLINK
+      button), else re-runs the displaced mov and continues.
+    status: confirmed
+    group: pracx_scroll_lr_console_exemption
+    virtual_addr: 0x10005367
+    length: 7
+    anchor_before: "F4 7C 69"
+    anchor_before_length: 3
+    original_bytes: "C7 45 E4 01 00 00 00"
+    new_bytes: "E9 17 E5 02 00 90 90"
+
+  - id: PRACXCheckScroll.band_left
+    description: >
+      pracx.cpp:1068 `p.x <= (w-1024)/2` disjunct: jle-to-scroll after
+      `cmp [ebp-0xC], eax` (eax = (ScreenSize.x-1024)/2). NOP -> disjunct always false;
+      control falls through to the band-right check.
+    status: confirmed
+    virtual_addr: 0x10005474
+    length: 2
+    anchor_before: "39 45 F4"
+    anchor_before_length: 3
+    original_bytes: "7E 50"
+    new_bytes: "90 90"
+
+  - id: PRACXCheckScroll.band_right
+    description: >
+      pracx.cpp:1069 `p.x >= (w-1024)/2+1024` disjunct: jge-to-scroll after
+      `cmp [ebp-0xC], eax` (eax = band right edge). NOP -> disjunct always false;
+      control falls through to the bottom-sliver test (pracx.cpp:1070), which becomes
+      the ONLY bottom-edge scroll trigger.
+    status: confirmed
+    virtual_addr: 0x1000548D
+    length: 2
+    anchor_before: "39 45 F4"
+    anchor_before_length: 3
+    original_bytes: "7D 37"
+    new_bytes: "90 90"
+
+groups:
+  - id: pracx_scroll_console_exemption
+    description: >
+      Fix deferred/eaten HUD clicks near the screen bottom (SMACX planet WORLD/DETAIL buttons at
+      high resolution): PRACXCheckScroll's message-starving edge-scroll spin engaged over the
+      full-width console because its exemption assumed a centered 1024px console. Bottom-edge
+      scroll now triggers only in PRACX's designed bottom sliver (~5*h/756), across the whole
+      width. Diagnosed via ScrollArea=0 INI test (user-confirmed instant clicks 2026-07-05).
+    members:
+      - PRACXCheckScroll.band_left
+      - PRACXCheckScroll.band_right
+
+  - id: pracx_scroll_lr_console_exemption
+    description: >
+      Fix deferred/eaten MENU (top-left) / COMMLINK (top-right) HUD-button clicks on 4:3
+      and 5:4 resolutions, where the scaled full-width console strip reaches the screen
+      edges and the buttons land inside PRACXCheckScroll's LEFT/RIGHT edge-scroll zones
+      (which, unlike the bottom edge, had no console carve-out) -> the message-starving
+      spin. Adds a strip-rect guard to each zone via pracx_scroll_lr_cave. 16:9/16:10 are
+      never exempted (strip is centered, doesn't reach the edges) so those are unaffected.
+    code_caves:
+      - pracx_scroll_lr_cave
+    members:
+      - PRACXCheckScroll.left_console_exempt
+      - PRACXCheckScroll.right_console_exempt

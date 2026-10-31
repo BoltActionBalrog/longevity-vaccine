@@ -1,0 +1,32 @@
+  - id: BaseWin_draw_production.cell_done
+    status: confirmed
+    group: base_cell_stripes
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040ecca
+    length: 5
+    original_bytes: "E8 21 BD 1C 00"   # call Buffer_tile_2 (20x20 mineral-cell tile, 1:1 into the strip canvas at device rects; pitch >= 8 path) -> tile, then the cell's own pair restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_sb_tile2}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then rewrites the drawn rect (clipped to the dest clip) to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: BaseWin_draw_production.cell_rest
+    status: confirmed
+    group: base_cell_stripes
+    function: BaseWin_draw_production
+    virtual_addr: 0x0040ed33
+    length: 5
+    original_bytes: "E8 B8 BC 1C 00"   # call Buffer_tile_2 (20x20 mineral-cell tile, 1:1 into the strip canvas at device rects; pitch >= 8 path) -> tile, then the cell's own pair restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_sb_tile2}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then rewrites the drawn rect (clipped to the dest clip) to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."
+
+  - id: BaseWin_draw_queue.row_tile
+    status: confirmed
+    group: base_cell_stripes
+    function: BaseWin_draw_queue
+    virtual_addr: 0x00415404
+    length: 5
+    original_bytes: "E8 57 54 1C 00"   # call Buffer_tile (selected row [0x78D9D0] E0/E1 / hover row [0x78D980] AE/EE, srcOff == dest, strip canvas) -> tile, then fe's unconditional families restriped to the stripe law
+    new_bytes:      "E8 {rel32:t_tile_force}"
+    pattern: call_target_redirect
+    rationale: "Above native scale the surface is tiled 1:1 from a native 1-row dither and nothing restripes it; the drop-in runs the native call unchanged, then rewrites the drawn rect (clipped to the dest clip) to the stripe law on the dest canvas's own row grid. g<=16: tail-jump to the native callee."

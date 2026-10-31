@@ -1,0 +1,10 @@
+; Export table for uimod.dll.
+; Init is pinned to ordinal 1 (mirrors PRACX's ordinal-1 init export) AND exported by name,
+; so the bootstrap loader can resolve it either way. The .def also strips the __stdcall name
+; decoration (_Init@4) to a clean "Init".
+; PreInit (ordinal 2) is the bootstrap's first phase: called with prax.dll loaded but before its own
+; init has run (thunk_uimod_preload). An exe baked before 2026-10-11 never calls it.
+LIBRARY uimod
+EXPORTS
+    Init @1
+    PreInit @2

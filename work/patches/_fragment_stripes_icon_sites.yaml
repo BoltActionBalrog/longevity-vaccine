@@ -1,0 +1,52 @@
+  # REPLACEMENT new_bytes for the 5 EXISTING council_scale chip sites (same ids; today E8 {rel32:thunk_cw_chip}).
+  # Not new sites: apply by changing each entry's new_bytes target (and assemble_council.py SITES).
+
+  - id: CouncilWin_draw_column.chip_da00
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x004261aa
+    length: 5
+    original_bytes: "E8 24 CC 1B 00"   # call Buffer_box_sprite (vote chip da00)
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: the half-open wrapper around t_si_chip (assemble_council_mirror.py)
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_d9d8
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x004261d6
+    length: 5
+    original_bytes: "E8 F8 CB 1B 00"   # call Buffer_box_sprite (vote chip d9d8)
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: the half-open wrapper around t_si_chip (assemble_council_mirror.py)
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_da28_a
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00426203
+    length: 5
+    original_bytes: "E8 CB CB 1B 00"   # call Buffer_box_sprite (vote chip da28)
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: the half-open wrapper around t_si_chip (assemble_council_mirror.py)
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_da28_b
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x00426230
+    length: 5
+    original_bytes: "E8 9E CB 1B 00"   # call Buffer_box_sprite (vote chip da28)
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: the half-open wrapper around t_si_chip (assemble_council_mirror.py)
+    pattern: call_target_redirect
+
+  - id: CouncilWin_draw_column.chip_da28_c
+    status: confirmed
+    group: council_scale
+    function: CouncilWin_draw_column
+    virtual_addr: 0x0042625c
+    length: 5
+    original_bytes: "E8 72 CB 1B 00"   # call Buffer_box_sprite (vote chip da28)
+    new_bytes:      "E8 {rel32:t_cw_chiphalf}"   # 2026-10-25 W5B: the half-open wrapper around t_si_chip (assemble_council_mirror.py)
+    pattern: call_target_redirect

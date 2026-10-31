@@ -1,0 +1,799 @@
+  - id: DesignWin_exec.enter
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_exec
+    virtual_addr: 0x0043e9a0
+    length: 5
+    original_bytes: "55 8B EC 6A FF"   # prologue replay + ret swap -> thunk_dw_leave (g_dw_active bracket): immfix at every exec (6 callers) (E9 -> thunk_dw_enter)
+    new_bytes:      "E9 1B 4E 5E 00"
+    pattern: detour_inplace
+
+  - id: PartPicker_exec.enter
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_exec
+    virtual_addr: 0x00433f70
+    length: 5
+    original_bytes: "55 8B EC 6A FF"   # prologue replay + ret swap -> thunk_dw_pk_leave (E9 -> thunk_dw_pk_enter)
+    new_bytes:      "E9 AB F9 5E 00"
+    pattern: detour_inplace
+
+  - id: PartPicker_draw_cell.rect_law
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_draw_cell
+    virtual_addr: 0x00433d84
+    length: 6
+    original_bytes: "8B 8E 6C 2B 00 00"   # cell rect = absolute native coords x g/16; g<=16 resumes the vanilla arithmetic (E9 -> thunk_dw_cell)
+    new_bytes:      "E9 17 FC 5E 00 90"
+    pattern: detour_inplace
+
+  - id: PartPicker_repaint.frame_r_inset
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_repaint
+    virtual_addr: 0x00434266
+    length: 5
+    original_bytes: "83 C7 C9 51 52"   # R inset s(55) (imm8 overflow at g=40) (E9 -> thunk_dw_frame)
+    new_bytes:      "E9 05 F8 5E 00"
+    pattern: detour_inplace
+
+  - id: PartPicker_vtbl.on_click
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_vtbl
+    virtual_addr: 0x0066b2fc
+    length: 4
+    original_bytes: "20 38 43 00"   # x,y descaled 16/g then the native hit test
+    new_bytes:      "{abs32:thunk_dw_click}"
+    pattern: vtable_repoint
+
+  - id: PartPicker_repaint.container_frame
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_repaint
+    virtual_addr: 0x00434285
+    length: 5
+    original_bytes: "E8 49 EB 1A 00"   # rect copy R-1/B-1 -> thunk_box_thick_hollow_flat (law bandmap_rect_from_halfopen) + interior restripe 197/65 (the gutters)
+    new_bytes:      "E8 {rel32:thunk_dw_container}"
+    pattern: call_target_redirect
+
+  - id: PartPicker_draw_cell.cell_frame
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_draw_cell
+    virtual_addr: 0x00433e2c
+    length: 5
+    original_bytes: "E8 A2 EF 1A 00"   # + interior restripe 196/65
+    new_bytes:      "E8 {rel32:thunk_dw_pickcell}"
+    pattern: call_target_redirect
+
+  - id: PartPicker_draw_cell.empty_tile
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_draw_cell
+    virtual_addr: 0x00433de9
+    length: 5
+    original_bytes: "E8 02 6C 1A 00"   # + restripe 197/65 (tile 0x6B33F8)
+    new_bytes:      "E8 {rel32:thunk_dw_tilecell}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_draw_slot_strip.cell
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_draw_slot_strip
+    virtual_addr: 0x0043d755
+    length: 5
+    original_bytes: "E8 79 56 1A 00"   # hover/selected fill restripe (194/65, 191/83)
+    new_bytes:      "E8 {rel32:thunk_dw_slotcell}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_master.union_frame
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_master
+    virtual_addr: 0x00437b89
+    length: 5
+    original_bytes: "E8 45 B2 1A 00"   # D4: canvas-dest frame through the thick chain
+    new_bytes:      "E8 {rel32:t_bm_ho_hf}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_on_mode.railshow
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_on_mode
+    virtual_addr: 0x0043d1be
+    length: 5
+    original_bytes: "E8 7D 02 02 00"   # popup-family rail recipe (SE v2 / diplo)
+    new_bytes:      "E8 {rel32:thunk_popup_railshow}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_on_mode.railhide
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_on_mode
+    virtual_addr: 0x0043d1fa
+    length: 5
+    original_bytes: "E8 71 07 02 00"   # popup-family rail recipe (SE v2 / diplo)
+    new_bytes:      "E8 {rel32:thunk_popup_railhide}"
+    pattern: call_target_redirect
+
+  - id: FlatButton_itemdraw_stub
+    status: confirmed
+    group: dw_scale
+    function: GraphicWin_vtbl_default
+    virtual_addr: 0x00404220
+    length: 5
+    original_bytes: "33 C0 C2 0C 00"   # the vtbl+0x14 default `xor eax,eax; ret 0xC`: DesignWin buttons -> thunk_se_rowdraw (E9 -> thunk_dw_btndraw)
+    new_bytes:      "E9 1B FC 61 00"
+    pattern: detour_inplace
+
+  - id: Caviar_draw.composite
+    status: confirmed
+    group: dw_scale
+    function: Caviar_draw
+    virtual_addr: 0x006175f4
+    length: 5
+    original_bytes: "E8 C7 0E FC FF"   # dirty-rect composite (caviar_dirty_rect, src scripts/assemble_cavdirty.py); DW/picker dst hand off to thunk_dw_shim (SSAA or keyed stretch of the TN^2 target)
+    new_bytes:      "E8 {rel32:t_cav_blit}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_painters.caviar_draw_434d4d
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_painters
+    virtual_addr: 0x00434d4d
+    length: 5
+    original_bytes: "E8 DE 24 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_painters.caviar_draw_43516d
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_painters
+    virtual_addr: 0x0043516d
+    length: 5
+    original_bytes: "E8 BE 20 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_painters.caviar_draw_4355da
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_painters
+    virtual_addr: 0x004355da
+    length: 5
+    original_bytes: "E8 51 1C 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_painters.caviar_draw_435a3d
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_painters
+    virtual_addr: 0x00435a3d
+    length: 5
+    original_bytes: "E8 EE 17 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_painters.caviar_draw_4362fd
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_painters
+    virtual_addr: 0x004362fd
+    length: 5
+    original_bytes: "E8 2E 0F 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: PartPicker_draw_cell.caviar_draw_432adf
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_draw_cell
+    virtual_addr: 0x00432adf
+    length: 5
+    original_bytes: "E8 4C 47 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: PartPicker_draw_cell.caviar_draw_432f55
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_draw_cell
+    virtual_addr: 0x00432f55
+    length: 5
+    original_bytes: "E8 D6 42 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: PartPicker_draw_cell.caviar_draw_43332a
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_draw_cell
+    virtual_addr: 0x0043332a
+    length: 5
+    original_bytes: "E8 01 3F 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: PartPicker_draw_cell.caviar_draw_43365c
+    status: confirmed
+    group: dw_scale
+    function: PartPicker_draw_cell
+    virtual_addr: 0x0043365c
+    length: 5
+    original_bytes: "E8 CF 3B 1E 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: Caviar_overlay.caviar_draw_6171cf
+    status: confirmed
+    group: dw_scale
+    function: Caviar_overlay
+    virtual_addr: 0x006171cf
+    length: 5
+    original_bytes: "E8 5C 00 00 00"   # trial render + fit plan (law dw_fit_plan)
+    new_bytes:      "E8 {rel32:thunk_dw_fit}"
+    pattern: call_target_redirect
+
+  - id: Caviar_draw.rasterize
+    status: confirmed
+    group: dw_scale
+    function: Caviar_draw
+    virtual_addr: 0x006174ce
+    length: 5
+    original_bytes: "E8 8D 29 02 00"   # gated: ctx clip = whole target
+    new_bytes:      "E8 {rel32:thunk_dw_clip}"
+    pattern: call_target_redirect
+
+  - id: Caviar_draw.reset_tail
+    status: confirmed
+    group: dw_scale
+    function: Caviar_draw
+    virtual_addr: 0x0061760f
+    length: 5
+    original_bytes: "E8 5C 0E 00 00"   # dirty rect clamped to [0,TN] before the unclipped memset
+    new_bytes:      "E8 {rel32:thunk_dw_resetguard}"
+    pattern: call_target_redirect
+
+  - id: Caviar_rasterize_part.runtab_63ea1f
+    status: confirmed
+    group: dw_scale
+    function: Caviar_rasterize_part
+    virtual_addr: 0x0063ea1f
+    length: 5
+    original_bytes: "E8 CC 1A 00 00"   # per-part footprint cells
+    new_bytes:      "E8 {rel32:thunk_dw_fpset}"
+    pattern: call_target_redirect
+
+  - id: Caviar_rasterize_part.runtab_63f0bc
+    status: confirmed
+    group: dw_scale
+    function: Caviar_rasterize_part
+    virtual_addr: 0x0063f0bc
+    length: 5
+    original_bytes: "E8 2F 14 00 00"   # per-part footprint cells
+    new_bytes:      "E8 {rel32:thunk_dw_fpset}"
+    pattern: call_target_redirect
+
+  - id: Caviar_plot8.big_block
+    status: confirmed
+    group: dw_scale
+    function: Caviar_plot8
+    virtual_addr: 0x006649b4
+    length: 6
+    original_bytes: "8A 3C 04 83 C7 03"   # fixed 2x2 -> n x n block (resume 0x664A29) (E9 -> thunk_dw_fp)
+    new_bytes:      "E9 67 FF 3B 00 90"
+    pattern: detour_inplace
+
+  - id: Caviar_plot8.big_block_plain
+    status: confirmed
+    group: dw_scale
+    function: Caviar_plot8
+    virtual_addr: 0x00664c64
+    length: 6
+    original_bytes: "03 CB 66 3B 14 4D"   # the non-flag&4 path (resume 0x664CC6) (E9 -> thunk_dw_fp2)
+    new_bytes:      "E9 37 FD 3B 00 90"
+    pattern: detour_inplace
+
+  - id: Caviar.E_ewin
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x0061730d
+    length: 27
+    original_bytes: "8D 79 80 89 54 24 4C 8D 70 80 8D 4C 24 40 8D 97 00 01 00 00 51 8D 86 00 01 00 00"   # option E: disp8 site of the 1024^2 target (E9 -> thunk_dw_ewin)
+    new_bytes:      "E9 6E D5 40 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: Caviar.E_eovl
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x006171e7
+    length: 8
+    original_bytes: "83 C1 80 6A 01 83 C2 80"   # option E: disp8 site of the 1024^2 target (E9 -> thunk_dw_eovl)
+    new_bytes:      "E9 C4 D6 40 00 90 90 90"
+    pattern: detour_inplace
+
+  - id: Caviar.E_ehalfa
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x0061757b
+    length: 25
+    original_bytes: "83 C0 C0 8B 51 54 8B 8C 24 8C 00 00 00 52 6A 02 6A 01 83 C1 C0 50 51 EB 10"   # option E: disp8 site of the 1024^2 target (E9 -> thunk_dw_ehalfa)
+    new_bytes:      "E9 50 D3 40 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: Caviar.E_ehalfb
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x006175da
+    length: 12
+    original_bytes: "83 C1 C0 6A 01 83 C2 C0 51 52 EB 06"   # option E: disp8 site of the 1024^2 target (E9 -> thunk_dw_ehalfb)
+    new_bytes:      "E9 21 D3 40 00 90 90 90 90 90 90 90"
+    pattern: detour_inplace
+
+  - id: Caviar.E_imm_6188b2
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x006188b2
+    length: 4
+    original_bytes: "00 01 00 00"   # option E: init Buffer_init dims/descriptor/ctx w,h/row stride (esi)
+    new_bytes:      "00 04 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_618a92
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00618a92
+    length: 4
+    original_bytes: "00 00 02 00"   # option E: init z-plane malloc
+    new_bytes:      "00 00 20 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_618baa
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00618baa
+    length: 4
+    original_bytes: "00 00 01 00"   # option E: init z-plane memset16 count
+    new_bytes:      "00 00 10 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_618c68
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00618c68
+    length: 4
+    original_bytes: "FF 00 00 00"   # option E: init ctx clip R/B
+    new_bytes:      "FF 03 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_618cb5
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00618cb5
+    length: 4
+    original_bytes: "00 04 00 00"   # option E: init row-table loop bound
+    new_bytes:      "00 10 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_61728e
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x0061728e
+    length: 4
+    original_bytes: "FF 00 00 00"   # option E: Caviar_draw obj clip R/B
+    new_bytes:      "FF 03 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_6172a9
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x006172a9
+    length: 4
+    original_bytes: "00 01 00 00"   # option E: Caviar_draw obj clip W/H
+    new_bytes:      "00 04 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_61735f
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x0061735f
+    length: 4
+    original_bytes: "80 00 00 00"   # option E: Caviar_draw window centre x
+    new_bytes:      "00 02 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_617366
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00617366
+    length: 4
+    original_bytes: "80 00 00 00"   # option E: Caviar_draw window centre y
+    new_bytes:      "00 02 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_616ed5
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00616ed5
+    length: 4
+    original_bytes: "FF 00 00 00"   # option E: ctor clip R/B
+    new_bytes:      "FF 03 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_616eec
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00616eec
+    length: 4
+    original_bytes: "00 01 00 00"   # option E: ctor clip W/H
+    new_bytes:      "00 04 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_6170c6
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x006170c6
+    length: 4
+    original_bytes: "FF 00 00 00"   # option E: attach clip R/B
+    new_bytes:      "FF 03 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_6170dc
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x006170dc
+    length: 4
+    original_bytes: "00 01 00 00"   # option E: attach clip W/H
+    new_bytes:      "00 04 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_6183fd
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x006183fd
+    length: 4
+    original_bytes: "FF 00 00 00"   # option E: set_target clip R/B
+    new_bytes:      "FF 03 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_618411
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00618411
+    length: 4
+    original_bytes: "00 01 00 00"   # option E: set_target clip W/H
+    new_bytes:      "00 04 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_618499
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x00618499
+    length: 1
+    original_bytes: "08"   # option E: reset z row shift
+    new_bytes:      "0A"
+    pattern: inplace_rewrite
+
+  - id: Caviar.E_imm_6184df
+    status: confirmed
+    group: dw_scale
+    function: Caviar
+    virtual_addr: 0x006184df
+    length: 4
+    original_bytes: "00 02 00 00"   # option E: reset z row stride
+    new_bytes:      "00 08 00 00"
+    pattern: inplace_rewrite
+
+  - id: Caviar_overlay.table_blit
+    status: confirmed
+    group: dw_scale
+    function: Caviar_overlay
+    virtual_addr: 0x006171f8
+    length: 5
+    original_bytes: "E8 B3 22 FC FF"   # one-shot rescale armed by thunk_dw_fit
+    new_bytes:      "E8 {rel32:thunk_dw_ovl}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_exec.build
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_exec
+    virtual_addr: 0x0043e9df
+    length: 5
+    original_bytes: "E8 8C D8 FF FF"   # + backdrop at device density
+    new_bytes:      "E8 {rel32:thunk_dw_build}"
+    pattern: call_target_redirect
+
+  - id: DesignWin_build.window_w_movimm
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_build
+    virtual_addr: 0x0043c6ca
+    length: 6
+    original_bytes: "8B 8E EC 3C 01 00"   # mov ecx,[esi+0x13CEC] (pcx w) -> mov ecx,imm32 623 (+nop); the imm is rewritten to ceil(623g/16) by g_dw_immtab
+    new_bytes:      "B9 6F 02 00 00 90"
+    pattern: inplace_rewrite
+
+  - id: DesignWin_draw_slot_strip.selected_split
+    status: confirmed
+    group: dw_scale
+    function: DesignWin_draw_slot_strip
+    virtual_addr: 0x0043d726
+    length: 9
+    original_bytes: "BF 02 00 00 00 8B C7 EB 12"   # D7': `mov edi,2; mov eax,edi` is dual-purpose (state 2 + inset 2) -> push imm8/pop edi (inset, table-scaled) + push 2/pop eax (state)
+    new_bytes:      "6A 02 5F 6A 02 58 EB 13 90"
+    pattern: inplace_rewrite
+
+  - id: WinProc.wm_keydown_target
+    status: confirmed
+    group: wheel_scroll
+    function: WinProc
+    virtual_addr: 0x005f07b0
+    length: 5
+    original_bytes: "E8 9B 62 00 00"   # synthetic VK_UP/DOWN (PRACX wheel) -> chevron press on the modal's bar
+    new_bytes:      "E8 {rel32:t_dw_wheel_down}"
+    pattern: call_target_redirect
+
+  - id: WinProc.wm_keyup_target
+    status: confirmed
+    group: wheel_scroll
+    function: WinProc
+    virtual_addr: 0x005f07f0
+    length: 5
+    original_bytes: "E8 5B 62 00 00"   # the matching KEYUP swallowed
+    new_bytes:      "E8 {rel32:t_dw_wheel_up}"
+    pattern: call_target_redirect
+
+  - id: g_scrollbar_w.LBR1
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x0060a632
+    length: 6
+    original_bytes: "8B 0D D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_ecx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.LBR2
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x0060a609
+    length: 6
+    original_bytes: "8B 0D D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_ecx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.LBR3
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x0060a650
+    length: 5
+    original_bytes: "A1 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_eax}"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.GW1
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005d503e
+    length: 6
+    original_bytes: "8B 0D D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_ecx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.GW2
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005d51eb
+    length: 6
+    original_bytes: "8B 0D D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_ecx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.GW3
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005d6246
+    length: 6
+    original_bytes: "8B 0D D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_ecx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.WC1
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005ec342
+    length: 6
+    original_bytes: "8B 2D D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_ebp} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.WC2
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005ec3f5
+    length: 6
+    original_bytes: "8B 0D D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_ecx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CV1
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005eee95
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CV2
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005eeeaa
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CV3
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005eef85
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CV4
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005eef9a
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CV5
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005ef066
+    length: 5
+    original_bytes: "A1 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_eax}"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CV6
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005ef07c
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CV7
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005ef126
+    length: 5
+    original_bytes: "A1 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_eax}"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CV8
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x005ef13c
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.SBI
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x006058e9
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.SBIV
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x00605938
+    length: 5
+    original_bytes: "A1 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_eax}"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CD1
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x0060a50f
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: g_scrollbar_w.CD2
+    status: confirmed
+    group: popup_listbox_reserve
+    function: listbox_bar_reserve
+    virtual_addr: 0x0060a532
+    length: 6
+    original_bytes: "8B 15 D4 8D 9B 00"   # law listbox_bar_reserve: load live, x g/16 under the popup gate
+    new_bytes:      "E8 {rel32:thunk_lbres_edx} 90"
+    pattern: call_helper
+
+  - id: Win_create_vbar.stash
+    status: confirmed
+    group: popup_listbox_reserve
+    function: Win_create_scrollbars
+    virtual_addr: 0x005ec42c
+    length: 6
+    original_bytes: "8B 8E 3C 04 00 00"   # register the heap V bar in g_rail_sb after ScrollBar_init_v
+    new_bytes:      "E8 {rel32:thunk_dw_sbv} 90"
+    pattern: call_helper
+
+  - id: Popup_hide.railsb_clear
+    status: confirmed
+    group: popup_listbox_reserve
+    function: Popup_hide
+    virtual_addr: 0x00404a84
+    length: 5
+    original_bytes: "E8 07 34 1F 00"   # clear g_rail_sb when it is this popup's heap bar
+    new_bytes:      "E8 {rel32:thunk_dw_hide}"
+    pattern: call_target_redirect
+
+  - id: PartPicker_on_click.grid_leave
+    status: confirmed
+    group: picker_grid_leave_present
+    function: PartPicker_on_click
+    virtual_addr: 0x00433914
+    length: 5
+    original_bytes: "E8 47 04 00 00"   # vanilla bug: the un-hover draw never presented
+    new_bytes:      "E8 {rel32:thunk_dw_gridleave}"
+    pattern: call_target_redirect

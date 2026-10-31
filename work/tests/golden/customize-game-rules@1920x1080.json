@@ -1,0 +1,47 @@
+{
+  "modal": "customize-game-rules",
+  "title": "Customize Game Rules",
+  "resolution": {
+    "w": 1920,
+    "h": 1080
+  },
+  "scale_num": 22,
+  "branch": "else",
+  "screen_rect": [
+    0,
+    0,
+    936,
+    653
+  ],
+  "box": {
+    "w": 936,
+    "h": 646
+  },
+  "window": {
+    "w": 936,
+    "h": -653
+  },
+  "content": {
+    "w": 0,
+    "h": 0
+  },
+  "pad": {
+    "x": 0,
+    "y": 5
+  },
+  "header_reserve": 52,
+  "footer_reserve": 24,
+  "margins": {
+    "l": 13,
+    "r": 16
+  },
+  "band": 20,
+  "intrinsic_w": 2,
+  "dialog": {
+    "type": null,
+    "row_w": null,
+    "row_h": null,
+    "font": null,
+    "row_count": null
+  }
+}

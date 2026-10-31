@@ -1,0 +1,125 @@
+  g_rw_ret:                      { cave: pcave2, offset: 0x27480, size: 4 }
+  g_rw_labs_ret:                 { cave: pcave2, offset: 0x27484, size: 4 }
+  g_rw_inlist:                   { cave: pcave2, offset: 0x27488, size: 4 }
+  g_rw_sb:                       { cave: pcave2, offset: 0x2748c, size: 4 }
+  g_rw_sbparent:                 { cave: pcave2, offset: 0x27490, size: 4 }
+  g_rw_font:                     { cave: pcave2, offset: 0x27494, size: 4 }
+  g_rw_vpdone:                   { cave: pcave2, offset: 0x27498, size: 4 }
+  g_rw_vpold:                    { cave: pcave2, offset: 0x2749c, size: 4 }
+  g_rw_barn:                     { cave: pcave2, offset: 0x274a0, size: 4 }
+  g_rw_barlist:                  { cave: pcave2, offset: 0x274a4, size: 160 }
+  g_rw_rect:                     { cave: pcave2, offset: 0x27544, size: 16 }
+  g_rw_hov_exec:                 { cave: pcave2, offset: 0x27554, size: 4 }
+  g_rw_hov_netwin:               { cave: pcave2, offset: 0x27558, size: 4 }
+  g_rw_hov_immg:                 { cave: pcave2, offset: 0x2755c, size: 4 }
+  g_rw_slot:                     { cave: pcave2, offset: 0x27560, size: 4 }
+  g_rw_sbs:                      { cave: pcave2, offset: 0x27564, size: 8 }
+  g_rw_sbparents:                { cave: pcave2, offset: 0x2756c, size: 8 }
+  g_rw_railcol:                  { cave: pcave2, offset: 0x27574, size: 4 }
+  g_rw_colsaved:                 { cave: pcave2, offset: 0x27578, size: 4 }
+  g_rw_colx0:                    { cave: pcave2, offset: 0x2757c, size: 4 }
+  g_rw_colw:                     { cave: pcave2, offset: 0x27580, size: 4 }
+  g_rw_colh:                     { cave: pcave2, offset: 0x27584, size: 4 }
+  g_rw_tech_rect:                { cave: pcave2, offset: 0x27588, size: 16 }
+  g_rw_fontscratch:              { cave: pcave2, offset: 0x27598, size: 128 }
+  g_rw_strip_rect:               { cave: pcave2, offset: 0x27618, size: 16 }
+  g_blink_tile:                  { cave: pcave2, offset: 0x27628, size: 8 }
+  g_rw_wheel_ate:                { cave: pcave2, offset: 0x27630, size: 4 }
+  g_rwk_intel_pbot:              { cave: pcave2, offset: 0x27634, size: 4 }
+  g_rw_immtab:                   { cave: pcave2, offset: 0x24f90, size: 6804 }
+  g_rw_immtab_tech:              { cave: pcave2, offset: 0x26a30, size: 2628 }
+  g_wheel_stc:                   { cave: pcave2, offset: 0x1293c, size: 4 }
+  t_rw_init_enter:               { cave: pcave2, offset: 0x23440 }   # rw_scale_shared (21B)
+  t_rw_init_leave:               { cave: pcave2, offset: 0x23460 }   # rw_scale_shared (1625B)
+  t_rw_restripe:                 { cave: pcave2, offset: 0x23c20 }   # rw_scale_shared (373B)
+  t_rw_rowframe:                 { cave: pcave2, offset: 0x23da0 }   # rw_scale_shared (96B)
+  t_rw_btnl:                     { cave: pcave2, offset: 0x23e00 }   # rw_scale_shared (36B)
+  t_rw_gap1:                     { cave: pcave2, offset: 0x23e30 }   # rw_scale_shared (18B)
+  t_rw_gap2:                     { cave: pcave2, offset: 0x23e60 }   # rw_scale_shared (18B)
+  t_rw_scrollsmall:              { cave: pcave2, offset: 0x23ea0 }   # rw_scale_shared (96B)
+  t_rw_scrollnormal:             { cave: pcave2, offset: 0x23f00 }   # rw_scale_shared (15B)
+  t_rw_sbinit:                   { cave: pcave2, offset: 0x23f10 }   # rw_scale_shared (71B)
+  t_rw_lbclose:                  { cave: pcave2, offset: 0x23f60 }   # rw_scale_shared (48B)
+  t_rw_wheel_down:               { cave: pcave2, offset: 0x23f90 }   # rw_scale_shared (284B)
+  t_rw_wheel_up:                 { cave: pcave2, offset: 0x24110 }   # rw_scale_shared (113B)
+  t_rw_wheel_have:               { cave: pcave2, offset: 0x240b4 }   # rw_scale_shared (88B)
+  t_rw_wheel_energy:             { cave: pcave2, offset: 0x12870 }   # rw_scale_shared (151B)
+  t_rw_wheel_hfail:              { cave: pcave2, offset: 0x12908 }   # rw_scale_shared (35B)
+  t_wheel_stc:                   { cave: pcave2, offset: 0x1292c }   # rw_scale_shared (16B)
+  t_rw_iconblit:                 { cave: pcave2, offset: 0x24190 }   # rw_scale_shared (152B)
+  thunk_btn_gate_pre:            { cave: pcave2, offset: 0x24230 }   # rw_scale_shared (290B)
+  t_rw_hdr1:                     { cave: pcave2, offset: 0x24360 }   # rw_scale_tech (80B)
+  t_rw_hdr2:                     { cave: pcave2, offset: 0x243b0 }   # rw_scale_tech (33B)
+  t_rw_hdr3:                     { cave: pcave2, offset: 0x243e0 }   # rw_scale_tech (36B)
+  t_rw_title:                    { cave: pcave2, offset: 0x24410 }   # rw_scale_tech (33B)
+  t_rw_crest:                    { cave: pcave2, offset: 0x24440 }   # rw_scale_tech (33B)
+  t_rw_bar:                      { cave: pcave2, offset: 0x24470 }   # rw_scale_tech (76B)
+  t_rw_labs_enter:               { cave: pcave2, offset: 0x244c0 }   # rw_scale_tech (35B)
+  t_rw_labs_leave:               { cave: pcave2, offset: 0x244f0 }   # rw_scale_tech (62B)
+  t_rw_techpage:                 { cave: pcave2, offset: 0x24530 }   # rw_scale_tech (511B)
+  t_rw_backdrop:                 { cave: pcave2, offset: 0x24730 }   # rw_scale_shared (96B)
+  t_rw_tabsplit1:                { cave: pcave2, offset: 0x24790 }   # rw_scale_shared (35B)
+  t_rw_tabsplit2:                { cave: pcave2, offset: 0x247c0 }   # rw_scale_shared (39B)
+  t_rw_labs_rw:                  { cave: pcave2, offset: 0x247f0 }   # rw_scale_tech (26B)
+  t_rw_tabpair:                  { cave: pcave2, offset: 0x24970 }   # rw_scale_shared (123B)
+  t_rw_insetv:                   { cave: pcave2, offset: 0x28070 }   # rw_scale_shared (80B)
+  t_rw_immsum:                   { cave: pcave2, offset: 0x13f50 }   # rw_scale_shared (103B)
+  t_rw_labs_w:                   { cave: pcave2, offset: 0x249f0 }   # rw_scale_tech (20B)
+  t_rw_labs_h:                   { cave: pcave2, offset: 0x280c0 }   # rw_scale_tech (26B)
+  t_rw_labs_rh:                  { cave: pcave2, offset: 0x280e0 }   # rw_scale_tech (22B)
+  t_rw_btnr:                     { cave: pcave2, offset: 0x24830 }   # rw_scale_shared (23B)
+  t_rw_techhover:                { cave: pcave2, offset: 0x24850 }   # rw_scale_tech (157B)
+  t_lb_hover_grid:               { cave: pcave2, offset: 0x248f0 }   # listbox_hover_clamp (52B)
+  t_lb_hover_slot:               { cave: pcave2, offset: 0x24930 }   # listbox_hover_clamp (58B)
+  t_rwk_proj_rowdiv:             { cave: pcave2, offset: 0x23ba0 }   # rw_scale_kinds (54B)
+  t_rwk_proj_rowy:               { cave: pcave2, offset: 0x1a930 }   # rw_scale_kinds (62B)
+  t_rwk_units_rowdiv:            { cave: pcave2, offset: 0x1a9a0 }   # rw_scale_kinds (54B)
+  t_rwk_units_rowstep:           { cave: pcave2, offset: 0x23b40 }   # rw_scale_kinds (68B)
+  t_rwk_bases_namex:             { cave: pcave2, offset: 0x24a10 }   # rw_scale_kinds (33B)
+  t_rwk_intel_textx:             { cave: pcave2, offset: 0x24a40 }   # rw_scale_kinds (33B)
+  t_rwk_gov_split1:              { cave: pcave2, offset: 0x24a70 }   # rw_scale_kinds (35B)
+  t_rwk_gov_split2:              { cave: pcave2, offset: 0x24aa0 }   # rw_scale_kinds (38B)
+  t_rwk_sat_w:                   { cave: pcave2, offset: 0x24ad0 }   # rw_scale_kinds (21B)
+  t_rwk_modes_w:                 { cave: pcave2, offset: 0x24af0 }   # rw_scale_kinds (22B)
+  t_rwk_ops_w:                   { cave: pcave2, offset: 0x231e0 }   # rw_scale_kinds (26B)
+  t_rwk_ops_lx:                  { cave: pcave2, offset: 0x1a9e0 }   # rw_scale_kinds (18B)
+  t_rwk_ops_lw:                  { cave: pcave2, offset: 0x1a970 }   # rw_scale_kinds (26B)
+  t_rwk_govlist:                 { cave: pcave2, offset: 0x23be0 }   # rw_scale_kinds (46B)
+  t_rwk_sat_split1:              { cave: pcave2, offset: 0x24b10 }   # rw_scale_kinds (64B)
+  t_rwk_sat_split2:              { cave: pcave2, offset: 0x24b50 }   # rw_scale_kinds (66B)
+  t_rwk_sat_cx:                  { cave: pcave2, offset: 0x24ba0 }   # rw_scale_kinds (37B)
+  t_rwk_sat_cy:                  { cave: pcave2, offset: 0x24bd0 }   # rw_scale_kinds (40B)
+  t_rwk_gblit:                   { cave: pcave2, offset: 0x24c00 }   # rw_scale_kinds (84B)
+  t_rwk_gdraw:                   { cave: pcave2, offset: 0x24c60 }   # rw_scale_kinds (130B)
+  t_rwk_gtable:                  { cave: pcave2, offset: 0x24cf0 }   # rw_scale_kinds (88B)
+  t_rwk_scrollshow:              { cave: pcave2, offset: 0x24d50 }   # rw_scale_kinds (160B)
+  t_rwk_scrollhide:              { cave: pcave2, offset: 0x24df0 }   # rw_scale_kinds (93B)
+  t_rwk_bases_cell:              { cave: pcave2, offset: 0x24e50 }   # rw_scale_kinds (31B)
+  t_rwk_bases_cellx:             { cave: pcave2, offset: 0x24e70 }   # rw_scale_kinds (40B)
+  t_rwk_bases_celly:             { cave: pcave2, offset: 0x24ea0 }   # rw_scale_kinds (56B)
+  t_rwk_bases_facey:             { cave: pcave2, offset: 0x24ee0 }   # rw_scale_kinds (66B)
+  t_rwk_boxhalf:                 { cave: pcave2, offset: 0x24f30 }   # rw_scale_kinds (52B)
+  t_rwk_parity_nn:               { cave: pcave2, offset: 0x213c0 }   # rw_scale_kinds (1265B)
+  t_rwk_boxforce:                { cave: pcave2, offset: 0x4730 }   # rw_scale_kinds (118B)
+  t_rwk_stripframe:              { cave: pcave2, offset: 0x1cf50 }   # rw_scale_kinds (151B)
+  t_rwk_stripxfer:               { cave: pcave2, offset: 0x1afb0 }   # rw_scale_kinds (52B)
+  t_rwk_stripanchor:             { cave: pcave2, offset: 0x34f0 }   # rw_scale_kinds (67B)
+  thunk_sprite_bilinear:         { cave: pcave2, offset: 0x21000 }   # rw_scale_kinds (936B)
+  t_rwk_face_blit:               { cave: pcave2, offset: 0x6b40 }   # rw_scale_kinds (77B)
+  thunk_face_hybrid:             { cave: pcave2, offset: 0x21a00 }   # rw_scale_kinds (1146B)
+  t_rwk_blink:                   { cave: pcave2, offset: 0x6e30 }   # rw_scale_kinds (418B)
+  t_rwk_blinktile:               { cave: pcave2, offset: 0x24f70 }   # rw_scale_kinds (23B)
+  t_rwk_intel_portrait:          { cave: pcave2, offset: 0x230b0 }   # rw_scale_kinds (119B)
+  t_rwk_intel_title:             { cave: pcave2, offset: 0x23130 }   # rw_scale_kinds (33B)
+  t_rwk_intel_lbr_l:             { cave: pcave2, offset: 0x23160 }   # rw_scale_kinds (29B)
+  t_rwk_intel_lbr_r:             { cave: pcave2, offset: 0x23180 }   # rw_scale_kinds (29B)
+  t_rwk_intel_blocky:            { cave: pcave2, offset: 0x231a0 }   # rw_scale_kinds (26B)
+  t_slide_rail_a:                { cave: pcave2, offset: 0x1180 }   # rw_scale_kinds (87B)
+  t_slide_rail_a2:               { cave: pcave2, offset: 0x3f80 }   # rw_scale_kinds (80B)
+  t_slide_rail_s1:               { cave: pcave2, offset: 0x2020 }   # rw_scale_kinds (50B)
+  t_slide_rail_s2:               { cave: pcave2, offset: 0x5b50 }   # rw_scale_kinds (55B)
+  t_rw_sbarrows:                 { cave: pcave2, offset: 0xc980 }   # rw_scale_kinds (128B)
+  t_rwk_con_title_add:           { cave: pcave2, offset: 0x30300 }   # rw_scale_kinds (29B)
+  t_rwk_con_title_mov:           { cave: pcave2, offset: 0x30320 }   # rw_scale_kinds (29B)
+  t_rwk_con_lbr:                 { cave: pcave2, offset: 0x30340 }   # rw_scale_kinds (25B)
+  t_lb_textpad:                  { cave: pcave2, offset: 0x28030 }   # rw_scale_kinds (56B)

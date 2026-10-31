@@ -1,0 +1,1 @@
+  t_si_chip:                     { cave: pcave2, offset: 0x29ca0 }   # council_scale (386B) Buffer_box_sprite drop-in at the 5 vote-chip sites (RET 8): P<=2 or g<=16 -> thunk_cw_chip untouched; else thunk_cw_chip, then the chip fill at the stripe law (pair remap, frame again, mask -> stripe)
