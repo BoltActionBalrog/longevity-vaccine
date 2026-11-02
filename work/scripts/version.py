@@ -27,7 +27,7 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 #: The oldest installed version that may update itself automatically; anything older is told to
 #: reinstall by hand (manifest `min_upgradable_from`, decide() step "too_old"). release.py used to

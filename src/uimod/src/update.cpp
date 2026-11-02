@@ -169,19 +169,14 @@ void Log(const char* fmt, ...)
     UimodLog(msg);
 }
 
-// The game directory (the exe's), no trailing backslash (a drive root keeps its one).
+// The game directory (the exe's), no trailing backslash (a drive root keeps its one, with or
+// without a \\?\ prefix: lvupd::GameDirFromExePath).
 bool GameDirW(wchar_t* out, size_t cap)
 {
     wchar_t exe[MAX_PATH];
     const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
     if (n == 0 || n >= MAX_PATH) return false;
-    wchar_t* slash = wcsrchr(exe, L'\\');
-    if (!slash) return false;
-    if (slash == exe + 2 && exe[1] == L':') slash[1] = 0;      // "D:\"
-    else *slash = 0;
-    if (wcslen(exe) + 1 > cap) return false;
-    wcscpy_s(out, cap, exe);
-    return true;
+    return lvupd::GameDirFromExePath(exe, out, cap);
 }
 
 bool Join(wchar_t* out, size_t cap, const wchar_t* dir, const wchar_t* rel)
@@ -306,7 +301,15 @@ void WorkerBody(Job* j, Result* r)
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION li; memset(&li, 0, sizeof li);
         li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &li, sizeof li) ||
-            !AssignProcessToJobObject(job, pi.hProcess)) { CloseHandle(job); job = nullptr; }
+            !AssignProcessToJobObject(job, pi.hProcess)) {
+            // Windows 7 has no nested jobs: a game started by GOG Galaxy / a launcher already sits in one and the
+            // assign fails with ERROR_ACCESS_DENIED. The check still runs; only "the child dies with the game" is
+            // lost (it ends on the installer's own network timeouts) -- said once, so a lingering python.exe in a
+            // bug report has its explanation.
+            Log("kill-on-close job not available (error %lu; a launcher's job on Windows 7?) -> the check runs without it",
+                GetLastError());
+            CloseHandle(job); job = nullptr;
+        }
     }
 
     size_t n = 0;

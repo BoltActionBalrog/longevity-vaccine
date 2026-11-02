@@ -210,7 +210,7 @@ def _thinker_needs_renaming(target: Path, spec) -> bool:
     other = target.parent / ov.exe
     if not other.is_file():
         return True
-    known = {ov.base_md5, ov.patched_md5, spec.patched_md5} - {None}
+    known = {ov.base_md5} | ov.builds | spec.builds
     try:
         if _md5_safe(other, changed=False) in known:
             return False
@@ -220,6 +220,554 @@ def _thinker_needs_renaming(target: Path, spec) -> bool:
     except Exception:  # noqa: BLE001 - a note must never fail the install
         return True
     return True
+
+
+# ---- setting a folder up for Thinker ----------------------------------------------------------
+# Thinker's launcher starts a file named terranx.exe and nothing else, and on a stock GOG
+# Planetary Pack that name is the ORIGINAL game (no PRACX) while the PRACX build is
+# terranx_PRACX.exe. A player who drops Thinker in such a folder runs Thinker on the original game
+# and the mod never loads. The installer sets the folder up itself: the original terranx.exe is
+# kept under a clear name (never deleted), a copy of the clean PRACX build takes its place, and
+# the normal pass then patches it as the PRACX + Thinker configuration. A record file says what
+# was done, so --uninstall puts the original back and a later run neither asks again nor backs
+# the original up a second time. Every later step first reads the folder as it IS (GOG's "verify
+# files" may have put the original back, Thinker may be gone, the player may have renamed
+# things): it acts on the record only while the set-up is still in effect.
+#
+# terranx_PRACX.exe is LEFT CLEAN in a folder set up this way (put back to clean when an earlier
+# plain install had patched it). Thinker players start thinker.exe; what else starts the game --
+# GOG's "SMAX PRACX" entry and shortcut start terranx_PRACX.exe, its main Play button the original
+# SMAC terran.exe -- is said in the closing note. An update refreshes only the receipt's exe, so a
+# second patched copy would go stale beside a newer uimod.dll; a clean one is always safe to start.
+
+#: The record of a set-up folder, beside the receipt. JSON: exe, backup (null when there was no
+#: original), original_md5, source.
+THINKER_SETUP_NAME = "longevity-thinker-setup.json"
+#: What the original terranx.exe is kept as (a hash suffix is added if the name is taken by
+#: something else).
+THINKER_ORIGINAL_STEM = "_original"
+_SETUP_TMP = ".longevity-tmp"
+
+
+def _thinker_overlay():
+    """The launcher overlay target (PRACX + Thinker): exe, launcher, requires_files. None if the
+    table has none."""
+    return next((t for t in _targets().values()
+                 if t.launch and t.requires_files and t.exe and getattr(t, "launcher", None)), None)
+
+
+def _read_setup(game_dir: Path) -> dict:
+    import json
+    try:
+        doc = json.loads((Path(game_dir) / THINKER_SETUP_NAME).read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+
+
+def _write_setup(game_dir: Path, doc: dict) -> None:
+    import json
+    p = Path(game_dir) / THINKER_SETUP_NAME
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def _pracx_source(game_dir: Path, ov) -> Path:
+    """A clean PRACX build in the folder under another name than the overlay's exe (the live file,
+    or the .bak of one we patched), else None."""
+    for n in _exe_names():
+        if n.lower() == ov.exe.lower():
+            continue
+        for probe in (game_dir / n, game_dir / (n + ".bak")):
+            try:
+                if probe.is_file() and _md5(probe) == ov.base_md5:
+                    return probe
+            except OSError:
+                continue
+    return None
+
+
+def _stock_original_hashes() -> set:
+    """The hashes of the ORIGINAL game's exe under the overlay's name: the table's non-launch
+    entries for that file name (the un-PRACX'd GOG terranx.exe)."""
+    ov = _thinker_overlay()
+    return {t.base_md5 for t in _targets().values()
+            if not t.launch and t.exe and ov is not None and t.exe.lower() == ov.exe.lower()
+            and t.base_md5}
+
+
+def _our_builds(ov) -> set:
+    """Every build this project made from the PRACX base (not the base itself): this release's
+    and every earlier release's (known_patched), for every configuration of that base."""
+    return ap.builds_on_base(_targets(), ov.base_md5)
+
+
+def _pracx_family(ov) -> set:
+    """Every hash that means "already a PRACX build": the clean base and each build we make from it."""
+    return _our_builds(ov) | {ov.base_md5}
+
+
+def _md5_or_none(p: Path):
+    try:
+        return _md5(p) if p.is_file() else None
+    except OSError:
+        return None
+
+
+def _thinker_here(game_dir: Path, ov) -> bool:
+    return all((Path(game_dir) / f).is_file() for f in ov.requires_files)
+
+
+def _ours_in_setup(game_dir: Path, ov) -> bool:
+    """In a folder the installer set up, is the exe Thinker starts a PRACX build of OURS -- the
+    clean copy, or any release's build the table records (patched_md5 + known_patched)? A build
+    the table does NOT record (a dev build, or a release whose hash was never added) is still
+    recognised the way the uninstall trusts a backup: the record is there, the exe is not the
+    recorded original, and its .bak is the clean PRACX base the set-up put there."""
+    game_dir = Path(game_dir)
+    rec = _read_setup(game_dir)
+    if not rec:
+        return False
+    live = game_dir / (rec.get("exe") or ov.exe)
+    md5 = _md5_or_none(live)
+    if md5 is None or (rec.get("original_md5") and md5 == rec["original_md5"]) \
+            or md5 in _stock_original_hashes():
+        return False                      # the original (recorded, or GOG's stock one) is back
+    if md5 in _pracx_family(ov):
+        return True
+    return _md5_or_none(live.with_suffix(live.suffix + ".bak")) == ov.base_md5
+
+
+def _setup_in_effect(game_dir: Path) -> bool:
+    """The installer set this folder up for Thinker, Thinker is still here, and the exe Thinker
+    starts is still a PRACX build of ours (not the original put back by GOG or by hand)."""
+    ov = _thinker_overlay()
+    return (ov is not None and thinker_setup_folder(game_dir) and _thinker_here(game_dir, ov)
+            and _ours_in_setup(game_dir, ov))
+
+
+#: Set once the Thinker section has explained the folder, so patch_target does not add a
+#: contradicting "rename it" note under it.
+_THINKER_EXPLAINED = False
+
+
+def _backup_name(game_dir: Path, ov, md5: str) -> Path:
+    stem, suf = os.path.splitext(ov.exe)
+    plain = game_dir / f"{stem}{THINKER_ORIGINAL_STEM}{suf}"
+    try:
+        if not plain.exists() or _md5(plain) == md5:
+            return plain
+    except OSError:
+        pass
+    return game_dir / f"{stem}{THINKER_ORIGINAL_STEM}-{md5[:8]}{suf}"
+
+
+def _ask_yes(question: str, default_yes: bool) -> bool:
+    try:
+        ans = input(question + (" [Y/n] " if default_yes else " [y/N] ")).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return ans in (("", "y", "yes") if default_yes else ("y", "yes"))
+
+
+def _plain_name(src: Path) -> str:
+    return src.name[:-4] if src.name.lower().endswith(".bak") else src.name
+
+
+def plan_thinker_setup(game_dir: Path, args):
+    """Decide -- asking at a console -- what the install does about Thinker. Writes nothing (the
+    install applies the plan just before it patches, after every question). The plan, or None:
+
+    * {"action": "setup", ...}: thinker.dll beside a PRACX build that Thinker's launcher would never
+      start. Default yes; default NO for an original it does not recognise; unattended it sets up
+      a folder whose terranx.exe is missing or the stock original and leaves an unrecognised one
+      alone. Never over a terranx.exe.bak another tool made.
+    * {"action": "release"}: a folder the installer set up whose set-up is no longer in effect and
+      will not be redone -- Thinker removed, or the original back and the player said no: the
+      original goes back and the record goes, so the plain install that follows never swaps it out.
+    """
+    global _THINKER_EXPLAINED
+    game_dir = Path(game_dir)
+    ov = _thinker_overlay()
+    if ov is None:
+        return None
+    record = _read_setup(game_dir)
+    ask = ix.can_ask() and not ix.is_worker() and not getattr(args, "no_prompt", False)
+    _THINKER_EXPLAINED = _thinker_here(game_dir, ov)
+    release = {"action": "release", "game_dir": game_dir}
+    if not _thinker_here(game_dir, ov):
+        if not record:
+            return None
+        ix.say("\n--- Thinker ---")
+        ix.say("  Thinker is no longer in this folder, which the installer had set up for it: the installer undoes that set-up (see below), and the mod is installed for PRACX without Thinker.")
+        return release
+    live = game_dir / ov.exe
+    src = _pracx_source(game_dir, ov)
+    if src is None:
+        return None                       # no PRACX build here to set up from
+    md5 = _md5_or_none(live)
+    if md5 in _pracx_family(ov) or _ours_in_setup(game_dir, ov):
+        _THINKER_EXPLAINED = False
+        return None                       # already PRACX: clean, or one of ours (any release)
+    bak = live.with_suffix(live.suffix + ".bak")
+    bak_md5 = _md5_or_none(bak)
+    if bak_md5 is not None and bak_md5 != ov.base_md5:
+        ix.say("\n--- Thinker ---")
+        ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and this folder also has a {bak.name} that this installer did not make, so it does not set the folder up for Thinker. Move {bak.name} out of the folder and run the installer again to set it up.")
+        return release if record else None
+    restored_by_gog = bool(record) and md5 is not None and (
+        md5 == record.get("original_md5") or md5 in _stock_original_hashes())
+    if record and md5 is not None and not restored_by_gog:
+        # The folder was set up, and its terranx.exe is now neither ours nor the recorded original
+        # (with no clean-base .bak beside it, or _ours_in_setup would have said so). Setting up
+        # over it would replace the record's pointer to the real original: never.
+        kept = record.get("backup")
+        ix.say("\n--- Thinker ---")
+        ix.say(f"  {ov.exe} has been replaced since the installer set this folder up for Thinker, so it is left as it is" + (f" (the original is still {kept})" if kept and (game_dir / kept).is_file() else "") + ": the mod is installed for PRACX without Thinker, so Thinker will not load it.")
+        return None
+    backup = None
+    if md5 is not None:
+        known = md5 in _stock_original_hashes() or restored_by_gog
+        if not known and bak_md5 == ov.base_md5:
+            _THINKER_EXPLAINED = False
+            return None                   # ours under another build: patch_target re-patches it
+        backup = _backup_name(game_dir, ov, md5)
+    elif record.get("backup") and (game_dir / record["backup"]).is_file():
+        # A set-up that stopped between its two steps: the original is already kept.
+        known = True
+    else:
+        known = True
+
+    ix.say("\n--- Thinker ---")
+    if md5 is None:
+        ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and there is none in this folder.")
+        ix.say(f"  The installer can put a copy of {_plain_name(src)} there as {ov.exe}.")
+    elif known:
+        why = ("the original game is back in its place (GOG may have restored it)" if restored_by_gog
+               else f"the {ov.exe} here is the original game without PRACX, so the mod would never load")
+        ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and {why}.")
+        if _keeps_record(game_dir, record, md5):
+            ix.say(f"  The installer can keep this {ov.exe} (GOG's copy) as {backup.name} and put a copy of {_plain_name(src)} in its place; --uninstall puts your earlier {ov.exe} ({record['backup']}) back.")
+        else:
+            ix.say(f"  The installer can keep the original as {backup.name} and put a copy of {_plain_name(src)} in its place as {ov.exe}; --uninstall puts the original back.")
+    else:
+        ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and the {ov.exe} here is a version the installer does not recognise (MD5 {md5}).")
+        ix.say(f"  The installer can keep it as {backup.name} and put a copy of {_plain_name(src)} in its place as {ov.exe}; --uninstall puts it back.")
+    if ask:
+        if not _ask_yes("  Set this folder up to play with Thinker?", default_yes=known):
+            ix.say("  Left as it is: the mod is installed for PRACX without Thinker. Run the installer again to set up Thinker later.")
+            return release if record else None
+    elif not known:
+        ix.say(f"  Left as it is, because that {ov.exe} is not one the installer recognises. Run the installer by double-clicking INSTALL.bat to choose.")
+        return release if record else None
+    else:
+        ix.say("  Setting it up (this run asks nothing).")
+    return {"action": "setup", "game_dir": game_dir, "ov": ov, "live": live, "src": src,
+            "backup": backup, "md5": md5, "record": record,
+            "keep_record": _keeps_record(game_dir, record, md5)}
+
+
+def _keeps_record(game_dir: Path, record: dict, md5) -> bool:
+    """GOG's stock exe written over a set-up whose recorded original is the player's own and still
+    kept: the record keeps pointing at that TRUE original, and the stock copy is only set aside
+    (named in the record, so the uninstall can say where it is). With the kept original gone, the
+    stock exe simply becomes the original."""
+    if not record or md5 is None or not record.get("original_md5") or md5 == record["original_md5"]:
+        return False
+    kept = record.get("backup")
+    return bool(kept) and _md5_or_none(Path(game_dir) / kept) == record["original_md5"]
+
+
+def apply_thinker_setup(plan) -> bool:
+    """Carry out plan_thinker_setup's plan: True when the folder was set up. Fails with nothing
+    changed when it cannot finish (disk space, a locked file)."""
+    if not plan:
+        return False
+    game_dir = plan["game_dir"]
+    if plan["action"] == "release":
+        revert_thinker_setup(game_dir, remedy="close Alpha Centauri and Thinker if they are running, then run the installer again.")
+        return False
+    ov, live, src = plan["ov"], plan["live"], plan["src"]
+    backup, md5, record = plan["backup"], plan["md5"], plan["record"]
+    # The copy, then the patch pass: its .bak and its temporary build.
+    need = 3 * src.stat().st_size + (1 << 20)
+    try:
+        free = shutil.disk_usage(game_dir).free
+    except OSError:
+        free = None
+    if free is not None and free < need:
+        raise ix.InstallerError(
+            "There is not enough free disk space to set the folder up for Thinker.",
+            detail=f"  {need >> 20} MB is needed on the game's drive; {free >> 20} MB is free.",
+            code=ix.EXIT_ABORTED, changed=False,
+            remedy="free some space on that drive and run the installer again.")
+
+    tmp = game_dir / (ov.exe + _SETUP_TMP)
+    # An identical copy of the original is already kept (GOG put it back after an earlier
+    # set-up): the live file is a duplicate, so it is simply replaced -- never renamed over the
+    # kept one, which a failure could then not undo.
+    kept_already = backup is not None and _md5_or_none(backup) == md5
+    moved = False
+    try:
+        shutil.copy2(src, tmp)
+        if _md5(tmp) != ov.base_md5:
+            raise OSError(f"the copy of {src.name} does not match the original")
+        if backup is not None:
+            if plan.get("keep_record"):
+                aside = [n for n in record.get("set_aside") or [] if n != backup.name]
+                _write_setup(game_dir, {**record, "set_aside": aside + [backup.name]})
+            else:
+                _write_setup(game_dir, {"exe": ov.exe, "backup": backup.name, "original_md5": md5,
+                                        "source": _plain_name(src)})
+            if not kept_already:
+                os.replace(live, backup)
+                moved = True
+        elif not record.get("backup"):
+            _write_setup(game_dir, {"exe": ov.exe, "backup": None, "original_md5": None,
+                                    "source": _plain_name(src)})
+        os.replace(tmp, live)
+    except OSError as e:
+        # Undo in reverse: nothing half-done is left behind.
+        try:
+            if moved and not live.exists():
+                os.replace(backup, live)
+                moved = False
+        except OSError:
+            pass
+        for p in (tmp,) + ((game_dir / THINKER_SETUP_NAME,) if not moved and not record else ()):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        if record and not moved:
+            try:
+                _write_setup(game_dir, record)          # the record as it was before this run
+            except OSError:
+                pass
+        raise ix.InstallerError(
+            "The folder could not be set up for Thinker.",
+            detail=f"  {type(e).__name__}: {e}",
+            code=ix.EXIT_ABORTED, changed=None if moved else False,
+            remedy="close Alpha Centauri and Thinker if they are running, then run the installer again.")
+    if backup is not None and not kept_already:
+        ix.say(f"  kept the original {ov.exe} as {backup.name}")
+    ix.say(f"  {ov.exe} is now a copy of {_plain_name(src)}: the folder is set up for Thinker")
+    # An earlier plain install's patched terranx_PRACX.exe: back to clean, so no second patched
+    # copy is left to go stale (see the section comment). Ours by its hash; nothing else touched.
+    if src.name.lower().endswith(".bak"):
+        other = src.with_name(_plain_name(src))
+        if _md5_or_none(other) in _our_builds(ov):
+            try:
+                shutil.copy2(src, other)
+                ix.say(f"  {other.name} is back to the clean PRACX build (Thinker players start thinker.exe)")
+            except OSError as e:
+                ix.warn(f"  {other.name} could not be put back to the clean PRACX build ({e}); it keeps an older build of the mod.")
+    return True
+
+
+def thinker_setup_folder(game_dir: Path) -> bool:
+    """Was this folder set up for Thinker by the installer (its record is there)?"""
+    return (Path(game_dir) / THINKER_SETUP_NAME).is_file()
+
+
+def revert_thinker_setup(game_dir: Path, held: list = None, remedy: str = None,
+                         title: str = None) -> int:
+    """Put a folder the installer set up for Thinker back the way it was (--uninstall, and a
+    set-up that will not be redone): our build of terranx.exe back to the clean PRACX copy, then
+    undo_thinker_setup. Returns the number of files put back; `held` collects the exe it had to
+    leave as it is (the uninstall's generic restore must not touch it either).
+
+    The clean copy comes from terranx.exe.bak when that is the clean base; for a build the table
+    records (any release's, by its hash), also from the folder's other clean PRACX copy when the
+    .bak is gone. A build known only by its place (one the table does not record) needs the .bak:
+    without it nothing proves the file is ours, and undo leaves it."""
+    game_dir = Path(game_dir)
+    rec = _read_setup(game_dir)
+    ov = _thinker_overlay()
+    if not rec or ov is None:
+        return 0
+    exe = rec.get("exe") or ov.exe
+    live, bak = game_dir / exe, game_dir / (exe + ".bak")
+    live_md5 = _md5_or_none(live)
+    n = 0
+    kept = False
+    clean = None
+    if live_md5 not in (None, ov.base_md5) and _ours_in_setup(game_dir, ov):
+        if _md5_or_none(bak) == ov.base_md5:
+            clean = bak
+        elif live_md5 in _our_builds(ov):
+            clean = _pracx_source(game_dir, ov)
+    if clean is not None:
+        try:
+            if live_md5 not in _our_builds(ov):
+                # A build the table does not record, recognised by its place, not its hash: keep
+                # the bytes beside, named by their hash, as patch_target does -- never destroy them.
+                keep = live.with_name(f"{live.name}.replaced-{live_md5[:8]}")
+                if not keep.exists():
+                    shutil.copy2(live, keep)
+                    kept = True
+                    ix.say(f"  the replaced {exe} is kept as {keep.name} (delete it if you do not need it)")
+            shutil.copy2(clean, live)
+            n += 1
+        except OSError as e:
+            raise ix.InstallerError(
+                f"Could not restore {exe} from its backup.", detail=f"  {e}", changed=kept, title=title,
+                remedy=remedy or "close the game and Thinker if they are running and try again.")
+    put_back = undo_thinker_setup(game_dir, held, changed=bool(n), remedy=remedy, title=title)
+    if n and not put_back:
+        ix.say(f"  restored {exe} from {clean.name}")
+    return put_back or n
+
+
+def _free_pracx_name(game_dir: Path, rec: dict, ov) -> Path:
+    """Where the folder's only PRACX copy goes when it is not to stay as the overlay's exe: the
+    name it was copied from, else a numbered one beside it."""
+    first = game_dir / (rec.get("source") or "terranx_PRACX.exe")
+    if not first.exists():
+        return first
+    stem, suf = os.path.splitext(first.name)
+    i = 2
+    while (game_dir / f"{stem} ({i}){suf}").exists():
+        i += 1
+    return game_dir / f"{stem} ({i}){suf}"
+
+
+def undo_thinker_setup(game_dir: Path, held: list = None, changed: bool = False,
+                       remedy: str = None, title: str = None) -> int:
+    """Put the original terranx.exe back where the installer set the folder up for Thinker, from
+    whatever state the folder is in now. Returns the number of files put back. Never destroys a
+    PRACX build the folder has no other copy of, nor a file it did not put there. Where it has to
+    leave the exe as it is, it says where the original is and appends the exe to `held`.
+
+    The states, in order (live = terranx.exe now, kept = the original the set-up kept):
+      1. live is the recorded original                -> in place; a duplicate kept copy goes.
+      2. live is GOG's stock exe and the kept original is still there and is something else (the
+         player's own) -> the stock copy is set aside, the kept original goes back.
+      3. live is GOG's stock exe otherwise            -> it is the original now; in place.
+      4. live is not the clean PRACX copy             -> left as it is, said so, held.
+      5. the kept original changed / is gone          -> live stays (clean PRACX or none), said so.
+      6. otherwise (live is the clean copy, or none)  -> the kept original goes back (or our copy
+         goes, when there was none before), the only PRACX copy kept under a plain name.
+
+    Two things always hold afterwards, so no later run acts on a stale picture: the record is gone
+    (once undone or explained it describes nothing left to do; keeping it would make the folder
+    read as installed for good), and our clean-PRACX terranx.exe.bak is gone too -- deleted when
+    the folder has another PRACX copy or live is the base, else renamed to a plain PRACX exe --
+    because a .bak of ours beside some other terranx.exe is exactly what the uninstall's generic
+    restore copies over it. Files the set-up set aside are named."""
+    game_dir = Path(game_dir)
+    rec = _read_setup(game_dir)
+    ov = _thinker_overlay()
+    if not rec or ov is None:
+        return 0
+    exe = rec.get("exe") or ov.exe
+    live, bak = game_dir / exe, game_dir / (exe + ".bak")
+    back = (game_dir / rec["backup"]) if rec.get("backup") else None
+    original = rec.get("original_md5")
+    put_back = 0
+    left = None
+    gog = "GOG Galaxy's \"verify files\" restores the original"
+    try:
+        live_md5 = _md5_or_none(live)
+        back_md5 = _md5_or_none(back) if back is not None else None
+        stock = live_md5 is not None and live_md5 in _stock_original_hashes()
+        still = f"; the original is still {back.name}." if back_md5 is not None else "."
+        now = (f"{exe} stays a clean PRACX copy" if live_md5 == ov.base_md5
+               else f"there is no {exe} in the folder now")
+        aside_names = [n for n in rec.get("set_aside") or [] if (game_dir / n).is_file()]
+        stock_aside = next((game_dir / n for n in aside_names
+                            if _md5_or_none(game_dir / n) in _stock_original_hashes()), None)
+        if live_md5 is not None and original and live_md5 == original:                       # 1
+            if back is not None and back_md5 == live_md5:
+                back.unlink()                         # a duplicate of the file now in place
+                changed = True
+        elif stock and original and back_md5 == original:                                    # 2
+            aside = live.with_name(f"{live.name}.replaced-{live_md5[:8]}")
+            same = [game_dir / n for n in aside_names if _md5_or_none(game_dir / n) == live_md5]
+            if same:
+                aside = same[0]
+                live.unlink()                         # the same copy is already set aside
+            elif aside.exists() and _md5_or_none(aside) == live_md5:
+                live.unlink()                         # the same copy is already set aside
+            else:
+                i = 2
+                while aside.exists():
+                    aside = live.with_name(f"{live.name}.replaced-{live_md5[:8]}-{i}")
+                    i += 1
+                os.replace(live, aside)
+            changed = True
+            if not same:                              # a set-aside copy is named below
+                ix.say(f"  GOG's copy of {exe} is kept as {aside.name} (delete it if you do not need it)")
+            os.replace(back, live)
+            ix.say(f"  put your earlier {exe} back (from {back.name})")
+            put_back += 1
+        elif stock:                                                                           # 3
+            if back is not None and back_md5 == live_md5:
+                back.unlink()
+                changed = True
+            elif back_md5 is not None:
+                ix.say(f"  your earlier {exe} is still kept as {back.name}")
+        elif live_md5 is not None and live_md5 != ov.base_md5:                               # 4
+            left = f"  {exe} is not the PRACX copy the installer put there, so it was left as it is" + still
+        elif ((back_md5 is not None and original and back_md5 != original)
+              or (back is not None and back_md5 is None)) and stock_aside:                   # 5, GOG's copy at hand
+            if live_md5 is not None and _pracx_source(game_dir, ov) is None \
+                    and _md5_or_none(bak) != ov.base_md5:
+                keep = _free_pracx_name(game_dir, rec, ov)
+                os.replace(live, keep)
+                ix.say(f"  {exe} was the folder's only PRACX copy: kept as {keep.name}")
+            os.replace(stock_aside, live)
+            changed = True
+            ix.say(f"  the kept original is {'gone' if back_md5 is None else 'changed'}: put GOG's copy of {exe} back (from {stock_aside.name})")
+            put_back += 1
+        elif back_md5 is not None and original and back_md5 != original:                    # 5
+            ix.warn(f"  {back.name} has changed since the installer kept it, so it was not put back as {exe}: {now}, and {gog}.")
+        elif back is not None and back_md5 is None:
+            ix.warn(f"  The original {exe} the installer kept ({back.name}) is no longer in the folder: {now}, and {gog}.")
+        else:                                                                                 # 6
+            if live_md5 is not None and _pracx_source(game_dir, ov) is None \
+                    and _md5_or_none(bak) != ov.base_md5:
+                # The folder's only PRACX build: keep it under the name it was copied from.
+                keep = _free_pracx_name(game_dir, rec, ov)
+                os.replace(live, keep)
+                changed = True
+                ix.say(f"  {exe} was the folder's only PRACX copy: kept as {keep.name}")
+                live_md5 = None
+            if back_md5 is not None:
+                os.replace(back, live)
+                changed = True
+                ix.say(f"  put the original {exe} back (from {back.name})")
+                put_back += 1
+            elif back is None and live_md5 is not None:
+                live.unlink()
+                changed = True
+                ix.say(f"  removed the {exe} the installer had put there (there was none before)")
+                put_back += 1
+        if left is not None:
+            ix.warn(left)
+            if held is not None:
+                held.append(exe)
+        if _md5_or_none(bak) == ov.base_md5:
+            if _pracx_source(game_dir, ov) is not None or _md5_or_none(live) == ov.base_md5:
+                bak.unlink()                          # nobody's backup any more
+            else:
+                keep = _free_pracx_name(game_dir, rec, ov)
+                os.replace(bak, keep)                 # the folder's only PRACX copy: kept
+                ix.say(f"  the folder's only PRACX copy is kept as {keep.name}")
+            changed = True
+        for name in rec.get("set_aside") or []:
+            if (game_dir / name).is_file() and name != (back.name if back is not None else None):
+                ix.say(f"  GOG's copy of {exe} that the installer set aside is kept as {name} (delete it if you do not need it)")
+        for p in (game_dir / (exe + _SETUP_TMP), game_dir / (THINKER_SETUP_NAME + ".tmp"),
+                  game_dir / THINKER_SETUP_NAME):
+            if p.exists():
+                p.unlink()
+    except OSError as e:
+        raise ix.InstallerError(
+            f"Could not put the original {exe} back.", detail=f"  {e}", changed=bool(changed), title=title,
+            remedy=remedy or "close the game and Thinker if they are running and run --uninstall again.")
+    return put_back
 
 
 def patch_target(target: Path, force: bool) -> str:
@@ -264,8 +812,11 @@ def patch_target(target: Path, force: bool) -> str:
                            f"older build) -> restoring from .bak, then re-patching as {bak_spec.label}...")
                     # Those live bytes may be a player's own edit or another tool's work on top of ours:
                     # never destroy them (audit 2026-10-29) -- keep them beside, named by their hash.
+                    # A build this project made (any release, any configuration of this base) is
+                    # ours to replace: re-made from the backup at will, so no copy is kept.
                     keep = target.with_name(f"{target.name}.replaced-{md5[:8]}")
-                    if not keep.exists():
+                    ours = ap.builds_on_base(_targets(), bak_spec.base_md5)
+                    if md5 not in ours and not keep.exists():
                         try:
                             shutil.copy2(target, keep)
                             ix.say(f"  the replaced file is kept as {keep.name} (delete it if you do not need it)")
@@ -285,10 +836,10 @@ def patch_target(target: Path, force: bool) -> str:
     ix.say(f"\n--- {target.name} ---")
     if spec.requires_files:
         ix.say(f"  {', '.join(spec.requires_files)} found beside it -> {spec.label} configuration")
-    elif "thinker.dll" in beside and _thinker_needs_renaming(target, spec):
+    elif "thinker.dll" in beside and not _THINKER_EXPLAINED and _thinker_needs_renaming(target, spec):
         ov = _overlay_of(spec)
         ix.say(f"  thinker.dll found beside it, but Thinker starts only a file named {ov.exe} -> patched as "
-               f"plain {spec.label}. To play with Thinker and the mod, the PRACX executable must be {ov.exe}.")
+               f"plain {spec.label}. To play with Thinker and the mod, run the installer again and let it set the folder up for Thinker.")
     ix.say(f"  patching (clean {spec.label})")
     # Pass the spec, not loose hashes: the baseline, size and group selection all come from the
     # one table entry, and the installer inherits its dry-run-only rule -- a base with no
@@ -1543,10 +2094,14 @@ def fetch_manifest(game_dir: Path, source: str = None, offline: bool = False,
             # one plain sentence and one thing to do (the URL/errno soup read as a fault of theirs).
             if quick:
                 print(f"  ({e})", file=sys.stderr)
+            # The reason travels with the error in BOTH paths: a bug report from an interactive update
+            # used to carry only "check your connection" (a certificate problem on an old Windows
+            # looks exactly like no connection to the player).
             raise ix.InstallerError(
                 "Could not reach the update server.",
-                code=ix.EXIT_ABORTED, title="UPDATE FAILED",
-                disk_note="Check your connection and try again later.")
+                code=ix.EXIT_ABORTED, title="UPDATE FAILED", detail=f"  ({fetchmod.clean(e)})",
+                disk_note="Check your connection and try again later. If it keeps happening, the message above "
+                          "says why (a certificate problem means Windows is missing the server's certificate authority).")
         except OSError as e:
             discard_staged_manifest(game_dir)
             raise ix.InstallerError("Could not read the update information.", code=ix.EXIT_ABORTED,
@@ -1634,8 +2189,19 @@ def _desktop_dirs() -> list:
     env = os.environ.get("LONGEVITY_DESKTOP_DIRS")
     if env:
         return [Path(p) for p in env.split(os.pathsep) if p]
-    out = _ps("[Environment]::GetFolderPath('Desktop'); [Environment]::GetFolderPath('CommonDesktopDirectory')")
-    return [Path(line.strip()) for line in out.splitlines() if line.strip()]
+    # SHGetFolderPathW (XP-era), not PowerShell: a stock Windows 7 has PowerShell 2.0 on .NET 3.5, where
+    # [Environment]::GetFolderPath('CommonDesktopDirectory') does not exist (.NET 4) -- the whole snippet failed,
+    # the list came back empty, and every run asked for a shortcut and then said "could not find your desktop".
+    out = []
+    try:
+        shell32 = ctypes.windll.shell32
+        for csidl in (0x0010, 0x0019):            # CSIDL_DESKTOPDIRECTORY, CSIDL_COMMON_DESKTOPDIRECTORY
+            buf = ctypes.create_unicode_buffer(260)
+            if shell32.SHGetFolderPathW(None, csidl, None, 0, buf) == 0 and buf.value:
+                out.append(Path(buf.value))
+    except (AttributeError, OSError):
+        pass
+    return out
 
 
 def _ps(script: str) -> str:
@@ -1752,8 +2318,10 @@ def print_play_note(game_dir: Path, target_id) -> None:
         # is what adds Thinker on top. "terranx.exe starts the unmodified game" would be wrong
         # here on both counts.
         ix.good(f"To play with the mod, start {exe.name} as before.")
-        ix.warn(f"Starting {spec.exe} directly plays with the mod but without Thinker; the GOG Galaxy "
-                "Play button and the shortcuts GOG created may do that.")
+        # GOG's own entries never start Thinker: its Play button starts terran.exe (SMAC, no mod),
+        # "SMAX PRACX" terranx_PRACX.exe (no mod), "Alien Crossfire" terranx.exe -- here the mod
+        # without Thinker (audit 2026-11-01, read from goggame-*.info and GOG's shortcuts).
+        ix.warn(f"The GOG Galaxy Play button and the shortcuts GOG created do not start Thinker: some start the game without the mod, and starting {spec.exe} directly plays with the mod but without Thinker.")
     elif target_id == "pracx":
         ix.good(f"To play with the mod, start {exe.name}.")
         # Name only the stock exes that are NOT the one carrying the mod: a PRACX exe named
@@ -2128,6 +2696,19 @@ def do_update(game_dir: Path, args) -> int:
             "No Alpha Centauri executable was found to update.",
             code=ix.EXIT_NO_GAME, detail=f"Searched: {game_dir}", changed=False,
             remedy="check that --game-dir points at the folder containing the game.")
+    rec = _read_setup(game_dir)
+    if rec.get("original_md5") and target.name.lower() == str(rec.get("exe", "")).lower() \
+            and _md5_or_none(target) == rec["original_md5"]:
+        # A folder set up for Thinker whose original terranx.exe is back (GOG's "verify files"):
+        # the preflight would refuse it as "a binary we did not make", which is true and useless.
+        raise ix.InstallerError(
+            f"The game's original {target.name} is back in this folder, so the update did not start.",
+            code=ix.EXIT_ABORTED, changed=False,
+            detail="  GOG Galaxy may have restored it while checking the game's files.",
+            remedy=("run the installer again (INSTALL.bat in the download; download it again if you no longer have it)"
+                    + (" to set the folder up for Thinker again"
+                       if _thinker_overlay() is not None and _thinker_here(game_dir, _thinker_overlay()) else "")
+                    + "; the game's update prompt then works again."))
 
     ix.say("")
     pf = pfm.run(game_dir=game_dir, target=target,
@@ -2327,6 +2908,7 @@ def do_update(game_dir: Path, args) -> int:
     merged["base"] = {"version": ver.VERSION}
     rc.write(game_dir, target_id=spec.id, modules=merged, say=ix.say)
     rc.note_check(game_dir)
+    config.remember_game_dir(game_dir)
 
     # The core update is committed and recorded. A pack that did not land after that is still a
     # failed run -- "UPDATE COMPLETE" would be a lie about the one thing the player may have
@@ -2948,6 +3530,16 @@ def do_repair(game_dir: Path) -> int:
     return ix.EXIT_OK
 
 
+def _uninstall_files() -> list:
+    """The files an uninstall removes from the game folder (the folder picker's "installed here"
+    test reads the same list, so a part-finished uninstall is still found by the retry)."""
+    try:
+        dlls = [p.name for p in sorted(ffmpeg_bin().glob("*.dll"))]
+    except OSError:
+        dlls = []
+    return ["uimod.dll", POPUP_ART_NAME] + dlls
+
+
 def do_uninstall(game_dir: Path, args) -> int:
     """Restore the original exe from .bak and remove what we deployed."""
     import receipt as rc
@@ -2968,10 +3560,29 @@ def do_uninstall(game_dir: Path, args) -> int:
     ours = restorable_base_hashes()
 
     restored, already_clean, foreign = 0, 0, 0
+    # A folder the installer set up for Thinker FIRST: its terranx.exe.bak is our PRACX copy's,
+    # and copying it over whatever terranx.exe is now in place (the original, put back by GOG or
+    # by hand) would destroy the only copy of the original. This reads the folder as it is and
+    # puts the original back; an exe it had to leave as it is (the player's own, say), the loop
+    # below leaves alone too.
+    held: list = []
+    # Its undo changes files even when it puts none back. An unreadable record describes nothing:
+    # it goes, said so, and does not count as work done.
+    had_setup = bool(_read_setup(game_dir))
+    if thinker_setup_folder(game_dir) and not had_setup:
+        try:
+            (game_dir / THINKER_SETUP_NAME).unlink()
+            ix.say(f"  removed an unreadable {THINKER_SETUP_NAME}")
+        except OSError:
+            pass
+    restored += revert_thinker_setup(game_dir, held, title="UNINSTALL FAILED")
+    if had_setup and not thinker_setup_folder(game_dir):
+        ix.say("  the installer's Thinker set-up of this folder is undone")
+    hold = {n.lower() for n in held}
     for name in names:
         exe = game_dir / name
         bak = exe.with_suffix(exe.suffix + ".bak")
-        if not (exe.is_file() and bak.is_file()):
+        if not (exe.is_file() and bak.is_file()) or name.lower() in hold:
             continue
         changed = bool(restored)         # honest once the first restore has landed
         if _md5_safe(bak, changed=changed) not in ours:
@@ -2994,7 +3605,7 @@ def do_uninstall(game_dir: Path, args) -> int:
                 remedy="close the game if it is running and try again.")
 
     removed, remove_failed = 0, 0
-    for f in ["uimod.dll", POPUP_ART_NAME] + [p.name for p in sorted(ffmpeg_bin().glob("*.dll"))]:
+    for f in _uninstall_files():
         p = game_dir / f
         if not p.exists():
             continue
@@ -3018,8 +3629,9 @@ def do_uninstall(game_dir: Path, args) -> int:
     # printed "UNINSTALL COMPLETE -- 0 file(s) restored, 0 removed. The game is back to how it
     # was", which is both useless and untrue. The record is still cleared on the way out, so a
     # leftover one never persists and re-running stays idempotent.
-    if not restored and not removed:
+    if not restored and not removed and not had_setup:
         rc.clear(game_dir, say=ix.say)
+        config.forget_game_dir(game_dir)
         if foreign:
             msg = ("Nothing to uninstall: the backup beside your executable was not made by this "
                    "installer, so it was left alone.")
@@ -3049,19 +3661,350 @@ def do_uninstall(game_dir: Path, args) -> int:
     ix.say("                           delete once this window is closed")
     ix.say("    [UIMod] settings     - your preferences in Alpha Centauri.ini")
     rc.clear(game_dir, say=ix.say)
+    if not remove_failed:
+        # Kept while something is left to remove: the verdict asks for another --uninstall,
+        # which has to find this folder again.
+        config.forget_game_dir(game_dir)
 
     global _VERDICT
     # Say only what is true. "The game is back to how it was" contradicted the list of things
     # deliberately left in place printed directly above it -- and was printed unchanged even when
     # a removal had just warned that it failed.
-    body = f"{restored} file(s) restored from their .bak backups, {removed} removed."
+    body = f"{restored} file(s) put back to the originals, {removed} removed."
     if remove_failed:
         body += (f" {remove_failed} file(s) could NOT be removed (see the warnings above) -- "
                  "close the game and run --uninstall again to finish.")
+    if held:
+        # An exe left to the player (see its warning above) may still carry an older build of
+        # the mod: say so in the verdict, not in one console line above it.
+        body += (f" {', '.join(held)} was left as it is (see the warning above): if it still starts "
+                 "the game with the mod, replace it with the original yourself; GOG Galaxy's \"verify files\" restores it.")
     body += " The items listed above were deliberately left in place."
-    _VERDICT = ("UNINSTALL COMPLETE" if not remove_failed else "UNINSTALL INCOMPLETE", body)
+    _VERDICT = ("UNINSTALL COMPLETE" if not (remove_failed or held) else "UNINSTALL INCOMPLETE", body)
     ix.say(f"\n  {restored} file(s) restored, {removed} removed.")
     return ix.EXIT_OK
+
+
+# ---- the game folder --------------------------------------------------------------------------
+# A player never needs a command prompt to install: without --game-dir the installer lists the
+# folders it found (the ones it installed into before, the GOG locations, every folder the GOG
+# registry names), lets the player pick one or another, and -- when it found none -- asks for the
+# folder in a Windows folder picker or as a typed path. Every choice is checked before anything is
+# written; a non-interactive run never asks, it takes the first good folder or explains.
+
+#: The folder holds a game build this mod installs onto (clean, or ours with its backup).
+FOLDER_OK = "ok"
+
+
+def _folder_exe_spec(d: Path, name: str):
+    """The launch target `d/name` installs as -- from its own bytes, else from its .bak (an
+    already-patched exe) -- or None. Never raises."""
+    p = d / name
+    try:
+        beside = ap.folder_files(d)
+        for probe in (p, p.with_suffix(p.suffix + ".bak")):
+            if not probe.is_file():
+                continue
+            try:
+                return ap.resolve_target(_md5(probe), targets=_targets(), launch_only=True,
+                                         present_files=beside, exe_name=name)
+            except ap.UnsupportedBase:
+                continue
+    except Exception:  # noqa: BLE001 - a probe is a verdict, never a crash
+        return None
+    return None
+
+
+def _has_install(d: Path) -> bool:
+    """Is the mod (or what is left of a part-finished uninstall) here: a receipt, the mod's DLL, a
+    Thinker set-up record, or one of our backups beside an exe that differs from it? Not the
+    resident updater, and not a .bak alone: an uninstall leaves both behind on purpose (it copies
+    the backup back and keeps it)."""
+    import receipt as rc
+    try:
+        state = rc.read(d)
+        if state.get("target_id") or state.get("modules") or thinker_setup_folder(d) \
+                or any((d / f).is_file() for f in _uninstall_files()):
+            return True
+        ours = None
+        for n in _exe_names():
+            exe, bak = d / n, d / (n + ".bak")
+            if not (exe.is_file() and bak.is_file()):
+                continue
+            if ours is None:
+                ours = restorable_base_hashes()
+            b = _md5(bak)
+            if b in ours and _md5(exe) != b:
+                return True
+        return False
+    except Exception:  # noqa: BLE001 - a probe is a verdict, never a crash
+        return False
+
+
+def check_game_folder(d: Path, installed: bool = False):
+    """(FOLDER_OK, label) when `d` is a folder the installer can work on, else (problem, the
+    plain-words reason). `installed`: the mode needs the mod to be there already (uninstall,
+    repair, update). Never raises for the folder itself: an access-denied folder (is_dir() still
+    answers for one) or a dropped network share is a reason, not a crash."""
+    try:
+        return _check_game_folder(d, installed)
+    except OSError as e:
+        return "missing", f"that folder cannot be read ({e.strerror or e})"
+
+
+def _check_game_folder(d: Path, installed: bool):
+    try:
+        if d.is_file():
+            if d.suffix.lower() == ".lnk":
+                return "file", "that is a shortcut; choose the game folder itself (the one with terranx.exe)"
+            return "file", "that is a file, not a folder; choose the folder that holds terranx.exe"
+        if not d.is_dir():
+            return "missing", "there is no folder at that location"
+    except OSError as e:
+        return "missing", f"that folder cannot be read ({e.strerror or e})"
+    names = [n for n in _exe_names() if (d / n).is_file()]
+    if installed:
+        if _has_install(d):
+            return FOLDER_OK, "Longevity Vaccine is installed here"
+        return "not-installed", "Longevity Vaccine is not installed in that folder"
+    if not names:
+        inner = []
+        try:
+            inner = [c for c in sorted(d.iterdir()) if c.is_dir()
+                     and any((c / n).is_file() for n in _exe_names())]
+        except OSError:
+            pass
+        if inner:
+            return "nested", (f"the game is one folder further in -- choose \"{inner[0].name}\" "
+                              f"inside it")
+        return "no-game", ("Alpha Centauri is not in that folder: choose the folder that holds "
+                           "terranx.exe")
+    specs = [s for s in (_folder_exe_spec(d, n) for n in names) if s is not None]
+    if not specs:
+        return "unsupported", ("the Alpha Centauri there is not a version this mod supports: it "
+                               "needs the GOG Planetary Pack (Alpha Centauri with Alien "
+                               "Crossfire) with PRACX, on its own or with Thinker")
+    label = specs[0].label
+    ov = _thinker_overlay()
+    if ov is not None and _thinker_here(d, ov):
+        label = ov.label                  # the install sets a stock Thinker folder up for Thinker
+    return FOLDER_OK, label + (" -- Longevity Vaccine is installed here" if _has_install(d) else "")
+
+
+def browse_for_folder(title: str):
+    """The Windows folder picker (IFileOpenDialog, FOS_PICKFOLDERS) in front of this console.
+    The chosen folder, or None (cancelled, or no picker on this system). Never raises."""
+    try:
+        from ctypes import wintypes
+        ole32 = ctypes.WinDLL("ole32")
+        ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+        ole32.CoCreateInstance.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD,
+                                           ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+        hr_init = ole32.CoInitializeEx(None, 0x2 | 0x4)     # STA, no OLE1 DDE
+        try:
+            return _show_folder_dialog(ole32, title)
+        finally:
+            if hr_init in (0, 1):                           # S_OK / S_FALSE: ours to balance
+                ole32.CoUninitialize()
+    except Exception:  # noqa: BLE001 - the typed path is always there as the fallback
+        return None
+
+
+def _guid(text: str):
+    import uuid
+    return (ctypes.c_byte * 16).from_buffer_copy(uuid.UUID(text).bytes_le)
+
+
+def _com_call(obj, index: int, restype, *args):
+    """Call vtable slot `index` of the COM object `obj` (a c_void_p). Each arg is a ctypes value;
+    an out-pointer is passed as `_ptr(x)`."""
+    vtbl = ctypes.cast(obj, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+    proto = ctypes.WINFUNCTYPE(restype, ctypes.c_void_p, *[type(a) for a in args])
+    return proto(vtbl[index])(obj, *args)
+
+
+def _ptr(x) -> ctypes.c_void_p:
+    return ctypes.c_void_p(ctypes.addressof(x))
+
+
+# IFileDialog vtable slots (IUnknown 0-2, IModalWindow::Show 3, then IFileDialog in order).
+_FD_SHOW, _FD_SETOPTIONS, _FD_GETOPTIONS, _FD_SETTITLE, _FD_GETRESULT, _RELEASE = 3, 9, 10, 17, 20, 2
+_SI_GETDISPLAYNAME = 5                       # IShellItem::GetDisplayName
+_FOS_PICKFOLDERS, _FOS_FORCEFILESYSTEM, _FOS_PATHMUSTEXIST = 0x20, 0x40, 0x800
+_SIGDN_FILESYSPATH = 0x80058000 - (1 << 32)  # an enum: a signed int
+
+
+def _show_folder_dialog(ole32, title: str):
+    from ctypes import wintypes
+    dlg = ctypes.c_void_p()
+    clsid = _guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7")    # FileOpenDialog
+    iid = _guid("D57C7288-D4AD-4768-BE02-9D969532D960")      # IFileOpenDialog
+    if ole32.CoCreateInstance(_ptr(clsid), None, 1, _ptr(iid), ctypes.byref(dlg)) != 0 or not dlg.value:
+        return None
+    try:
+        opts = wintypes.DWORD()
+        _com_call(dlg, _FD_GETOPTIONS, ctypes.HRESULT, _ptr(opts))
+        _com_call(dlg, _FD_SETOPTIONS, ctypes.HRESULT,
+                  wintypes.DWORD(opts.value | _FOS_PICKFOLDERS | _FOS_FORCEFILESYSTEM | _FOS_PATHMUSTEXIST))
+        _com_call(dlg, _FD_SETTITLE, ctypes.HRESULT, wintypes.LPCWSTR(title))
+        k32 = ctypes.windll.kernel32
+        k32.GetConsoleWindow.restype = ctypes.c_void_p
+        try:
+            # Owned by the console window: Show() disables its owner while it is up. Under Windows
+            # Terminal that is the hidden pseudo-console window, which the terminal owns -- so the
+            # picker still stacks above the terminal, and the terminal itself is never disabled
+            # (its root owner as the owner froze every tab, and stayed frozen if the installer was
+            # killed with the picker open: re-audit 2026-11-01).
+            ctypes.windll.user32.GetForegroundWindow.restype = ctypes.c_void_p
+            owner = k32.GetConsoleWindow() or ctypes.windll.user32.GetForegroundWindow()
+            _com_call(dlg, _FD_SHOW, ctypes.HRESULT, ctypes.c_void_p(owner))
+        except OSError:
+            return None                                       # cancelled (HRESULT 0x800704C7)
+        item = ctypes.c_void_p()
+        _com_call(dlg, _FD_GETRESULT, ctypes.HRESULT, _ptr(item))
+        try:
+            name = ctypes.c_void_p()
+            _com_call(item, _SI_GETDISPLAYNAME, ctypes.HRESULT, ctypes.c_int(_SIGDN_FILESYSPATH), _ptr(name))
+            try:
+                return Path(ctypes.wstring_at(name.value))
+            finally:
+                ole32.CoTaskMemFree(name)
+        finally:
+            _com_call(item, _RELEASE, ctypes.c_ulong)
+    finally:
+        _com_call(dlg, _RELEASE, ctypes.c_ulong)
+
+
+def _ask_line(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        raise ix.InstallerError("No game folder was chosen.", code=ix.EXIT_ABORTED, changed=False,
+                                remedy="run the installer again and choose the folder.")
+
+
+def _typed_folder(text: str) -> Path:
+    return Path(os.path.expandvars(text.strip().strip('"').strip()))
+
+
+def _absolute(d) -> Path:
+    """Absolute, so nothing later resolves it against another working directory (a shortcut's
+    target, generation 2 started in the game folder, the profile API's %WINDIR%)."""
+    return Path(os.path.abspath(str(d)))
+
+
+def _say_rejected(rejected: list) -> None:
+    for d, why in rejected:
+        ix.say(f"  Found {d}, but {why}.")
+
+
+def pick_game_folder(found: list, installed: bool, rejected: list = ()) -> Path:
+    """Ask the player which folder to use. `found`: [(folder, label)] that already checked out;
+    `rejected`: [(folder, reason)] that were looked at and do not. Loops until a folder checks out
+    or the player quits; every rejection says why."""
+    verb = "use" if installed else "install into"
+    browse_title = "Choose your Alpha Centauri folder (the one with terranx.exe)"
+    while True:
+        if found:
+            ix.say("\nAlpha Centauri was found here:")
+            for i, (d, label) in enumerate(found, 1):
+                ix.say(f"  {i}. {d}")
+                ix.say(f"       {label}")
+            more = "type a number to choose, " if len(found) > 1 else ""
+            ans = _ask_line(f"Press Enter to {verb} 1, {more}B to browse for a different folder, "
+                            "type or paste a folder's path, or Q to quit: ")
+        else:
+            if rejected:
+                ix.say("\nNo folder the installer found can be used:")
+                _say_rejected(rejected)
+            elif installed:
+                ix.say("\nThe installer could not find a game folder Longevity Vaccine is installed in.")
+            else:
+                ix.say("\nThe installer could not find Alpha Centauri on this PC by itself.")
+            ans = _ask_line("Press Enter to choose the game folder in a window, type or paste "
+                            "the folder's path, or Q to quit: ")
+        low = ans.lower()
+        if low in ("q", "quit", "exit"):
+            raise ix.InstallerError("No game folder was chosen, so nothing was installed."
+                                    if not installed else "No game folder was chosen.",
+                                    code=ix.EXIT_ABORTED, changed=False,
+                                    remedy="run the installer again when you know where the game is.")
+        if found and low == "":
+            return found[0][0]
+        if found and low.isdecimal() and len(low) <= 4 and 1 <= int(low) <= len(found):
+            return found[int(low) - 1][0]
+        if low in ("", "b", "browse"):
+            chosen = browse_for_folder(browse_title)
+            if chosen is None:
+                ix.say("  No folder chosen in the window. You can also type or paste the path here.")
+                continue
+        else:
+            chosen = _typed_folder(ans)
+        chosen = _absolute(chosen)
+        try:
+            if chosen.suffix.lower() == ".exe" and chosen.is_file():
+                chosen = chosen.parent          # the game's program, dragged in: its folder is meant
+        except OSError:
+            pass
+        status, why = check_game_folder(chosen, installed=installed)
+        if status == FOLDER_OK:
+            ix.say(f"  {chosen}: {why}")
+            return chosen
+        ix.warn(f"  Not that folder: {why}.")
+        ix.say("  Try again.")
+
+
+def resolve_game_dir(args, installed: bool = False) -> Path:
+    """The game folder this run works on, always absolute.
+
+    --game-dir wins and is taken as given (scripted runs; its own checks follow). A resident
+    updater works on the folder it lives in. Otherwise: the folders found on this PC, checked;
+    an interactive run lets the player pick one or another, a non-interactive one takes the one
+    good folder or stops with a reason a player can act on -- and with more than one install it
+    does not guess which one an --uninstall / --update / --repair is meant for.
+    """
+    if getattr(args, "game_dir", None):
+        d = _absolute(args.game_dir)
+        try:
+            if d.suffix.lower() == ".exe" and d.is_file():
+                d = d.parent                    # --game-dir given the game's program: its folder
+        except OSError:
+            pass
+        return d
+    resident = config.resident_game_dir(_SCRIPTS)
+    if resident is not None:
+        return resident
+    cands = config._dedup_dirs(config.remembered_game_dirs() + config.candidate_game_dirs())
+    found, rejected = [], []
+    for d in cands:
+        d = _absolute(d)
+        status, label = check_game_folder(d, installed=installed)
+        (found if status == FOLDER_OK else rejected).append((d, label))
+    if ix.can_ask() and not ix.is_worker() and not getattr(args, "no_prompt", False):
+        return pick_game_folder(found, installed, rejected)
+    if found and (len(found) == 1 or not installed):
+        return found[0][0]
+    flag = "--game-dir \"<the folder that holds terranx.exe>\""
+    if found:
+        raise ix.InstallerError(
+            "Longevity Vaccine is installed in more than one game folder, so this run did not guess which one.",
+            code=ix.EXIT_ABORTED, changed=False,
+            detail="\n".join(f"  {d}" for d, _ in found),
+            remedy=f"run it again from a console window and choose the folder when it asks, or pass {flag}.")
+    if installed:
+        raise ix.InstallerError(
+            "No game folder with Longevity Vaccine installed could be found.",
+            code=ix.EXIT_NO_GAME, changed=False,
+            detail="\n".join(f"  Found {d}, but {why}." for d, why in rejected) or None,
+            remedy=f"run it again from a console window and choose the folder when it asks, or pass {flag}.")
+    raise ix.InstallerError(
+        "The game folder could not be found." if not rejected else
+        "No folder the installer found can be used.",
+        code=ix.EXIT_NO_GAME, changed=False,
+        detail=("\n".join(f"  Found {d}, but {why}." for d, why in rejected) if rejected else
+                "  Alpha Centauri is not in any of the usual GOG locations on this PC."),
+        remedy=f"start the installer by double-clicking INSTALL.bat and choose the game folder when it asks; a scripted run passes {flag}.")
 
 
 def main() -> int:
@@ -3141,16 +4084,6 @@ def main() -> int:
         # the ones reached from modules that never see `args`.
         os.environ["LONGEVITY_PAYLOAD_ROOT"] = str(Path(args.payload_root).resolve())
 
-    game_dir = Path(args.game_dir) if args.game_dir else config.game_dir(required=False)
-    ix.say(f"Game dir: {game_dir}")
-    if not game_dir.is_dir():
-        raise ix.InstallerError(
-            "The game directory could not be found.",
-            code=ix.EXIT_NO_GAME,
-            detail=f"Looked for: {game_dir}",
-            remedy="re-run with --game-dir \"<path to your Alpha Centauri folder>\", "
-                   "or set the SMACX_GAME_DIR environment variable.")
-
     # Every pairing, not just one. main() dispatches uninstall > repair > update in that order,
     # so an unchecked `--repair --update` silently did the repair and the verdict claimed only
     # that -- the player asked for two things and was told about one, with no word about the
@@ -3166,6 +4099,16 @@ def main() -> int:
         raise ix.InstallerError("--only-listed works only with --update.",
                                 code=ix.EXIT_ABORTED, changed=False,
                                 remedy="add --update, or leave --only-listed out.")
+    # After the flag checks (a refused combination never asks for a folder), before the lock
+    # (which is named after the folder).
+    game_dir = resolve_game_dir(args, installed=bool(args.uninstall or args.repair or args.update))
+    ix.say(f"Game dir: {game_dir}")
+    if not game_dir.is_dir():
+        raise ix.InstallerError(
+            "The game folder could not be found.",
+            code=ix.EXIT_NO_GAME,
+            detail=f"Looked for: {game_dir}",
+            remedy="check the --game-dir path: it must be the folder that holds terranx.exe.")
     # Before the first write of every mode, and released before run_guarded offers to start the
     # game, so an update the game then offers is never refused by the window that is closing.
     lock = hold_installer_lock(game_dir)
@@ -3181,27 +4124,40 @@ def main() -> int:
         lock.release()
 
 
-def _install(game_dir: Path, args) -> int:
-    """The first-time install (and its re-runs): main() without a mode flag."""
-    # Candidate exes come from the target table's `exe` fields plus the configured name -- no
-    # hardcoded executable names here (CLAUDE.md's opening invariant), and a base that is not a
-    # shipping target contributes no candidate.
+def _install_candidates(game_dir: Path) -> list:
+    """The exes the install pass patches: every configured name that is in the folder -- except
+    that in a folder the installer set up for Thinker, only the exe Thinker starts (terranx_PRACX.exe
+    is left as it is; see "setting a folder up for Thinker")."""
     candidates: list[Path] = []
     for name in _exe_names():
         p = game_dir / name
         if p.exists() and p not in candidates:
             candidates.append(p)
+    ov = _thinker_overlay()
+    if ov is not None and _setup_in_effect(game_dir):
+        candidates = [p for p in candidates if p.name.lower() == ov.exe.lower()]
+    return candidates
+
+
+def _install(game_dir: Path, args) -> int:
+    """The first-time install (and its re-runs): main() without a mode flag."""
+    # Candidate exes come from the target table's `exe` fields plus the configured name -- no
+    # hardcoded executable names here (CLAUDE.md's opening invariant), and a base that is not a
+    # shipping target contributes no candidate.
+    # Before the first write: a companion declared without its baseline is a packaging fault, and
+    # companions are patched AFTER the exe -- discovering it then would mean aborting with the exe
+    # already modified.
+    check_companion_declarations()
+    # A Thinker folder whose terranx.exe is not PRACX: asked about now, set up just before the
+    # patch pass (after every question), so the pass patches the exe Thinker actually starts.
+    thinker_plan = plan_thinker_setup(game_dir, args)
+    candidates = _install_candidates(game_dir)
     if not candidates:
         raise ix.InstallerError(
             "No Alpha Centauri executable was found in the game directory.",
             code=ix.EXIT_NO_GAME,
             detail=f"Searched: {game_dir}",
             remedy="check that this is the folder containing terranx.exe.")
-
-    # Before the first write: a companion declared without its baseline is a packaging fault, and
-    # companions are patched AFTER the exe -- discovering it then would mean aborting with the exe
-    # already modified.
-    check_companion_declarations()
 
     # The optional modules are chosen BEFORE anything is written: the player sees what is on
     # offer, with sizes, and the installer waits for the answer (user, 2026-09-27). The downloads
@@ -3214,6 +4170,8 @@ def _install(game_dir: Path, args) -> int:
     elif manifest is not None and not catalogue:
         ix.say("No optional modules are available for download right now.")
 
+    if apply_thinker_setup(thinker_plan):
+        candidates = _install_candidates(game_dir)
     results = {p.name: patch_target(p, args.force) for p in candidates}
     if any(v == "error" for v in results.values()):
         raise ix.InstallerError(
@@ -3336,6 +4294,9 @@ def _install(game_dir: Path, args) -> int:
     mods["base"] = {"version": ver.VERSION}
     mods.update(installed_packs)
     rc.write(game_dir, target_id=target_id, modules=mods, say=ix.warn)   # warnings only
+    # So the next run -- an --uninstall, a re-run of this download or a newer one -- finds this
+    # folder by itself, wherever the player put the game.
+    config.remember_game_dir(game_dir)
 
     # One row per thing the player cares about, coloured; the executables the folder happens
     # to hold but the mod does not touch are not rows.

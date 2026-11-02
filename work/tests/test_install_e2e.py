@@ -522,6 +522,55 @@ def test_uninstall_restores_the_original_and_removes_the_mod(game_installed):
     assert rc.ini_get(game, rc.KEY_TARGET) == ""
 
 
+def _run_found(*args, candidates, installs, expect_ok=True, timeout=900):
+    """An installer run WITHOUT --game-dir: it finds the folder itself, from `candidates` (the
+    only folders it may see -- never the real game) and the remembered installs in `installs`."""
+    env = dict(os.environ, LONGEVITY_NO_WAIT="1", LONGEVITY_PAYLOAD_ROOT=str(_PAYLOAD),
+               LONGEVITY_GAME_CANDIDATES="|".join(str(c) for c in candidates),
+               LONGEVITY_INSTALLS_FILE=str(installs))
+    p = subprocess.run([str(_PY), str(_INSTALL), "--no-wait", *args], capture_output=True,
+                       text=True, env=env, timeout=timeout, stdin=subprocess.DEVNULL)
+    out = p.stdout + p.stderr
+    if expect_ok:
+        assert p.returncode == 0, f"expected success, got {p.returncode}:\n{out}"
+    return p.returncode, out
+
+
+def test_an_install_without_game_dir_finds_the_folder_and_uninstall_remembers_it(game, tmp_path):
+    """No --game-dir anywhere: the install takes the one good folder it was shown (skipping an
+    empty one), remembers it, and a later --uninstall that is shown NO folders still finds it."""
+    installs = tmp_path / "installs.txt"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    rcode, out = _run_found("--ai", "off", candidates=[empty, game], installs=installs)
+    assert "INSTALLATION SUCCESSFUL" in out and f"Game dir: {game}" in out, out
+    assert (game / "terranx_PRACX.exe.bak").is_file()
+    assert installs.read_text(encoding="utf-8").splitlines() == [str(game.resolve())]
+    # an uninstall that cannot finish (the DLL in use) keeps the folder remembered, so the
+    # "run --uninstall again" it asks for finds it
+    with open(game / "uimod.dll", "rb"):
+        rcode, out = _run_found("--uninstall", candidates=[], installs=installs, expect_ok=False)
+    assert "UNINSTALL INCOMPLETE" in out, out
+    assert installs.read_text(encoding="utf-8").splitlines() == [str(game.resolve())]
+    rcode, out = _run_found("--uninstall", candidates=[], installs=installs)
+    assert "UNINSTALL COMPLETE" in out and f"Game dir: {game.resolve()}" in out, out
+    assert not (game / "uimod.dll").exists()
+    assert installs.read_text(encoding="utf-8").strip() == ""
+
+
+def test_with_no_game_folder_found_an_unattended_run_explains_and_changes_nothing(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    rcode, out = _run_found("--ai", "off", candidates=[empty], installs=tmp_path / "i.txt",
+                            expect_ok=False)
+    assert rcode == ix.EXIT_NO_GAME, out
+    assert "No folder the installer found can be used" in out and "double-clicking INSTALL.bat" in out
+    assert f"Found {empty}, but Alpha Centauri is not in that folder" in out, out
+    assert "Nothing on disk was changed" in out
+    assert "SMACX_GAME_DIR" not in out and "GOG Galaxy" not in out and "SmacxUi" not in out, out
+    assert list(empty.iterdir()) == [] and not (tmp_path / "i.txt").exists()
+
+
 def test_uninstall_with_nothing_installed_is_an_explained_refusal(game):
     rcode, out = _run("--uninstall", game=game, expect_ok=False)
     assert rcode != 0
@@ -1736,3 +1785,258 @@ def test_a_plain_pracx_exe_named_terranx_is_not_called_unmodified(tmp_path, bak_
     assert "To play with the mod, start terranx.exe." in out, out
     assert "terranx.exe and terran.exe all start" not in out, out
     assert "terran.exe" in out and "unmodified game" in out, out
+
+
+# ---------------------------------------------------------------- setting a folder up for Thinker
+
+def _thinker_folder(tmp_path, bak_path, original: bytes = None) -> Path:
+    """The stock GOG layout with Thinker dropped in: `original` as terranx.exe (None: no
+    terranx.exe at all), the clean PRACX build as terranx_PRACX.exe, thinker.dll / thinker.exe."""
+    g = tmp_path / "game"
+    g.mkdir()
+    if original is not None:
+        (g / "terranx.exe").write_bytes(original)
+    shutil.copy2(bak_path, g / "terranx_PRACX.exe")
+    (g / "thinker.dll").write_bytes(b"not a real dll")
+    (g / "thinker.exe").write_bytes(b"not a real exe")
+    (g / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
+    return g
+
+
+def test_a_stock_thinker_folder_is_set_up_and_uninstall_puts_the_original_back(tmp_path, bak_path,
+                                                                              pristine_bytes):
+    """The stock GOG terranx.exe (the original game, no PRACX) with Thinker beside it: the
+    installer keeps the original as terranx_original.exe, puts the PRACX build in its place and
+    patches it as PRACX + Thinker; terranx_PRACX.exe is left as it is. A re-run neither asks nor
+    backs anything up again; --uninstall puts the original back and leaves nothing of the set-up."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    table = ap.load_targets(PATCHES)
+    vanilla, base = _md5(g / "terranx.exe"), table["pracx"].base_md5
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert "kept the original terranx.exe as terranx_original.exe" in out, out
+    assert _md5(g / "terranx_original.exe") == vanilla
+    assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
+    assert _md5(g / "terranx.exe.bak") == base
+    assert _md5(g / "terranx_PRACX.exe") == base and not (g / "terranx_PRACX.exe.bak").exists()
+    assert rc.ini_get(g, rc.KEY_TARGET) == "pracx_thinker"
+    # the set-up says why once; the patch pass adds no "rename it" note on top
+    assert "start thinker.exe" in out and out.count("Thinker starts only") == 1, out
+    assert not list(g.glob("*.longevity-tmp"))
+
+    rcode, out = _run("--ai", "off", game=g)
+    assert "--- Thinker ---" not in out and "already patched" in out, out
+    assert sorted(p.name for p in g.glob("terranx_original*")) == ["terranx_original.exe"]
+
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out and "put the original terranx.exe back" in out, out
+    assert _md5(g / "terranx.exe") == vanilla
+    assert not (g / "terranx_original.exe").exists() and not (g / "terranx.exe.bak").exists()
+    assert _md5(g / "terranx_PRACX.exe") == base
+    assert not (g / "longevity-thinker-setup.json").exists()
+
+
+def test_a_thinker_folder_with_no_terranx_gets_one_and_uninstall_removes_it(tmp_path, bak_path):
+    g = _thinker_folder(tmp_path, bak_path, None)
+    table = ap.load_targets(PATCHES)
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
+    assert not list(g.glob("terranx_original*"))
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out, out
+    assert not (g / "terranx.exe").exists() and not (g / "terranx.exe.bak").exists()
+    assert _md5(g / "terranx_PRACX.exe") == table["pracx"].base_md5
+
+
+def test_gog_restoring_the_original_then_update_and_uninstall_lose_nothing(tmp_path, bak_path,
+                                                                         pristine_bytes):
+    """GOG Galaxy's "verify files" writes the original terranx.exe back over a set-up folder. The
+    game's update then stops with what to do (not "a binary we did not make"), and --uninstall
+    keeps that original -- its generic restore used to copy our PRACX .bak over it, destroying the
+    only copy left once the kept duplicate was gone (audit 2026-11-01, blocker)."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    vanilla = _md5(g / "terranx.exe")
+    _run("--ai", "off", game=g)
+    (g / "terranx.exe").write_bytes(pristine_bytes)                    # GOG's verify
+    (g / "terranx_original.exe").unlink()                              # and the player tidied up
+    m = _publish(tmp_path, g, latest=ver.VERSION, modules={})
+    rcode, out = _run("--update", "--manifest", str(m), "--no-prompt", game=g, expect_ok=False,
+                      env_extra={"LONGEVITY_TRUST_KEY": PK_HEX})
+    assert rcode == ix.EXIT_ABORTED and "original terranx.exe is back" in out, out
+    assert _md5(g / "terranx.exe") == vanilla
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out, out
+    assert _md5(g / "terranx.exe") == vanilla, "the original was overwritten"
+    assert not (g / "terranx.exe.bak").exists() and not (g / "longevity-thinker-setup.json").exists()
+
+
+def test_thinker_removed_after_the_set_up_returns_the_folder_to_plain_pracx(tmp_path, bak_path,
+                                                                          pristine_bytes):
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    vanilla = _md5(g / "terranx.exe")
+    table = ap.load_targets(PATCHES)
+    _run("--ai", "off", game=g)
+    (g / "thinker.dll").unlink()
+    (g / "thinker.exe").unlink()
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out and "no longer in this folder" in out, out
+    assert _md5(g / "terranx.exe") == vanilla and not (g / "terranx_original.exe").exists()
+    assert _md5(g / "terranx_PRACX.exe") == table["pracx"].patched_md5
+    assert rc.ini_get(g, rc.KEY_TARGET) == "pracx" and "start terranx_PRACX.exe" in out, out
+
+
+def test_a_plain_install_then_thinker_leaves_one_patched_exe(tmp_path, bak_path, pristine_bytes):
+    """An earlier plain install patched terranx_PRACX.exe; Thinker added, the set-up puts it back
+    to the clean build, so no second patched copy is left to go stale."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    (g / "thinker.dll").rename(g / "thinker.dll.off")
+    table = ap.load_targets(PATCHES)
+    _run("--ai", "off", game=g)
+    assert _md5(g / "terranx_PRACX.exe") == table["pracx"].patched_md5
+    (g / "thinker.dll.off").rename(g / "thinker.dll")
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
+    assert _md5(g / "terranx_PRACX.exe") == table["pracx"].base_md5, out
+    assert rc.ini_get(g, rc.KEY_TARGET) == "pracx_thinker"
+
+
+def test_an_earlier_releases_build_is_brought_up_to_date_and_uninstalls(tmp_path, bak_path,
+                                                                       pristine_bytes):
+    """Every release has its own patched hash: the build a set-up folder holds from an earlier
+    release is still recognised as ours (re-audit: it was "not recognised", the set-up dropped and
+    the old build left running against the new uimod.dll)."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    vanilla = _md5(g / "terranx.exe")
+    table = ap.load_targets(PATCHES)
+    _run("--ai", "off", game=g)
+    data = bytearray((g / "terranx.exe").read_bytes())
+    data[0x2000] ^= 0xFF                                               # "an earlier release"
+    (g / "terranx.exe").write_bytes(bytes(data))
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out and "--- Thinker ---" not in out, out
+    assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
+    assert _md5(g / "terranx_PRACX.exe") == table["pracx"].base_md5
+    assert rc.ini_get(g, rc.KEY_TARGET) == "pracx_thinker" and "start thinker.exe" in out
+    (g / "terranx.exe").write_bytes(bytes(data))
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out, out
+    assert _md5(g / "terranx.exe") == vanilla
+
+
+def test_an_exe_the_uninstall_must_leave_makes_it_incomplete(tmp_path, bak_path, pristine_bytes):
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    _run("--ai", "off", game=g)
+    (g / "terranx.exe.bak").unlink()
+    (g / "terranx.exe").write_bytes(b"MZ the player's own")
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL INCOMPLETE" in out and "terranx.exe was left as it is" in out, out
+    assert (g / "terranx.exe").read_bytes() == b"MZ the player's own"
+    assert (g / "terranx_original.exe").is_file()
+
+
+def test_our_build_without_its_backup_never_blocks_uninstall_or_install(tmp_path, bak_path,
+                                                                       pristine_bytes):
+    """This release's build with its terranx.exe.bak gone: known by its hash, it is restored from the
+    folder's other clean PRACX copy and the original goes back -- never "could not restore ... try
+    again" on every run (audit 3 #1), never "left as it is" for our own build (audit 4 #1); with
+    Thinker removed the install does the same."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    vanilla = _md5(g / "terranx.exe")
+    _run("--ai", "off", game=g)
+    (g / "terranx.exe.bak").unlink()
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out and "Could not restore" not in out, out
+    assert _md5(g / "terranx.exe") == vanilla and not (g / "terranx_original.exe").exists()
+
+    (tmp_path / "second").mkdir()
+    g2 = _thinker_folder(tmp_path / "second", bak_path, pristine_bytes)
+    _run("--ai", "off", game=g2)
+    (g2 / "terranx.exe.bak").unlink()
+    (g2 / "thinker.dll").unlink()
+    rcode, out = _run("--ai", "off", game=g2)
+    assert "INSTALLATION SUCCESSFUL" in out and "Could not restore" not in out, out
+    assert _md5(g2 / "terranx.exe") == vanilla and "start terranx_PRACX.exe" in out, out
+
+
+@pytest.mark.parametrize("junk", ["{not json", "[]"])
+def test_an_unreadable_set_up_record_is_no_uninstall(tmp_path, bak_path, pristine_bytes, junk):
+    """An unreadable record describes nothing: the uninstall removes it and is still the honest
+    "Nothing to uninstall" (audit 5 #1: it reported UNINSTALL COMPLETE on every run)."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    (g / "longevity-thinker-setup.json").write_text(junk, encoding="utf-8")
+    rcode, out = _run("--uninstall", game=g, expect_ok=False)
+    assert "Nothing to uninstall" in out and "UNINSTALL COMPLETE" not in out, out
+    assert not (g / "longevity-thinker-setup.json").exists()
+
+
+# ---------------------------------------------------------------- a REAL earlier release's build
+
+#: The commit 0.1.0 was cut from (dist\release\0.1.0\release-log.json) and what it shipped for
+#: `pracx` (its signed manifest's `targets`).
+RELEASE_010 = ("c50e7bcdd9174dbc208811dc03978172723c6f3e", "ed30ac8bc96b6f30dc1ba4e1461b97bd")
+
+
+def test_the_in_game_update_from_a_real_0_1_0_build_is_not_refused(game, tmp_path, bak_path):
+    """patched_md5 changes with every release; the build 0.1.0 left on a player's disk is ours by
+    the target's known_patched history, so the update goes through -- it was refused as "a binary
+    we did not make" (audit 2026-11-01) -- and a fresh install over it keeps no .replaced copy.
+
+    0.1.0's actual pracx build is made here by 0.1.0's OWN patcher from its release commit (~3 s of
+    the test's ~10; not conftest's baked_exe, which is THIS release's build)."""
+    import io
+    import tarfile
+    commit, want = RELEASE_010
+    try:
+        tar = subprocess.run(["git", "-C", str(_REPO), "archive", "--format=tar", commit,
+                              "work/scripts", "work/patches"], capture_output=True)
+    except FileNotFoundError:
+        pytest.skip("no git on PATH")
+    if tar.returncode != 0:
+        pytest.skip(f"0.1.0's sources ({commit[:8]}) are not in this checkout's history")
+    old = tmp_path / "rel010"
+    with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as t:
+        t.extractall(old / "src", filter="data")
+    exe = old / "terranx_PRACX.exe"
+    shutil.copy2(bak_path, exe)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+    env["SMACX_GAME_DIR"] = str(old / "no-game")         # its config must never find a real game
+    scripts = old / "src" / "work" / "scripts"
+    p = subprocess.run([sys.executable, str(scripts / "apply_patches.py"), "--target", str(exe),
+                        "--patches", str(old / "src" / "work" / "patches" / "patches.yaml"),
+                        "--apply", "--target-id", "pracx"],
+                       cwd=scripts, capture_output=True, text=True, env=env, timeout=300,
+                       stdin=subprocess.DEVNULL)
+    build_010 = exe.read_bytes()
+    assert hashlib.md5(build_010).hexdigest() == want, p.stdout[-2000:] + p.stderr[-2000:]
+
+    table = ap.load_targets(PATCHES)
+    (game / "terranx_PRACX.exe.bak").write_bytes((game / "terranx_PRACX.exe").read_bytes())
+    (game / "terranx_PRACX.exe").write_bytes(build_010)
+    rc.write(game, target_id="pracx", modules={"base": {"version": "0.1.0"}}, say=lambda *a: None)
+    m = _publish(tmp_path, game, latest=ver.VERSION, modules={})
+    rcode, out = _run("--update", "--manifest", str(m), "--no-prompt", game=game,
+                      env_extra={"LONGEVITY_TRUST_KEY": PK_HEX})
+    assert "UPDATE COMPLETE" in out and "did not make" not in out, out
+    assert _md5(game / "terranx_PRACX.exe") == table["pracx"].patched_md5
+
+    (game / "terranx_PRACX.exe").write_bytes(build_010)
+    rcode, out = _run("--ai", "off", game=game)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert _md5(game / "terranx_PRACX.exe") == table["pracx"].patched_md5
+    assert not list(game.glob("*.replaced-*")), "our own earlier build was kept as a stranger's"
+
+
+def test_a_locked_terranx_fails_the_set_up_with_nothing_changed(tmp_path, bak_path, pristine_bytes):
+    """terranx.exe held open without delete sharing (another program reading it) -- the rename
+    fails, and the installer stops before patching with every file as it was. (A RUNNING exe can be
+    renamed on Windows; the set-up then simply completes, and the patch pass is what reports the
+    game still running.)"""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    before = _tree(g)
+    with open(g / "terranx.exe", "rb"):
+        rcode, out = _run("--ai", "off", game=g, expect_ok=False)
+    assert rcode == ix.EXIT_ABORTED, out
+    assert "could not be set up for Thinker" in out and "Nothing on disk was changed" in out, out
+    assert _tree(g) == before

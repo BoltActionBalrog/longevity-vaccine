@@ -92,6 +92,9 @@ MODULE_SPEC = {
             ("work/scripts/bootstrap.py", "scripts/bootstrap.py"),
             # The Datalinks text patch (helpx.txt / conceptsx.txt), applied by install.py on every run.
             ("work/scripts/patch_helptext.py", "scripts/patch_helptext.py"),
+            # Public roots our hosts chain to, loaded by fetch.py beside the Windows store: a Windows 7 whose
+            # store never met them cannot fetch anything otherwise (make_roots_pem.py).
+            ("work/scripts/roots.pem", "scripts/roots.pem"),
             # NOT shipped, deliberately: sign_manifest.py (the private-key machinery),
             # release.py and hash_hd_pack.py (build tooling). test_release asserts their absence.
             ("work/patches/patches.yaml", "patches/patches.yaml"),

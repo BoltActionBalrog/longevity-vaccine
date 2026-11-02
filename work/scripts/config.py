@@ -83,6 +83,146 @@ def _from_autodetect() -> Path | None:
     return None
 
 
+#: Replaces EVERY machine source of candidate_game_dirs() (the env var, game-path.txt, the fixed
+#: locations, the GOG registry) with this list, "|"-separated -- empty means none. The test suite
+#: sets it so no installer a test spawns can ever find the real game.
+CANDIDATES_ENV = "LONGEVITY_GAME_CANDIDATES"
+#: Where the folders the installer installed into are remembered (one per line). Default:
+#: %LOCALAPPDATA%\LongevityVaccine\installs.txt.
+INSTALLS_ENV = "LONGEVITY_INSTALLS_FILE"
+
+
+def _gog_registry_dirs() -> list:
+    """Every GOG-installed game folder (GOG Galaxy and the offline installers both record one
+    under HKLM\\SOFTWARE\\[WOW6432Node\\]GOG.com\\Games\\<id>, value `path`), wherever the
+    player put the library. Read-only; any failure is just "none"."""
+    try:
+        import winreg
+    except ImportError:
+        return []
+    out = []
+    for root in (r"SOFTWARE\WOW6432Node\GOG.com\Games", r"SOFTWARE\GOG.com\Games"):
+        try:
+            k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, root)
+        except OSError:
+            continue
+        with k:
+            i = 0
+            while True:
+                try:
+                    sub = winreg.EnumKey(k, i)
+                except OSError:
+                    break
+                i += 1
+                try:
+                    with winreg.OpenKey(k, sub) as g:
+                        v, _ = winreg.QueryValueEx(g, "path")
+                except OSError:
+                    continue
+                if isinstance(v, str) and v.strip():
+                    out.append(Path(v.strip().strip('"')))
+    return out
+
+
+def _dedup_dirs(dirs) -> list:
+    out, seen = [], set()
+    for d in dirs:
+        try:
+            key = _dir_key(d)
+        except (OSError, ValueError):
+            continue
+        if key and key not in seen:
+            seen.add(key)
+            out.append(Path(d))
+    return out
+
+
+def candidate_game_dirs() -> list:
+    """Folders that may hold the game, most likely first: the configured one (env var,
+    game-path.txt), then every known location that has the game's marker file in it -- the fixed
+    GOG paths and every folder the GOG registry names. Only existing folders; no validation of
+    WHICH game build is there (the installer does that)."""
+    if CANDIDATES_ENV in os.environ:
+        raw = [p.strip().strip('"') for p in os.environ[CANDIDATES_ENV].split("|")]
+        found = [Path(p) for p in raw if p]
+    else:
+        found = [d for d in (_from_env_dir(), _from_file_dir()) if d is not None]
+        found += [d for d in [Path(c) for c in _CANDIDATES] + _gog_registry_dirs()
+                  if (d / _DIR_MARKER).exists()]
+    return [d for d in _dedup_dirs(found) if _safe_is_dir(d)]
+
+
+def _safe_is_dir(d: Path) -> bool:
+    """is_dir() that reads an unreadable folder as "not a candidate" instead of raising."""
+    try:
+        return d.is_dir()
+    except (OSError, ValueError):
+        return False
+
+
+def installs_file() -> Path:
+    v = os.environ.get(INSTALLS_ENV, "").strip().strip('"')
+    if v:
+        return Path(v)
+    import tempfile
+    base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
+    return Path(base) / "LongevityVaccine" / "installs.txt"
+
+
+def remembered_game_dirs() -> list:
+    """The folders the installer installed into on this PC (still existing), newest first."""
+    try:
+        lines = installs_file().read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    return [d for d in _dedup_dirs(Path(s.strip()) for s in lines if s.strip()) if _safe_is_dir(d)]
+
+
+def _write_remembered(dirs) -> bool:
+    f = installs_file()
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")    # two installers never share one
+        tmp.write_text("".join(f"{d}\n" for d in dirs), encoding="utf-8")
+        os.replace(tmp, f)
+        return True
+    except OSError:
+        try:
+            tmp.unlink()
+        except (OSError, NameError):
+            pass
+        return False
+
+
+def _dir_key(p) -> str:
+    """One key per folder ON DISK: its volume serial + file index when it can be read, so a
+    junction, a subst drive or an 8.3 name of the same folder is one folder, not two installs."""
+    try:
+        st = os.stat(str(p))
+        if st.st_ino:
+            return f"id:{st.st_dev}:{st.st_ino}"
+    except (OSError, ValueError):
+        pass
+    return os.path.normcase(os.path.abspath(str(p))).rstrip("\\/")
+
+
+def _same_dir(a, b) -> bool:
+    return _dir_key(a) == _dir_key(b)
+
+
+def remember_game_dir(d: Path) -> bool:
+    """Record `d` (absolute) as an install, newest first. Best effort: a failure only means the
+    next run has to be pointed at the folder again."""
+    d = Path(os.path.abspath(str(d)))
+    keep = [x for x in remembered_game_dirs() if not _same_dir(x, d)]
+    return _write_remembered([d] + keep)
+
+
+def forget_game_dir(d: Path) -> bool:
+    keep = [x for x in remembered_game_dirs() if not _same_dir(x, d)]
+    return _write_remembered(keep)
+
+
 def resident_game_dir(script_dir: Path) -> Path | None:
     """The game directory a RESIDENT updater belongs to, from its own location
     (`<game>\\LongevityMods\\updater\\scripts`), else None.

@@ -153,6 +153,12 @@ targets:
     base_size:    3084288
     groups:       all
     patched_md5:  677a55d5b96c51750a27a72df8dffe74   # mirrors target.patched_md5 above
+    # APPEND-ONLY: every patched_md5 a RELEASE shipped for this target, so the next release still
+    # knows the build on a player's disk as ours (release_all.py's "exe history" check refuses a
+    # release whose table drops one). From dist\release\<version>\manifest.json `targets`.
+    known_patched:
+      - ed30ac8bc96b6f30dc1ba4e1461b97bd   # 0.1.0
+      - 677a55d5b96c51750a27a72df8dffe74   # 0.2.0
     companion:
       prax.dll:
         patches:      patches_prax.yaml
@@ -208,6 +214,8 @@ targets:
       - SetupWin_draw_item.decoration_soft_update_scaled  # decision 2 (menu strip) option A: Thinker's write_call 0x4AE73B inside our 43-byte block; DLL applies ours after Thinker
       - load_credits_a.subwin                             # decision 3 (credits) option A: Thinker's write_call 0x428AB9 inside our 50-byte detour; DLL applies ours after Thinker
     patched_md5:    c4c0240a057878fbc530dd6acf02a2c6   # pracx 677a55d5 minus the 4 excluded sites (dry-run 2026-10-28, boot guard). Before: 00d74f0f = pracx 5a3e20b0 minus the 4 excluded sites (dry-run 2026-10-28)
+    known_patched:                           # APPEND-ONLY: every release's build (see pracx)
+      - c4c0240a057878fbc530dd6acf02a2c6   # 0.2.0
     companion:
       prax.dll:
         patches:      patches_prax.yaml

@@ -94,9 +94,13 @@ if not exist "%SCRIPT%" goto :incomplete
 REM Windows 7 / 8 only: CPython 3.8's extension loader needs Windows update KB2533623 (2011; part of any
 REM Windows 7 that ever took Windows Update). Without it every .pyd import dies before install.py can say
 REM a word, so the one import the installer needs first is tried here and the update is named instead.
-REM No block: `if errorlevel 1` misses a NEGATIVE code (a loader crash of the probe), so compare the
-REM expanded value instead -- which a parenthesised block would have expanded too early.
+REM Two probes, no block (`if errorlevel 1` misses a NEGATIVE code; a parenthesised block would expand
+REM %ERRORLEVEL% too early). First: does the runtime START at all (a quarantined python38.dll or UCRT
+REM forwarder gives a loader status, not 1 -- that is "download again / antivirus", NOT the KB). Then the
+REM one import KB2533623 governs.
 if not defined PY38 goto :afterkb
+"%PY%" -I -c "pass" >nul 2>&1
+if not "%ERRORLEVEL%"=="0" goto :nostart
 "%PY%" -I -c "import ctypes" >nul 2>&1
 if not "%ERRORLEVEL%"=="0" goto :needkb
 :afterkb
@@ -115,6 +119,26 @@ echo  [installer] Could not create a status marker file, so this window cannot t
 echo  [installer] whether the installer reported its result. Read the text above.
 if not defined NOWAIT pause
 endlocal & exit /b %RC%
+
+:nostart
+set "RC=%ERRORLEVEL%"
+if defined MDIR rd /s /q "%MDIR%" 2>nul
+echo.
+echo  ============================================================
+echo     INSTALLATION FAILED
+echo  ============================================================
+echo  The installer's runtime for this Windows ^(tools\python38\python.exe^) could not start
+echo  ^(code %RC%^). A file beside it is missing or blocked -- an antivirus quarantine or an
+echo  incomplete extraction is the usual cause.
+echo.
+echo  Nothing on disk was changed.
+echo.
+echo  What to do: extract the WHOLE archive again ^(check the antivirus quarantine^), then run
+echo  the installer again.
+echo.
+if not defined NOWAIT pause
+REM 11: distinct from 9 ^(package incomplete^) and 10 ^(missing KB2533623^).
+endlocal & exit /b 11
 
 :needkb
 if defined MDIR rd /s /q "%MDIR%" 2>nul

@@ -194,6 +194,11 @@ bool ReadWhole(const wchar_t* path, std::vector<uint8_t>* out)
 template <typename T> void Release(T*& p) { if (p) { p->Release(); p = nullptr; } }
 
 // Decode PNG / JPEG bytes to 24bpp RGB.  False on anything unexpected.
+// The WIC step that refused the last decode on this thread (the game thread and the prewarm worker both decode),
+// for the log: a codec missing on this Windows is not "a bad file".
+thread_local const char* g_wicStep = nullptr;
+thread_local HRESULT     g_wicHr = S_OK;
+
 bool DecodeWic(const std::vector<uint8_t>& file, std::vector<uint8_t>* rgb, int* w, int* h)
 {
     static const uint8_t kPng[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
@@ -222,26 +227,41 @@ bool DecodeWic(const std::vector<uint8_t>& file, std::vector<uint8_t>* rgb, int*
     IWICBitmapDecoder* dec = nullptr;
     IWICBitmapFrameDecode* frame = nullptr;
     IWICFormatConverter* conv = nullptr;
+    g_wicStep = nullptr; g_wicHr = S_OK;
+    auto fails = [](const char* step, HRESULT hr) { if (FAILED(hr)) { g_wicStep = step; g_wicHr = hr; return true; } return false; };
     do {
-        if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&fac)))) break;
-        if (FAILED(fac->CreateStream(&stream))) break;
-        if (FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(file.data()), static_cast<DWORD>(file.size())))) break;
-        if (FAILED(CoCreateInstance(png ? CLSID_WICPngDecoder : CLSID_WICJpegDecoder, nullptr, CLSCTX_INPROC_SERVER,
-                                    IID_PPV_ARGS(&dec)))) break;
-        if (FAILED(dec->Initialize(stream, WICDecodeMetadataCacheOnDemand))) break;
-        if (FAILED(dec->GetFrame(0, &frame))) break;
+        // Same Windows 7 story as the PNG decoder below: the Win10 SDK's CLSID_WICImagingFactory is the v2 factory
+        // (Windows 8+, Platform Update on 7); plain 7 SP1 has only CLSID_WICImagingFactory1, which decodes exactly
+        // the same (v2 adds D2D interop we never use).
+        HRESULT hrFac = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&fac));
+        if (hrFac == REGDB_E_CLASSNOTREG)
+            hrFac = CoCreateInstance(CLSID_WICImagingFactory1, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&fac));
+        if (fails("imaging factory (v2, then v1)", hrFac)) break;
+        if (fails("stream", fac->CreateStream(&stream))) break;
+        if (fails("stream init", stream->InitializeFromMemory(const_cast<BYTE*>(file.data()), static_cast<DWORD>(file.size())))) break;
+        // PNG: with the Windows 10 SDK, CLSID_WICPngDecoder names the v2 decoder, registered on Windows 8+ and on
+        // Windows 7 only by the Platform Update (KB2670838). A plain 7 SP1 answers REGDB_E_CLASSNOTREG -- which
+        // used to drop EVERY PNG portrait, HD pack included, with a log line blaming the file. The v1 decoder
+        // (CLSID_WICPngDecoder1) exists on every Windows since Vista: ask for it when v2 is not there.
+        HRESULT hrDec = CoCreateInstance(png ? CLSID_WICPngDecoder : CLSID_WICJpegDecoder, nullptr, CLSCTX_INPROC_SERVER,
+                                         IID_PPV_ARGS(&dec));
+        if (png && hrDec == REGDB_E_CLASSNOTREG)
+            hrDec = CoCreateInstance(CLSID_WICPngDecoder1, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dec));
+        if (fails(png ? "PNG decoder (v2, then v1)" : "JPEG decoder", hrDec)) break;
+        if (fails("decoder init", dec->Initialize(stream, WICDecodeMetadataCacheOnDemand))) break;
+        if (fails("frame", dec->GetFrame(0, &frame))) break;
         UINT fw = 0, fh = 0;
-        if (FAILED(frame->GetSize(&fw, &fh))) break;
+        if (fails("frame size", frame->GetSize(&fw, &fh))) break;
         if (fw < static_cast<UINT>(kMinSide) || fh < static_cast<UINT>(kMinSide) ||
             fw > static_cast<UINT>(kMaxSide) || fh > static_cast<UINT>(kMaxSide)) break;
         const unsigned long long stride = static_cast<unsigned long long>(fw) * 3ull;
         const unsigned long long bytes = stride * fh;
         if (bytes > 0x7FFFFFFFull) break;
-        if (FAILED(fac->CreateFormatConverter(&conv))) break;
-        if (FAILED(conv->Initialize(frame, GUID_WICPixelFormat24bppRGB, WICBitmapDitherTypeNone, nullptr, 0.0,
-                                    WICBitmapPaletteTypeCustom))) break;
+        if (fails("format converter", fac->CreateFormatConverter(&conv))) break;
+        if (fails("convert to 24bpp", conv->Initialize(frame, GUID_WICPixelFormat24bppRGB, WICBitmapDitherTypeNone, nullptr, 0.0,
+                                                       WICBitmapPaletteTypeCustom))) break;
         try { rgb->resize(static_cast<size_t>(bytes)); } catch (...) { break; }   // keep the cleanup below
-        if (FAILED(conv->CopyPixels(nullptr, static_cast<UINT>(stride), static_cast<UINT>(bytes), rgb->data()))) break;
+        if (fails("copy pixels", conv->CopyPixels(nullptr, static_cast<UINT>(stride), static_cast<UINT>(bytes), rgb->data()))) break;
         *w = static_cast<int>(fw);
         *h = static_cast<int>(fh);
         ok = true;
@@ -272,7 +292,13 @@ std::shared_ptr<const Image> Decode(const wchar_t* path, uint64_t id, const char
         int w = 0, h = 0;
         if (!ReadWhole(path, &file)) { Log("[uimod] portrait: %s: replacement %s unreadable or too large -> vanilla\n", name, path); return nullptr; }
         if (!DecodeWicGuarded(file, &rgb, &w, &h)) {
-            Log("[uimod] portrait: %s: replacement %s is not a complete PNG/JPEG of 32..2048 px -> vanilla\n", name, path);
+            if (g_wicStep) {    // WIC itself refused (a missing codec on this Windows, not a bad file): say which step
+                char why[256];
+                _snprintf_s(why, sizeof why, _TRUNCATE, "%s: WIC %s failed (0x%08lX) for replacement", name, g_wicStep,
+                            static_cast<unsigned long>(g_wicHr));
+                Log("[uimod] portrait: %s %s -> vanilla\n", why, path);
+            } else
+                Log("[uimod] portrait: %s: replacement %s is not a complete PNG/JPEG of 32..2048 px -> vanilla\n", name, path);
             return nullptr;
         }
         auto img = std::make_shared<Image>();

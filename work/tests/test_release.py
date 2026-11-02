@@ -255,7 +255,8 @@ def test_the_runtime_modules_the_installer_needs_are_shipped(built):
     names = set(zipfile.ZipFile(built / rel.archive_name("base", ver.VERSION)).namelist())
     for required in ("ed25519_verify.py", "manifest.py", "fetch.py", "preflight.py",
                      "transact.py", "receipt.py", "bootstrap.py",
-                     "patch_helptext.py"):     # the Datalinks text patch install.py applies on every run
+                     "patch_helptext.py",      # the Datalinks text patch install.py applies on every run
+                     "roots.pem"):             # the public roots fetch.py adds to the Windows store (Windows 7)
         assert f"scripts/{required}" in names, f"{required} is missing from the base module"
 
 

@@ -3,6 +3,7 @@
 //   t bytes <n>                             -> FormatBytes
 //   t decline <rawfile> [item ver]...       -> DeclineParse (+DeclineSet pairs) -> DeclineFormat
 //   t cmdline <utf8file>                    -> ExtractLvManifest on the file's one line
+//   t gamedir <exe path>                    -> GameDirFromExePath
 //   t buildcmd <py> <script> <game> [<manifest>] -> BuildCheckCommandLine
 //   t handoff <bat> <game> <pid> <manifest|-> [id...] -> BuildUpdateCommandLine (the accept hand-off)
 //   t handoffmods <exit> <infile> <accepted 0|1> [new id...] -> HandoffModules as a csv
@@ -115,6 +116,13 @@ int main(int argc, char** argv)
         wchar_t out[2048];
         if (ExtractLvManifest(cmd.c_str(), out, 2048)) printf("%ls\n", out);
         else printf("<none>\n");
+        return 0;
+    }
+    if (mode == "gamedir" && argc == 3) {                      // <exe path> -> GameDirFromExePath
+        const std::wstring exe = widen(argv[2]);
+        wchar_t out[1024];
+        if (GameDirFromExePath(exe.c_str(), out, 1024)) printf("%ls\n", out);
+        else printf("<refused>\n");
         return 0;
     }
     if (mode == "buildcmd" && (argc == 5 || argc == 6)) {

@@ -553,10 +553,46 @@ inline int ExtractLvDelaySeconds(const wchar_t* cmd)
     return n;
 }
 
-// `"<python>" "<script>" --check --game-dir "<game>" [--manifest "<manifest>"]`. Refuses an
-// argument with a quote; trailing backslashes would escape the closing quote, so they are
-// dropped -- except a drive root's (`D:\`), which must keep its one (`D:` means "the current
-// directory of drive D"). An argument that is nothing but backslashes is refused.
+// The game directory from the exe's full path: everything before the last backslash -- except a
+// drive root, which keeps it (`D:\`; `D:` alone means the CURRENT directory of drive D), also
+// behind a `\\?\` or `\\.\` prefix (`\\?\C:` names the volume device, not its root). False when
+// there is no backslash or the result does not fit.
+inline bool GameDirFromExePath(const wchar_t* exe, wchar_t* out, size_t cap)
+{
+    const wchar_t* slash = wcsrchr(exe, L'\\');
+    if (!slash) return false;
+    const bool device = exe[0] == L'\\' && exe[1] == L'\\' && (exe[2] == L'?' || exe[2] == L'.') && exe[3] == L'\\';
+    const wchar_t* drive = device ? exe + 4 : exe;          // "X:" of a drive path, prefix or not
+    const bool root = drive[0] && drive[1] == L':' && slash == drive + 2;
+    const size_t n = static_cast<size_t>(slash - exe) + (root ? 1 : 0);
+    if (n + 1 > cap) return false;
+    memcpy(out, exe, n * sizeof(wchar_t));
+    out[n] = 0;
+    return true;
+}
+
+// Appends `"<s>"` at out[o] so the MSVC CRT argv parser -- CommandLineToArgvW, and Python's own
+// argv -- reads back EXACTLY `s`. Backslashes are literal there except in a run that ends at a
+// quote, so the run before the CLOSING quote is doubled: `"D:\"` read back as `D:"` plus the rest
+// of the line (a game at a drive root lost --wait-pid, --only-listed and --modules, 2026-11-01).
+// A path without a trailing backslash comes out exactly as before. `s` must hold no quote (the
+// callers refuse one). Leaves room for the terminator; false when it does not fit.
+inline bool AppendArgQuoted(wchar_t* out, size_t& o, size_t cap, const wchar_t* s)
+{
+    const size_t n = wcslen(s);
+    size_t tail = 0;
+    while (tail < n && s[n - 1 - tail] == L'\\') ++tail;
+    if (o + n + tail + 2 >= cap) return false;
+    out[o++] = L'"';
+    memcpy(out + o, s, n * sizeof(wchar_t)); o += n;
+    for (size_t i = 0; i < tail; ++i) out[o++] = L'\\';
+    out[o++] = L'"';
+    return true;
+}
+
+// `"<python>" "<script>" --check --game-dir "<game>" [--manifest "<manifest>"]`, each path quoted
+// by AppendArgQuoted, so the receiver reads it back exactly -- a drive root `D:\` included. Refuses
+// an empty argument, one with a quote, and one that is nothing but backslashes.
 inline bool BuildCheckCommandLine(const wchar_t* python, const wchar_t* script, const wchar_t* game,
                                   const wchar_t* manifest, wchar_t* out, size_t cap)
 {
@@ -566,11 +602,8 @@ inline bool BuildCheckCommandLine(const wchar_t* python, const wchar_t* script, 
         memcpy(out + o, s, n * sizeof(wchar_t)); o += n; return true;
     };
     auto quoted = [&](const wchar_t* s) {
-        size_t n = wcslen(s);
-        if (n == 0 || wcschr(s, L'"')) return false;
-        while (n > 0 && s[n - 1] == L'\\' && !(n == 3 && s[1] == L':')) --n;
-        if (n == 0) return false;
-        return put(L"\"", 1) && put(s, n) && put(L"\"", 1);
+        if (!s || !s[0] || wcschr(s, L'"') || wcsspn(s, L"\\") == wcslen(s)) return false;
+        return AppendArgQuoted(out, o, cap, s);
     };
     if (!quoted(python) || !put(L" ", 1) || !quoted(script) || !put(L" --check --game-dir ", 20) || !quoted(game))
         return false;
@@ -617,7 +650,10 @@ inline int HandoffModules(const UpdateInfo& u, bool updateAccepted, const char* 
 // fetch EXACTLY the packs named (none when --modules is absent) and never to add other stale
 // installed packs; the core still comes along whenever it is stale -- the bootstrap runs the newest
 // installer by nature, and the popup always lists the core when it is stale and undeclined. Refuses
-// a path or manifest with a quote or a cmd.exe metacharacter, and any id HandoffIdOk rejects.
+// a path or manifest with a quote, a cmd.exe metacharacter or nothing but backslashes, and any id
+// HandoffIdOk rejects. Paths
+// are quoted by AppendArgQuoted: cmd.exe and the batch file's %* pass them through untouched, and
+// the python that finally parses them reads back exactly what was given (a drive root included).
 inline bool BuildUpdateCommandLine(const wchar_t* cmdExe, const wchar_t* bat, const wchar_t* game, unsigned long pid,
                                    const char* const* mods, int nMods, const wchar_t* manifest,
                                    wchar_t* out, size_t cap)
@@ -627,8 +663,10 @@ inline bool BuildUpdateCommandLine(const wchar_t* cmdExe, const wchar_t* bat, co
         if (o + n >= cap) return false;
         memcpy(out + o, s, n * sizeof(wchar_t)); o += n; return true;
     };
-    auto clean = [](const wchar_t* s) { return s && s[0] && !wcspbrk(s, L"\"%!&|<>^\r\n"); };
-    auto quoted = [&](const wchar_t* s) { return clean(s) && put(L"\"", 1) && put(s, wcslen(s)) && put(L"\"", 1); };
+    auto clean = [](const wchar_t* s) {
+        return s && s[0] && !wcspbrk(s, L"\"%!&|<>^\r\n") && wcsspn(s, L"\\") != wcslen(s);
+    };
+    auto quoted = [&](const wchar_t* s) { return clean(s) && AppendArgQuoted(out, o, cap, s); };
     if (!quoted(cmdExe) || !put(L" /D /S /C \"", 11) || !quoted(bat) || !put(L" --update --game-dir ", 21) || !quoted(game))
         return false;
     wchar_t num[24];                                      // the pid in decimal (no CRT formatting: this header is CRT-free)

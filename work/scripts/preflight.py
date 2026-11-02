@@ -161,12 +161,16 @@ def check_target_and_backup(pf: Preflight, target: Path, table: dict,
     # this configuration's, or a sibling configuration's on the same base (PRACX and PRACX +
     # Thinker share one base -- a Thinker build in a folder Thinker was removed from is still ours,
     # not "a binary we did not make"; audit 2026-10-28).
-    known = {spec.base_md5, spec.patched_md5} - {None}
-    siblings = {t.patched_md5 for t in table.values()
-                if t.launch and t.patched_md5 and t.id != spec.id and t.base_md5 == spec.base_md5}
+    # ... and a build of ours means ANY release's, not only this one's: patched_md5 changes with
+    # every release, so the build an earlier release left on the player's disk is in the target's
+    # known_patched history (TargetSpec.builds). Without it every in-game update from one release
+    # to the next was refused here as "a binary we did not make".
+    known = ({spec.base_md5} | spec.builds) - {None}
+    siblings = ap.builds_on_base(table, spec.base_md5, exclude=spec.id)
     if live_md5 in known:
         pf.add("live executable is ours or the clean base", True,
-               "clean" if live_md5 == spec.base_md5 else "already patched")
+               "clean" if live_md5 == spec.base_md5 else
+               "already patched" if live_md5 == spec.patched_md5 else "patched by an earlier release")
     elif live_md5 in siblings:
         pf.add("live executable is ours or the clean base", True,
                "patched for another configuration of the same base")

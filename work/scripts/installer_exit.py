@@ -239,6 +239,12 @@ def can_ask() -> bool:
     not because nobody is watching: the update console the player just opened is watched."""
     if os.environ.get("LONGEVITY_NO_WAIT"):
         return False
+    # --no-wait straight off argv, as interactive() reads it: the bootstrap asks (the folder
+    # picker) before anything exports LONGEVITY_NO_WAIT, so a scripted `--update --no-wait` run
+    # from a console stopped at the question.
+    for a in sys.argv[1:]:
+        if a == "--no-wait" or a.startswith("--no-wait="):
+            return False
     try:
         return sys.stdin is not None and sys.stdin.isatty()
     except (ValueError, AttributeError, OSError):

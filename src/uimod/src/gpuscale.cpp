@@ -234,8 +234,14 @@ bool g_madeWarned = false;
 bool MakeDevice(Made& m)
 {
     const HMODULE d3d = LoadLibraryA("d3d11.dll");
-    const HMODULE comp = LoadLibraryA("d3dcompiler_47.dll");
-    if (!d3d || !comp) return m.Err("loading d3d11 / d3dcompiler_47", HRESULT_FROM_WIN32(GetLastError()));
+    if (!d3d) return m.Err("loading d3d11.dll (Windows 7 SP1+ has it)", HRESULT_FROM_WIN32(GetLastError()));
+    // The shader is compiled at run time. Windows 8+ ship d3dcompiler_47; Windows 7 has it only through KB4019990
+    // (the .NET 4.7 prerequisite, 2017) -- but the June 2010 DirectX redistributable that most games install left
+    // d3dcompiler_43 behind, and vs_4_0/ps_4_0 compile the same there. Neither -> the CPU scaler, named.
+    HMODULE comp = LoadLibraryA("d3dcompiler_47.dll");
+    if (!comp) comp = LoadLibraryA("d3dcompiler_43.dll");
+    if (!comp) return m.Err("loading d3dcompiler_47.dll / d3dcompiler_43.dll (Windows 7: install KB4019990 or the DirectX June 2010 redist)",
+                            HRESULT_FROM_WIN32(GetLastError()));
     using FCreate = HRESULT(WINAPI*)(IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL*, UINT, UINT,
                                      const DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**, ID3D11Device**, D3D_FEATURE_LEVEL*,
                                      ID3D11DeviceContext**);

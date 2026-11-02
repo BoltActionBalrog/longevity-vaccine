@@ -1,5 +1,5 @@
 {
-  "commit": "50a0e16648c6c2c14f3be85cdc59ecf104c72917",
+  "commit": "0bb3e50bb1857a8e007266a8829a7cff4d506cb0",
   "files": {
     ".gitattributes": {
       "sha256": "5fbe777721a346d0dfa570e85a23b59348fa85041486ce9f8b1889ec14566a7b",
@@ -18,16 +18,16 @@
       "size": 35149
     },
     "README.md": {
-      "sha256": "91344a0c9b57b4a513d49471849b0c480e41832bf05dfac8acb51dbc449eec0f",
-      "size": 11684
+      "sha256": "8f5770859654fdbad0655a2a831176035dcb039b05577b244089e4bd7d288018",
+      "size": 7344
     },
     "THIRD_PARTY.md": {
       "sha256": "66872cc89d8c5985cc315b9c4a6852bb1d70427abfa71a407e8f81fa3303cf18",
       "size": 4510
     },
     "docs/notes/README.md": {
-      "sha256": "6222d4c201505f10327cbcd30e693bf2d98d4b5acff4b953949920bc126d23bb",
-      "size": 55294
+      "sha256": "8bbd661c774633d09b521eae82c63d624a6540734125a57b5d5204668286a4bb",
+      "size": 55528
     },
     "docs/notes/feedback-animation-loop-draw-sites.md": {
       "sha256": "6afa234904f10543fff5169ef931c2f6df93ef8692744cc45190dd754ec4df13",
@@ -216,6 +216,10 @@
     "docs/notes/feedback-no-external-movie-player.md": {
       "sha256": "fa4e6761785137152fa36659d02414512b4339aafe533cfaf8eb1460d2b4d959",
       "size": 1260
+    },
+    "docs/notes/feedback-no-maintainer-paths-as-instructions.md": {
+      "sha256": "2b7668e5fccc54e75ba6fdccbbc682c8f8458ba873778d8ebe4a3c6a13e8aad2",
+      "size": 1185
     },
     "docs/notes/feedback-parity-blit-key-exclusion.md": {
       "sha256": "17555a0cd3ab8a5a31d6305369e9b700010ffc880da409d2bd6c9cc331da8a60",
@@ -786,8 +790,8 @@
       "size": 7377
     },
     "docs/notes/project-smac-win7-and-dll-load-robustness.md": {
-      "sha256": "7e82c42dd847d75fdd25bcfc492e8ba5e0c7dd06f97fdfd703597c2e29c1d851",
-      "size": 4293
+      "sha256": "6f1ba1d4f30d95785867b2c519379f3e4b3ffd7f945d3f3005de3d99d200dd73",
+      "size": 5545
     },
     "docs/notes/project-smacx-baseline.md": {
       "sha256": "7f5e5c08ee0c79f81dde02a54d8117c383530ded0c7e158da8bb8146ce2036ad",
@@ -910,8 +914,8 @@
       "size": 1072
     },
     "src/uimod/src/gpuscale.cpp": {
-      "sha256": "8d9ff0ff2dfd4458e74fa018519719519fc8860872a31ba2e74cb11ae8051dd3",
-      "size": 23274
+      "sha256": "4dea1e7b1b72fc09298d9383ab4faec4a664621f0bdded10b0d6c835c513e3ec",
+      "size": 23871
     },
     "src/uimod/src/gpuscale.h": {
       "sha256": "46330ab2bf23cedbdc8d711952a07c9dd6cdf28da5bd2ed7577fd6042ac55076",
@@ -998,8 +1002,8 @@
       "size": 2037
     },
     "src/uimod/src/portrait_files.cpp": {
-      "sha256": "68ff2ad14433ac6023f21f403dd8edb1aa1152ddbf17bf4188b48ce6859554bb",
-      "size": 21742
+      "sha256": "d01f20006622e26b7014fd5193fcba83947e49c4fcd8b4d565a9d28b97245cc3",
+      "size": 23948
     },
     "src/uimod/src/portrait_files.h": {
       "sha256": "b6861e8c36c27f1642b0342357178efeaa542609c6e9282ffc6c1a254f8e2f23",
@@ -1106,19 +1110,19 @@
       "size": 354
     },
     "src/uimod/src/update.cpp": {
-      "sha256": "1e9fe6658007b0388ae4ef0d650c89c4fdaf62935d860458d22d264a1441174a",
-      "size": 50853
+      "sha256": "4753a9f1ee793ec221846a195be982ff79f032979e7ca535afdf3c5e7334af33",
+      "size": 51280
     },
     "src/uimod/src/update.h": {
       "sha256": "de10c3f2cf0a1726b25a1ef024996a6ef41e1cd6f6ef7268a2d4e1958be57222",
       "size": 2680
     },
     "src/uimod/src/update_core.h": {
-      "sha256": "b258b709700bc59913b5da7d42a117213ed30febcf419068e2c7ee748cd28c32",
-      "size": 45648
+      "sha256": "ef4b7c9d267f53fc8b1f1df948c062878556f7591563b648f49bec4c64a8f0bf",
+      "size": 47667
     },
     "src/uimod/src/version.h": {
-      "sha256": "d0ba806524e5708ec51adecb37db1eac3d3135c60dd1c1baee64e396763f3bcb",
+      "sha256": "c42f9c51951be6bb3a589552bff4eefdf4252865a6646e9bfedbafcaf4a1c2cc",
       "size": 1382
     },
     "src/uimod/src/vidmode.cpp": {
@@ -1194,8 +1198,8 @@
       "size": 438
     },
     "work/CHANGELOG.md": {
-      "sha256": "f4ef00f8276cee746c2a6eafc396d899f4f9568b2b570e6f512efd8c3ac919d1",
-      "size": 21050
+      "sha256": "68f241ff107e400e9bb710633d04da230a2179e77598a7f2f2b12a8f0ac1e541",
+      "size": 22440
     },
     "work/FONT_FACE_WEIGHT_AUDIT.md": {
       "sha256": "421cd39981688ad7288822170f1c65f794dc8dbe676e08fc696254d1ddeb567c",
@@ -1206,8 +1210,8 @@
       "size": 16529
     },
     "work/WIN7.md": {
-      "sha256": "97eddedbe1abbfa6270fa4af4e64e5fd14ec1f1b73b7b85e45bee29e9f7f2fde",
-      "size": 6852
+      "sha256": "4e1a2c2cd2c88b577a39653c9175f22cbb9163a69b3ff216109e4d35d973cb8e",
+      "size": 9962
     },
     "work/_thinker_symbols_5.5.json": {
       "sha256": "f373e04a354de9052f20d3a3ba69cbe985ed069b084037efeec6ff4d7a85b068",
@@ -1514,8 +1518,8 @@
       "size": 1435
     },
     "work/patches/patches.yaml": {
-      "sha256": "f5aade1b91952c5bfe9c34f6900d204d91567ad059399f66fe3b12fbe452ef31",
-      "size": 2383950
+      "sha256": "3f6006ec7d7796f0f57134da6773bbf35c5a7d9e420cea52dbc8d12c8f8b1131",
+      "size": 2384502
     },
     "work/patches/patches_prax.yaml": {
       "sha256": "637572411f12c36a9fd3bccf99afa6f791b5c78a20969d1cbbab290058f3df95",
@@ -1686,8 +1690,8 @@
       "size": 238
     },
     "work/run-install.bat": {
-      "sha256": "7432b1d39a7ce63ada4afd5b9107b67ae7c7201f5b69653580ca0953d642b583",
-      "size": 7789
+      "sha256": "a60dd63d4b1f2a61fa392de2e762ac864ce2e11777e45a076324e01d469f7582",
+      "size": 8792
     },
     "work/run-investigate-destbuf.bat": {
       "sha256": "180201d2bebcdd4c64e769b3b20f1aa3c043e9d780647c8113a92963530b4d4c",
@@ -1766,8 +1770,8 @@
       "size": 8640
     },
     "work/scripts/apply_patches.py": {
-      "sha256": "d44bfd6185f4ab569b3e84670fe88ad5c5dfad2084efbb9a9d2e374b966a7bb5",
-      "size": 64713
+      "sha256": "cd3e8569aa63f4cb465fa8472dca56edef0d0df691e6f6bb7cc79d67d5269215",
+      "size": 66534
     },
     "work/scripts/apply_thinker_names.py": {
       "sha256": "96a5148b669073ffc25251920e2baa23d88f65a883df1b86529263a519dda276",
@@ -2282,8 +2286,8 @@
       "size": 5535
     },
     "work/scripts/bootstrap.py": {
-      "sha256": "26d3fe3b0040fd8f5a279f8ab3c67a7b1d6d077e85681f364a1119f912f060f4",
-      "size": 51404
+      "sha256": "e4be66c582d13f46116cd037a21676d9452f0adcaf259eacfae645b194b4c74e",
+      "size": 51563
     },
     "work/scripts/build_runtime.py": {
       "sha256": "aa5fa42cb4a29959bf174a52845310ef1e1e58970699eae35a2f766c9e6a0f40",
@@ -2306,8 +2310,8 @@
       "size": 5355
     },
     "work/scripts/config.py": {
-      "sha256": "04cfee9077033723135660cda37a29e88ebc855082a70eae3b9677f617842b66",
-      "size": 5480
+      "sha256": "6ad11b816923a7c8caa96f80e622fd6b987dcf44f66ecebd564c88214df734d1",
+      "size": 10533
     },
     "work/scripts/decompile_funcs.py": {
       "sha256": "9c8e1b0eacb22b5f0998bb539032655569896b643e02159c2543cefc298f279e",
@@ -2370,8 +2374,8 @@
       "size": 5670
     },
     "work/scripts/fetch.py": {
-      "sha256": "868aa17551d29cab3479f048884a8e48daca2fde2afc5f36fe316e9d89b9618f",
-      "size": 19724
+      "sha256": "f4eb928fec258c4e9f5778572caf73e264cf5badf5463e239098931bdc8cd9f7",
+      "size": 20301
     },
     "work/scripts/fetch_python38.py": {
       "sha256": "02a51e970a35b52ba2d6faf19181f9b37ad43c0341d6eaf9b7f56263db5bb670",
@@ -2754,12 +2758,12 @@
       "size": 4909
     },
     "work/scripts/install.py": {
-      "sha256": "0c16f3e7f0d4bfe36d5869213ae1fc55122e11b376fa6b37bdbde74f42aa8273",
-      "size": 176728
+      "sha256": "7727d5d83b8b2ac8a215b3bda6ea80f6f42f33b309cb8d9e804a5760e167cdc6",
+      "size": 228140
     },
     "work/scripts/installer_exit.py": {
-      "sha256": "94ef5de6b46f54439016b4fc11c0cba2a113c5be87edcc52d918b7c85473c17e",
-      "size": 22408
+      "sha256": "20d1c41e3765165def18b65a6606148fa8b74cf92c9a6bce2d2b75c4d53a4f19",
+      "size": 22754
     },
     "work/scripts/investigate_destbuf_sizing.py": {
       "sha256": "5474f3205d9812434c1d0b71ac09ca703f10678037c6f296582a52e83dd34a59",
@@ -2768,6 +2772,10 @@
     "work/scripts/ks_guard.py": {
       "sha256": "f56171af7250d12208356b5a12a113c5fff763ba710dfb6d086a41dddea57ecd",
       "size": 2346
+    },
+    "work/scripts/make_roots_pem.py": {
+      "sha256": "ef62064229db904f678677d5aca04e74881f59a2fb22943271cbfe1572fd31f3",
+      "size": 4404
     },
     "work/scripts/manifest.py": {
       "sha256": "5858807d0b7f8f042ff74331540b37d098583abd5add0228cbec92de35ecf208",
@@ -2782,8 +2790,8 @@
       "size": 11809
     },
     "work/scripts/preflight.py": {
-      "sha256": "ade6ed8998192849973f6b1c78e80d127b8786601f76bcce84341a31d76ca8f5",
-      "size": 27893
+      "sha256": "5f7d21bea24ad090127d70166adcb2fba201c3f84c8d2201956364288d56ae7d",
+      "size": 28253
     },
     "work/scripts/receipt.py": {
       "sha256": "14b05bee7178f5d4c46575d1bae08cd877c8734cbf14f164e9b47357f68f2398",
@@ -2802,8 +2810,8 @@
       "size": 4467
     },
     "work/scripts/release.py": {
-      "sha256": "472d6854deeb792e579ad8401d7157d954b389497c29cdbacf9978c01523a75f",
-      "size": 37056
+      "sha256": "de005ad1e8cac409dbab3384f72fa3b21700a7ee5d0e4f86c0732f945da34c1e",
+      "size": 37315
     },
     "work/scripts/rename_one.py": {
       "sha256": "a9fe258b3f0689d2b5049c5f673641d5b88d8dd2f2ef3b8e20d27557d5002859",
@@ -2812,6 +2820,10 @@
     "work/scripts/report_stats.py": {
       "sha256": "447c80310696bd93a763925ea90c8c89a97bebcdf79b8f8d39a6355d1d1b4633",
       "size": 3334
+    },
+    "work/scripts/roots.pem": {
+      "sha256": "63c5a1b2d04b2b5468bdbbe2e41923663c1e3e91cf1753c0cfea6549a02a3b53",
+      "size": 11045
     },
     "work/scripts/run_frida_thinker.py": {
       "sha256": "ce1d02676b399e436e1949b54c4a0f565c35db66ccfb8672d8743433f78bf603",
@@ -2930,7 +2942,7 @@
       "size": 3195
     },
     "work/scripts/version.py": {
-      "sha256": "bc4565dc512aa022f0b35342af278f5de2386dbf3ce63a61ec7b3aa6949afdfd",
+      "sha256": "0f9698dc70db8eaa10bdd2921f65328a77d16b38d2ab3c4853bd327d921431da",
       "size": 7482
     },
     "work/scripts/xref_addr.py": {
@@ -3018,8 +3030,8 @@
       "size": 4759
     },
     "work/tests/conftest.py": {
-      "sha256": "2b2bc15d41bbc26a2181be52c3ee111f07dff13c9c18b7838d11341d9157a39f",
-      "size": 15587
+      "sha256": "57127c10697b04561fa12734dd379a02deb0f14ebdc57547b4aeeecd9b11bd1e",
+      "size": 16153
     },
     "work/tests/council_mirror_emu.py": {
       "sha256": "3b9cd7c6a7c886bf03bcb97a4c876eeacf5986d68a76a50199290a39ddefb2fa",
@@ -3518,12 +3530,20 @@
       "size": 14632
     },
     "work/tests/test_install_e2e.py": {
-      "sha256": "2dd3ed62313082a378b8d1aab6e7201589efaccfeed5e66319bad6697855a0ad",
-      "size": 91016
+      "sha256": "8e0c76790c8e6db5369a10c2d028c34173be2d267ad482d41305aefb092f5a21",
+      "size": 108504
+    },
+    "work/tests/test_install_game_folder.py": {
+      "sha256": "fa6f2a863f23edaefbfcd661c363365d6b3f151fc859d4f49273505b1ca92ae1",
+      "size": 19577
     },
     "work/tests/test_install_portraits.py": {
       "sha256": "dd241de5b64304bc6071ada87ec20b4621f0e59714d2310e5d00fc95f43f9464",
       "size": 12121
+    },
+    "work/tests/test_install_thinker_setup.py": {
+      "sha256": "c45013842b5c5f05695bc42115d9fbfe1803c4bd4dc8b20996f1ef18fe532ac5",
+      "size": 24662
     },
     "work/tests/test_installer_audit_fixes.py": {
       "sha256": "adb7951bf85aff50085ad7fa76f7392f2a8d5d639a6da55d54f62c22003e159c",
@@ -3690,8 +3710,8 @@
       "size": 5914
     },
     "work/tests/test_preflight.py": {
-      "sha256": "0fe2d18d14feb736ad19c42c3cc20275f3894f76ec6208c3404180ac68f4fdbc",
-      "size": 24590
+      "sha256": "99d0a25298e58972879a49284badf404180ac988817464e8ba90cbdb137e276f",
+      "size": 26038
     },
     "work/tests/test_probe_catalog.py": {
       "sha256": "53c28d3801b99e22e99abcac7fc61d7db18c6c663eb7e4570762c76ea50ed85d",
@@ -3722,8 +3742,8 @@
       "size": 2664
     },
     "work/tests/test_release.py": {
-      "sha256": "50fd534486641e51b869594926ca06ca410293b7183f1775be5a87fd11afb51d",
-      "size": 27049
+      "sha256": "ca3975a8504201939cb9039aee7ba1b83552567a90cbebe868445af0fefb536f",
+      "size": 27162
     },
     "work/tests/test_resampler_parity.py": {
       "sha256": "2dfb696a164556490fd1dc736af23f809abc346846b2fd841f4d6b289c7df854",
@@ -3740,6 +3760,10 @@
     "work/tests/test_riotfix_parity.py": {
       "sha256": "b35eabb7ba4d1c60b702c9a208db67a3b09e44a2ecf2db2e34f551a176805597",
       "size": 6780
+    },
+    "work/tests/test_roots_pem.py": {
+      "sha256": "2f3a04eed65abef31c1fac1ecb8711645d694085f4bcd5e230cfdaaa8ccbd2ef",
+      "size": 3962
     },
     "work/tests/test_rowbox_phase_asm.py": {
       "sha256": "53a728651f295b5a2f77d21445648ea2ce39fd1819af723f1d8732958f022a3a",
@@ -4186,8 +4210,8 @@
       "size": 3725
     },
     "work/tests/test_targets.py": {
-      "sha256": "d438e35c3a69dee9fc24d305ffac6351ab115b1379517b81599fb63d68ad9e85",
-      "size": 28415
+      "sha256": "9d12ee6d901eb803d433dd94fa20ac2dbe97fa245766fd329c7d3f8b7cb5075a",
+      "size": 29157
     },
     "work/tests/test_tech_asm_parity.py": {
       "sha256": "73e02018f629dc6c4a298da0eeaf872c4da342c126ae3d57661a6e025657df0b",
@@ -4274,8 +4298,8 @@
       "size": 15967
     },
     "work/tests/test_update_core.py": {
-      "sha256": "154bd692fa399c8ee269a7847f571ceddac93aa714d9c0d50477c64232155610",
-      "size": 35186
+      "sha256": "0573f74544cbb2d8e9f71c1b29193fd7f8c6327955f0c8baac9c3696431fee21",
+      "size": 46960
     },
     "work/tests/test_version_sync.py": {
       "sha256": "3a39a6362f9455488c30c2035172b1d82692ec91b1dbe4464a73ec221226a47b",
@@ -4288,6 +4312,10 @@
     "work/tests/test_viewdragfix_sites.py": {
       "sha256": "e2b4254620a658d91007db9143c5015a1be8f06ca589a3ec6e993808e7f77222",
       "size": 3349
+    },
+    "work/tests/test_win7_paths.py": {
+      "sha256": "b209002396f3c166a6c8bc51f8cda8d33656aa5b8d694e5e40367e7baaa1b207",
+      "size": 4797
     },
     "work/tests/test_winline_overlay.py": {
       "sha256": "8bc368e3f0050642b18fa391d9ad697e45611f3384a9b0f7160e0af29f888704",
@@ -4326,8 +4354,8 @@
       "size": 5238
     },
     "work/tests/update_core_selftest.cpp": {
-      "sha256": "00115dc50992c6e6115441da9c397cf5949eefaeae3a11448aeddd8279e91345",
-      "size": 10073
+      "sha256": "f2e43890df79784fb2110792bad938194c0f5cda331dee4c725685620843ed4e",
+      "size": 10453
     },
     "work/tests/vidsafety_selftest.cpp": {
       "sha256": "4734f5168871450a3ca818aba493711e3af89c209928b618f2ce76896cedde8a",
@@ -4364,5 +4392,5 @@
   },
   "hashes": "sha256 of the committed blob (git cat-file -p <rev>:<path>), so line-ending conversion on checkout does not change them",
   "source": "smacx-ui",
-  "tree_hash": "ef92f14dc15bce75b05b416312a03430455a62beeb70cb5084f27da03abbf62a"
+  "tree_hash": "d2f2425755bbbd434e6bb46a858d80de6e901cb42ac5fc397e77a0a221da6949"
 }

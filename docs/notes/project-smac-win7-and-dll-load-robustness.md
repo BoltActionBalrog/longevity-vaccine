@@ -42,6 +42,19 @@ rebuild 3c1685d7 (uimod.dll.e3f29e9e.bak beside it); master was pushed the same 
 run-install.bat checked out LF once (autocrlf; blob is CRLF) -- test_run_install_bat_is_crlf catches it. Windows 7 stays "built for, not confirmed" until a
 Windows 7 machine runs WIN7.md's checklist; no CHANGELOG line until then.
 
+**2026-11-01 "what breaks on Windows 7" audits** (user: no VM obtainable soon, "we're probably just going to ship
+untested" -- 0.2.0 already shipped with the Win7 work; find it first). Found by review, all fixed on the branch:
+TLS roots (Python enumerates the Windows ROOT store, which never triggers 7's root auto-update -> every fetch failed on
+a 7 that never met our CAs; now `scripts\roots.pem` loaded beside the store by fetch.tls_context), the WIC v2 classes
+(`CLSID_WICImagingFactory`/`CLSID_WICPngDecoder` are v2 under the Win10 SDK -> all replacement portraits dropped on
+plain 7 SP1; v1 fallbacks), d3dcompiler_47 absent (d3dcompiler_43 probed; CPU scaler otherwise), the PowerShell
+desktop lookup (PS 2.0/.NET 3.5), fetch error detail, bat exit 11 vs 10, job-assign log. Lesson for any SDK-mapped
+CLSID/API: with no `_WIN32_WINNT` the Win10 SDK silently picks the Win8+ class -- grep the DLL for the v1 GUID.
+Still open: precompiled gpuscale shaders; CREATE_BREAKAWAY_FROM_JOB; the Win7 machine itself.
+
+**DECIDED 2026-11-01 (user): "we are shipping windows 7 blind and will bugfix if needed."** Player-facing text says
+"Windows 7+" (public README). Do not hedge it as unconfirmed in player text or block on a VM; fix reports as they come.
+
 **Why:** the maintainer wants Windows 7 players served and no silent mod loss; it was relayed that the DLL-load
 item is this branch's too.
 

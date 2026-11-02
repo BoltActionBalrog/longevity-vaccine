@@ -515,24 +515,23 @@ def run(argv: list = None) -> int:
     import receipt as rc
     import version as ver
 
-    if args.game_dir:
-        game_dir = Path(args.game_dir)
-    else:
-        import config
-        game_dir = config.game_dir(required=False)
+    import install as inst
+    inst._load_modules()        # banner() prints ver.VERSION, which only exists after this
+    # The same header the first-time install prints, before anything (the folder picker) asks;
+    # the generation is an implementation detail no player needs to see (it is still in the
+    # exit code / worker env for us).
+    inst.banner()
+    # The same folder rules as install.py: --game-dir, else the resident updater's own folder,
+    # else the installed folders found on this PC (asked about when someone is at the console).
+    game_dir = inst.resolve_game_dir(args, installed=True)
     if not game_dir.is_dir():
         raise ix.InstallerError(
-            "The game directory could not be found.",
+            "The game folder could not be found.",
             code=ix.EXIT_NO_GAME, detail=f"Looked for: {game_dir}", changed=False,
-            remedy="re-run with --game-dir \"<path to your Alpha Centauri folder>\".")
+            remedy="check the --game-dir path: it must be the folder that holds terranx.exe.")
     args.game_dir = str(game_dir)
 
     gen = max(1, int(args.generation))
-    # The same header the first-time install prints; the generation is an implementation
-    # detail no player needs to see (it is still in the exit code / worker env for us).
-    import install as inst
-    inst._load_modules()        # banner() prints ver.VERSION, which only exists after this
-    inst.banner()
     # One installer at a time, before anything is read or written. Generation 2 waits for
     # generation 1 (which holds it until it exits) and for no one else.
     inst.hold_installer_lock(game_dir, wait_for=args.wait_pid if gen >= MAX_GENERATION else None,

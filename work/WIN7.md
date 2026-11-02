@@ -53,7 +53,8 @@ driver (any VM GPU driver that gives Aero). Audio device present.
    picked `tools\python38\python.exe` (add `echo %PY%` under a debug flag or read the receipt's interpreter
    line); install reports success; `terranx_PRACX.exe` + `uimod.dll` + ffmpeg DLLs land as on Windows 11.
    Repeat on image (i): the app-local UCRT must carry the interpreter; no "api-ms-win-crt-runtime-l1-1-0.dll" box.
-   On image (ii): the KB2533623 screen, exit code 9, nothing changed on disk.
+   On image (ii): the KB2533623 screen, exit code 10, nothing changed on disk (a runtime that cannot start at all
+   -- a quarantined DLL -- is its own screen, exit 11).
 2. **DLL load.** Start the game. `uimod.log` appears beside `uimod.dll` with the Init lines and
    `movie audio: waveOut -- C:\Windows\system32\xaudio2_9.dll failed to load (error 126; normal on Windows 7/8.1)`.
    No "entry point not found" dialog (that would be a post-Vista API slipping into an import table — re-run the
@@ -73,6 +74,37 @@ driver (any VM GPU driver that gives Aero). Audio device present.
 6. **Uninstall** (`run-install.bat --uninstall`) under 3.8 restores the vanilla set.
 
 Record outcomes in the maintainer's work log (Win7 section) and give the CHANGELOG its one line only after 1–4 pass.
+
+## Found by the 2026-11-01 "what breaks on Windows 7" review (no machine; three independent readings)
+
+- **Replacement portraits** (HD pack, player PNG/JPEG): with the Win10 SDK both `CLSID_WICImagingFactory` and
+  `CLSID_WICPngDecoder` name the v2 classes, which a plain 7 SP1 does not register (Platform Update KB2670838
+  only) -- every replacement portrait was silently dropped, the log blaming the file. Fixed: v2 then v1 for both
+  (`CLSID_WICImagingFactory1` / `CLSID_WICPngDecoder1`, Vista+, never removed), and the log names the WIC step.
+  **Checklist addition: an image WITHOUT KB2670838 must show the HD portraits.**
+- **Notes to ship with Windows 7 support:** KB2533623 for the installer (enforced, exit 10); Aero on (GOG's
+  DDrawCompat logs "Desktop composition is disabled. This is not supported." and carries on in its unsupported
+  path -- and Windows 7 drops to Basic whenever an 8-bit exclusive DirectDraw mode starts, so confirm the theme
+  stays Aero in our no-mode-switch Fullscreen/Borderless); without KB4019990 or the DirectX June 2010 redist the
+  CPU scaler runs in the stretched modes (slower in Windowed/Borderless, fine at 1080p).
+- **GPU scaler**: compiles its shader at run time; Windows 7 has `d3dcompiler_47.dll` only via KB4019990 (2017).
+  Now probes `d3dcompiler_43.dll` (the June 2010 DirectX redist most games install) too and names the missing
+  DLL; without either the CPU scaler runs (clean, logged). A VM cannot exercise the GPU path at all (no D3D10
+  WDDM driver): expect "gpuscale: ... -> CPU scaler" there; proving the GPU path on 7 needs real hardware.
+- **Update check in a launcher's job**: Windows 7 cannot nest jobs, so under GOG Galaxy the kill-on-close job
+  fails; the check still runs (now logged) -- only "the child dies with the game" is lost.
+- **TLS trust roots** (the most likely real-world failure): Python's OpenSSL takes its roots from the Windows
+  ROOT store by enumeration, which never triggers Windows 7's root auto-update; a 7 that never browsed to our
+  CAs (Starfield/Amazon, USERTrust, ISRG) failed every fetch -- no update check, no HD packs, no self-update
+  -- reproduced under the shipped 3.8 runtime with an empty store. Fixed: `scripts\roots.pem` (seven public
+  roots, `make_roots_pem.py`) loaded by `fetch.py` BESIDE the Windows store; the bundle alone verifies all four
+  hosts (`test_roots_pem.py`, live with LONGEVITY_NET_TESTS=1). **Checklist addition: an image whose
+  Automatic Root Certificates Update is disabled must still show `--check: verified` in check.log.**
+- The interactive update's "Check your connection" screen now carries the fetch error (a certificate failure
+  looked like no connection); the desktop-shortcut lookup uses `SHGetFolderPathW` instead of a PowerShell 2.0
+  snippet that failed on .NET 3.5 (every run nagged and then "could not find your desktop"); `run-install.bat`
+  first checks that the 3.8 runtime STARTS (exit 11: a quarantined DLL is not the KB) before the KB2533623
+  import probe (exit 10).
 
 ## Known limits
 

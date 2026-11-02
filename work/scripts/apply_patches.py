@@ -110,7 +110,8 @@ class TargetSpec:
     """One row of the `targets:` table."""
 
     __slots__ = ("id", "label", "exe", "launcher", "launch", "base_md5", "base_sha256", "base_size",
-                 "groups", "patched_md5", "pending", "companion", "requires_files", "exclude_sites")
+                 "groups", "patched_md5", "known_patched", "pending", "companion", "requires_files",
+                 "exclude_sites")
 
     def __init__(self, tid: str, d: dict):
         self.id = tid
@@ -125,6 +126,11 @@ class TargetSpec:
         self.base_size = d.get("base_size")
         pm = d.get("patched_md5")
         self.patched_md5 = pm.lower() if isinstance(pm, str) and pm else None
+        # Every build an EARLIER RELEASE shipped for this target (append-only; release_all.py
+        # refuses a release that drops one). patched_md5 changes with every release, so without
+        # this the build on a player's disk is "a binary we did not make" to the next release's
+        # installer and its in-game update is refused.
+        self.known_patched = self._normalise_md5s(tid, "known_patched", d.get("known_patched"))
         self.pending = d.get("pending") or None
         self.companion = d.get("companion") or {}
         self.groups = self._normalise_groups(tid, d.get("groups", "all"))
@@ -153,6 +159,22 @@ class TargetSpec:
         if not all(isinstance(x, str) and x.strip() for x in out):
             raise ValueError(f"target {tid!r}: `{field}` entries must be non-empty strings, got {out!r}")
         return out
+
+    @staticmethod
+    def _normalise_md5s(tid: str, field: str, v) -> list:
+        """A list of 32-hex-digit MD5s, lowercased. A malformed entry is an error, not a skip: a
+        typo here would make a released build "not ours" again, silently."""
+        out = [x.strip().lower() for x in TargetSpec._normalise_names(tid, field, v)]
+        bad = [x for x in out if not re.fullmatch(r"[0-9a-f]{32}", x)]
+        if bad:
+            raise ValueError(f"target {tid!r}: `{field}` entries must be MD5 hex digests, got {bad!r}")
+        return out
+
+    @property
+    def builds(self) -> set:
+        """Every build this project has produced for this target: this release's lock and every
+        earlier release's (known_patched)."""
+        return set(self.known_patched) | ({self.patched_md5} if self.patched_md5 else set())
 
     @staticmethod
     def _normalise_groups(tid: str, g):
@@ -193,6 +215,17 @@ class TargetSpec:
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics only
         return f"<TargetSpec {self.id} md5={self.base_md5} launch={self.launch}>"
+
+
+def builds_on_base(table: dict, base_md5: str, exclude: str = None) -> set:
+    """Every build this project produced, in any release, for every SHIPPING configuration of
+    `base_md5` (PRACX and PRACX + Thinker share one base) -- optionally without target `exclude`.
+    The one rule for "is this exe a build of ours"; never re-derive it from patched_md5 alone."""
+    out = set()
+    for t in table.values():
+        if t.launch and t.base_md5 == base_md5 and t.id != exclude:
+            out |= t.builds
+    return out
 
 
 def load_targets(path: Path | str = None) -> dict[str, TargetSpec]:

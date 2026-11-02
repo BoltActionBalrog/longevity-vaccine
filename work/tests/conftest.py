@@ -44,7 +44,14 @@ def pytest_addoption(parser, pluginmanager):
 # No test -- and no installer a test spawns -- may read or write the REAL desktop: the installer's
 # shortcut offer looks at LONGEVITY_DESKTOP_DIRS first, so point it at a throwaway folder for the
 # whole session (tests that need their own use monkeypatch.setenv on top).
-os.environ.setdefault("LONGEVITY_DESKTOP_DIRS", tempfile.mkdtemp(prefix="lv-desktop-"))
+os.environ["LONGEVITY_DESKTOP_DIRS"] = tempfile.mkdtemp(prefix="lv-desktop-")
+# Nor find the real game, nor remember a throwaway install as one of the player's: an installer
+# run without --game-dir looks only at the folders a test names, and the folders it installed
+# into are recorded in a throwaway file (config.CANDIDATES_ENV / INSTALLS_ENV).
+# Assigned, not setdefault: a value inherited from a developer's shell would point the suite at
+# real folders or record test installs into a real list.
+os.environ["LONGEVITY_GAME_CANDIDATES"] = ""
+os.environ["LONGEVITY_INSTALLS_FILE"] = str(Path(tempfile.mkdtemp(prefix="lv-installs-")) / "installs.txt")
 
 # Cache compiled bytecode even when the environment says not to (PYTHONDONTWRITEBYTECODE=1, as agent shells set
 # it). Without the cache EVERY worker of EVERY run re-does pytest's assertion rewrite of every test module and

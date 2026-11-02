@@ -2,6 +2,20 @@
 
 UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
+## 0.2.1 -- 2026-11-01
+
+### Windows 7
+- Runs on Windows 7 SP1 (with update KB2533623): the installer and the updater verify their downloads with root certificates shipped in the download, since Windows 7 no longer refreshes its own; replacement leader portraits load without the Platform Update; the desktop shortcut is placed; without a shader compiler the interface is scaled on the CPU and the log names the missing component.
+
+### Installer
+- INSTALL.bat finds the game folder itself: it lists the folders it knows (earlier installs, the GOG locations and the folders the GOG registry names) and lets you pick one, or asks for the folder with a Windows folder picker when it finds none. Every choice is checked before anything is written; installing never needs a command prompt.
+- A Thinker Mod folder needs no renaming by hand any more: the installer keeps the original terranx.exe as terranx_original.exe, puts a PRACX copy in its place and patches it for PRACX and Thinker; uninstalling puts the original back.
+
+### Fixes
+- A game installed at the root of a drive (the folder is the drive letter itself) now updates and checks for updates; the folder's path was misread before.
+- When the installer cannot fetch the update list, it says why (the network error) instead of only that it failed.
+- The in-game update no longer refuses a game patched by an earlier release of the mod.
+
 ## 0.2.0 -- 2026-10-31
 
 ### High-resolution UI scaling

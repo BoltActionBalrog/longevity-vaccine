@@ -346,6 +346,30 @@ def test_an_already_patched_live_exe_is_accepted(game, table, tmp_path):
     assert any(c.name == "live executable is ours or the clean base" and c.ok for c in pf.checks)
 
 
+@pytest.mark.parametrize("whose", ["pracx", "pracx_thinker"])
+def test_an_earlier_releases_build_is_ours_by_the_history(game, table, whose):
+    """patched_md5 changes with every release: the build an EARLIER release left on the player's
+    disk is ours through the target's `known_patched` history -- this configuration's or a
+    sibling's on the same base. Without it every in-game update from one release to the next was
+    refused as "a binary we did not make" (audit 2026-11-01)."""
+    older = b"MZ an earlier release's build" + b"\x00" * 4096
+    (game / "terranx_PRACX.exe").write_bytes(older)
+    md5 = hashlib.md5(older).hexdigest()
+    pf = pfm.run(game_dir=game, target=game / "terranx_PRACX.exe", patches=PATCHES,
+                 table=table, min_free_bytes=1 << 20)
+    assert not pf.ok, "an unrecorded build must still be refused"
+    table[whose].known_patched = table[whose].known_patched + [md5]
+    pf = pfm.run(game_dir=game, target=game / "terranx_PRACX.exe", patches=PATCHES,
+                 table=table, min_free_bytes=1 << 20)
+    assert pf.ok, [c.detail for c in pf.blockers]
+
+
+def test_the_shipped_builds_are_in_the_history(table):
+    """What 0.1.0 and 0.2.0 shipped (their signed manifests' `targets`), recorded for good."""
+    assert {"ed30ac8bc96b6f30dc1ba4e1461b97bd", "677a55d5b96c51750a27a72df8dffe74"} <= table["pracx"].builds
+    assert "c4c0240a057878fbc530dd6acf02a2c6" in table["pracx_thinker"].builds
+
+
 def test_run_returns_blockers_instead_of_raising(game, table, monkeypatch):
     """A crashed check is a blocker, not a traceback -- returning a Preflight is the contract,
     and an exception escaping sends a read-only game dir to the crash handler instead."""

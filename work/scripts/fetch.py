@@ -59,8 +59,23 @@ class _HttpsOnlyRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+#: Public roots our hosts chain to, loaded IN ADDITION to the Windows store (make_roots_pem.py says why: a
+#: Windows 7 that never browsed to these authorities has them in no store Python can see).
+ROOTS_PEM = Path(__file__).resolve().with_name("roots.pem")
+
+
+def tls_context() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    if ROOTS_PEM.is_file():
+        try:
+            ctx.load_verify_locations(cafile=str(ROOTS_PEM))
+        except (ssl.SSLError, OSError):
+            pass                        # the Windows store alone, as before this bundle existed
+    return ctx
+
+
 def _opener(allow_file: bool = False):
-    handlers = [_HttpsOnlyRedirect(), urllib.request.HTTPSHandler(context=ssl.create_default_context())]
+    handlers = [_HttpsOnlyRedirect(), urllib.request.HTTPSHandler(context=tls_context())]
     if allow_file:
         handlers.append(urllib.request.FileHandler())
     return urllib.request.build_opener(*handlers)

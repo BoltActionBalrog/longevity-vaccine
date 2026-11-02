@@ -5,6 +5,8 @@ Builds tests/update_core_selftest.cpp with the VS x86 toolchain (skipped when VS
 """
 from __future__ import annotations
 
+import json
+import os
 import pathlib
 import re
 import subprocess
@@ -310,15 +312,17 @@ def test_extract_lv_delay(exe, tmp_path, text, want):
 @pytest.mark.parametrize("game,manifest,want", [
     (r"D:\Games\SMAC", None,
      r'"C:\g\LongevityMods\updater\tools\python\python.exe" "C:\g\LongevityMods\updater\scripts\install.py" --check --game-dir "D:\Games\SMAC"'),
+    # A trailing backslash is kept and DOUBLED before the closing quote, so the receiver reads the
+    # path back exactly (CRT rule; `"...\"` escaped the quote and swallowed the rest of the line).
     ("D:\\Games\\Sid Meier's\\", r"C:\my m\manifest.json",
      '"C:\\g\\LongevityMods\\updater\\tools\\python\\python.exe" "C:\\g\\LongevityMods\\updater\\scripts\\install.py"'
-     ' --check --game-dir "D:\\Games\\Sid Meier\'s" --manifest "C:\\my m\\manifest.json"'),
+     ' --check --game-dir "D:\\Games\\Sid Meier\'s\\\\" --manifest "C:\\my m\\manifest.json"'),
     (r'D:\Ga"mes', None, "<refused>"),
     (r"D:\Games", r'C:\m"x', "<refused>"),
     ("", None, "<refused>"),
     (r"D:\Games", "\\\\", "<refused>"),                                 # nothing but backslashes
-    ("D:\\", None,                                                      # a drive root keeps its backslash
-     r'"C:\g\LongevityMods\updater\tools\python\python.exe" "C:\g\LongevityMods\updater\scripts\install.py" --check --game-dir "D:\"'),
+    ("D:\\", None,                                                      # a drive root: `"D:\\"` reads back `D:\`
+     r'"C:\g\LongevityMods\updater\tools\python\python.exe" "C:\g\LongevityMods\updater\scripts\install.py" --check --game-dir "D:\\"'),
 ])
 def test_build_check_command_line(exe, game, manifest, want):
     py = r"C:\g\LongevityMods\updater\tools\python\python.exe"
@@ -546,8 +550,13 @@ def test_run_install_bat_kb2533623_probe_and_screen():
     exercised on this Windows 11 box, so the block is pinned by text."""
     bat = (ROOT / "run-install.bat").read_text(encoding="ascii", errors="replace")
     probe = bat[bat.index("if not defined PY38 goto :afterkb"):bat.index("\n:afterkb")]
-    assert '"%PY%" -I -c "import ctypes"' in probe and 'if not "%ERRORLEVEL%"=="0" goto :needkb' in probe
+    # first "does the runtime start" (a quarantined DLL is NOT the KB), then the import the KB governs
+    assert probe.index('"%PY%" -I -c "pass"') < probe.index('"%PY%" -I -c "import ctypes"')
+    assert 'if not "%ERRORLEVEL%"=="0" goto :nostart' in probe and 'if not "%ERRORLEVEL%"=="0" goto :needkb' in probe
     assert "if errorlevel" not in probe, "a negative (NTSTATUS) exit code slips past `if errorlevel 1`"
+    nostart = bat[bat.index("\n:nostart"):bat.index("\n:needkb")]
+    assert 'rd /s /q "%MDIR%"' in nostart and "antivirus" in nostart and "endlocal & exit /b 11" in nostart
+    assert "if not defined NOWAIT pause" in nostart
     block = bat[bat.index("\n:needkb"):bat.index("\n:incomplete")]
     assert 'rd /s /q "%MDIR%"' in block and "KB2533623" in block
     assert "if not defined NOWAIT pause" in block and "endlocal & exit /b 10" in block
@@ -578,9 +587,223 @@ def test_handoff_always_says_only_listed_and_names_exactly_the_modules(exe):
     (r"C:\g\run.bat", r"D:\Games", "-", ["Movies-HD"]),      # upper case is not a compiled-in id
     (r"C:\g\run.bat", r"D:\Games", "-", ["a" * 40]),         # longer than kIdCap
     (r"C:\g\run.bat", "", "-", []),                          # no game dir
+    (r"C:\g\run.bat", "\\\\", "-", []),                      # nothing but backslashes (as the check line)
 ])
 def test_handoff_refuses_anything_unclean(exe, bat, game, manifest, ids):
     assert run(exe, "handoff", bat, game, 7, manifest, *ids).strip() == "<refused>"
+
+
+# ---------------------------------------------------------------- the paths survive the real parsers
+#
+# A game at a drive root (`D:\`) used to come out as `--game-dir "D:\"`: the CRT reads `\"` as an
+# escaped quote, so the argument never closed and --wait-pid / --only-listed / --modules vanished
+# into it (2026-11-01). Every shape a builder can see is read back -- by CommandLineToArgvW, and by
+# the REAL receiving parser (bootstrap.py / install.py --check, under each shipped runtime, reached
+# the way the game reaches it) -- and must come back exactly.
+
+PATH_SHAPES = ["D:\\", "C:\\", r"D:\Games\SMAC", "D:\\Games\\SMAC\\", "D:\\Games\\SMAC\\\\",
+               "\\\\server\\share\\", r"\\server\share\SMAC", r"D:\Sid Meier's Alpha Centauri",
+               "D:\\Sid Meier's Alpha Centauri\\", r"\\?\D:\Games\SMAC"]
+
+
+def _argv(line: str) -> list:
+    import ctypes
+    from ctypes import wintypes
+    shell32, k32 = ctypes.WinDLL("shell32"), ctypes.WinDLL("kernel32")
+    shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+    shell32.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
+    k32.LocalFree.argtypes = [ctypes.c_void_p]
+    n = ctypes.c_int()
+    p = shell32.CommandLineToArgvW(line, ctypes.byref(n))
+    try:
+        return [p[i] for i in range(n.value)]
+    finally:
+        k32.LocalFree(ctypes.cast(p, ctypes.c_void_p))
+
+
+MANIFESTS = ["-", "C:\\my m\\man.json", "C:\\my m\\man\\"]
+
+
+@pytest.mark.parametrize("manifest", MANIFESTS)
+@pytest.mark.parametrize("game", PATH_SHAPES)
+def test_the_check_line_reads_back_exactly_through_command_line_to_argv(exe, game, manifest):
+    py, sc = r"C:\g\py\python.exe", r"C:\g\scripts\install.py"
+    line = run(exe, "buildcmd", py, sc, game, *([] if manifest == "-" else [manifest])).strip()
+    want = [py, sc, "--check", "--game-dir", game] + ([] if manifest == "-" else ["--manifest", manifest])
+    assert _argv(line) == want, line
+
+
+@pytest.mark.parametrize("manifest", MANIFESTS)
+@pytest.mark.parametrize("game", PATH_SHAPES)
+def test_the_handoff_reads_back_exactly_after_cmd_strips_its_quotes(exe, game, manifest):
+    """cmd /S /C removes the outer quote pair and the batch file's %* passes the rest through
+    verbatim, so python parses exactly `"<bat>" <args>` -- read that back."""
+    line = run(exe, "handoff", BAT, game, 4242, manifest, "movies-hd", "portraits-hd").strip()
+    inner = line.split(" /D /S /C ", 1)[1]
+    assert inner[0] == '"' and inner[-1] == '"'
+    assert _argv(inner[1:-1]) == [BAT, "--update", "--game-dir", game, "--wait-pid", "4242",
+                                  "--only-listed", "--modules", "movies-hd,portraits-hd"] \
+        + ([] if manifest == "-" else ["--manifest", manifest]), line
+
+
+@pytest.mark.parametrize("exe_path,want", [
+    (r"D:\Games\SMAC\terranx.exe", r"D:\Games\SMAC"),
+    (r"D:\terranx.exe", "D:\\"),                              # a drive root keeps its backslash
+    (r"\\?\C:\terranx.exe", "\\\\?\\C:\\"),                   # ... behind a \\?\ prefix too
+    (r"\\.\C:\terranx.exe", "\\\\.\\C:\\"),
+    (r"\\?\C:\Games\terranx.exe", r"\\?\C:\Games"),
+    (r"\\server\share\terranx.exe", r"\\server\share"),
+    (r"\\?\UNC\server\share\SMAC\terranx.exe", r"\\?\UNC\server\share\SMAC"),
+    ("terranx.exe", "<refused>"),
+])
+def test_the_game_dir_from_the_exe_path(exe, exe_path, want):
+    assert run(exe, "gamedir", exe_path).strip() == want
+
+
+@pytest.mark.parametrize("manifest", ["-", "C:\\my m\\man.json"])
+@pytest.mark.parametrize("game", [g for g in PATH_SHAPES if not g.endswith("\\")])
+def test_a_path_without_a_trailing_backslash_comes_out_exactly_as_before(exe, game, manifest):
+    """Byte-identical to what 0.2.0's DLL emitted (its format, rebuilt here) for every path that
+    does not end in a backslash -- every ordinary game folder."""
+    m = "" if manifest == "-" else f' --manifest "{manifest}"'
+    assert run(exe, "buildcmd", r"C:\g\py.exe", r"C:\g\i.py", game,
+               *([] if manifest == "-" else [manifest])).strip() \
+        == rf'"C:\g\py.exe" "C:\g\i.py" --check --game-dir "{game}"' + m
+    assert run(exe, "handoff", BAT, game, 4242, manifest, "movies-hd").strip() \
+        == (r'"C:\Windows\System32\cmd.exe" /D /S /C ""' + BAT + f'" --update --game-dir "{game}" '
+            f'--wait-pid 4242 --only-listed --modules movies-hd{m}"')
+
+
+# ---- the FROZEN 0.2.0 receiver, reached the way the game reaches it
+#
+# Players' installs run the 0.2.0 resident updater until a swap succeeds, so the lines this DLL
+# builds are parsed by THAT code: its run-install.bat (cmd.exe, `echo %* | findstr`, `%*`), its
+# runtime (3.12, or 3.8 on Windows 7/8) and its bootstrap.py / install.py argparse. The 0.2.0
+# sources come from the release commit; a spy named like the real script loads the frozen module
+# and records what its argparse got, then exits before anything is checked or fetched.
+
+#: The 0.2.0 sources: the commit the release was cut from (the maintainer's checkout), else the public tag
+#: v0.2.0 (a clone of the public repository has no private history; the tag marks the same sources).
+SHIPPED = "50a0e16648c6c2c14f3be85cdc59ecf104c72917"
+SHIPPED_FALLBACK = "v0.2.0"
+
+_SPY = r'''
+import argparse, json, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != here]
+sys.path.insert(0, os.environ["LV_FROZEN_SCRIPTS"])
+orig = argparse.ArgumentParser.parse_known_args
+def spy(self, args=None, namespace=None):
+    ns, unknown = orig(self, args, namespace)
+    with open(os.environ["LV_ARGV_SPY"], "w", encoding="utf-8") as f:
+        json.dump({"ns": {k: v for k, v in vars(ns).items() if isinstance(v, (str, int, bool, type(None)))},
+                   "unknown": unknown, "python": sys.version_info[:2]}, f)
+    os._exit(0)
+argparse.ArgumentParser.parse_known_args = spy
+name = os.path.splitext(os.path.basename(__file__))[0]
+mod = __import__(name)
+(mod.check_main if name == "install" else mod.run)()
+'''
+
+_RUNTIMES = [pytest.param(rel, id=rel) for rel in ("runtime", "runtime38")]
+
+
+@pytest.fixture(scope="module")
+def shipped(tmp_path_factory):
+    """{"frozen": <0.2.0 work/scripts>, "updater": {runtime: <a resident updater dir>}}: the real
+    0.2.0 run-install.bat, a spy bootstrap.py / install.py beside it, and tools\\python linked to
+    each staged runtime (a junction, removed here -- never followed into the runtime)."""
+    import _winapi
+    import io
+    import tarfile
+    from conftest import _missing                 # skip, or fail under LONGEVITY_REQUIRE_E2E
+    repo = ROOT.parent
+    for rev in (SHIPPED, SHIPPED_FALLBACK):
+        tar = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", rev,
+                              "work/scripts", "work/run-install.bat"], capture_output=True)
+        if tar.returncode == 0:
+            break
+    else:
+        _missing(repo, f"the 0.2.0 sources (commit {SHIPPED[:7]} or tag {SHIPPED_FALLBACK} in this checkout)")
+    d = tmp_path_factory.mktemp("shipped020")
+    with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as t:
+        if hasattr(tarfile, "data_filter"):
+            t.extractall(d / "frozen", filter="data")
+        else:
+            t.extractall(d / "frozen")
+    # The bat as it SHIPPED: CRLF (cmd.exe needs it). git archive follows this clone's
+    # core.autocrlf, and the blob itself is LF.
+    bat_bytes = (d / "frozen" / "work" / "run-install.bat").read_bytes().replace(b"\r\n", b"\n")
+    bat_bytes = bat_bytes.replace(b"\n", b"\r\n")
+    links, updaters = [], {}
+    try:
+        for rel in ("runtime", "runtime38"):
+            src = ROOT / "build" / rel
+            if not (src / "python.exe").is_file():
+                continue
+            up = d / f"updater-{rel}"
+            (up / "scripts").mkdir(parents=True)
+            (up / "tools").mkdir()
+            (up / "scripts" / "run-install.bat").write_bytes(bat_bytes)
+            for name in ("bootstrap.py", "install.py"):
+                (up / "scripts" / name).write_text(_SPY, encoding="utf-8")
+            _winapi.CreateJunction(str(src), str(up / "tools" / "python"))
+            links.append(up / "tools" / "python")
+            updaters[rel] = up
+        yield {"frozen": d / "frozen" / "work" / "scripts", "updater": updaters}
+    finally:
+        for link in links:
+            os.rmdir(link)            # removes the junction only, never the runtime behind it
+
+
+def _spied(cmdline: str, tmp_path, frozen) -> dict:
+    out = tmp_path / "ns.json"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+    env.update(LV_ARGV_SPY=str(out), LV_FROZEN_SCRIPTS=str(frozen), LONGEVITY_NO_WAIT="1")
+    r = subprocess.run(cmdline, capture_output=True, text=True, timeout=120, env=env,
+                       stdin=subprocess.DEVNULL)
+    assert out.is_file(), f"the receiver never parsed its arguments:\n{r.stdout}\n{r.stderr}"
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def _updater(shipped, rel):
+    if rel not in shipped["updater"]:
+        from conftest import _missing             # skip, or fail under LONGEVITY_REQUIRE_E2E
+        _missing(ROOT / "build" / rel / "python.exe", f"the staged {rel} (build_runtime.py / fetch_python38.py)")
+    return shipped["updater"][rel]
+
+
+RECEIVER_SHAPES = ["D:\\", "\\\\server\\share\\", r"D:\Games\SMAC", "D:\\Sid Meier's Alpha Centauri\\"]
+
+
+@pytest.mark.parametrize("rel", _RUNTIMES)
+@pytest.mark.parametrize("game", RECEIVER_SHAPES)
+def test_the_shipped_bootstrap_gets_every_handoff_argument(exe, shipped, tmp_path, rel, game):
+    """cmd.exe -> 0.2.0's run-install.bat (its --update routing and %*) -> the runtime -> 0.2.0's
+    bootstrap.py argparse: every argument arrives, the game dir exactly as the game gave it."""
+    up = _updater(shipped, rel)
+    line = run(exe, "handoff", up / "scripts" / "run-install.bat", game, 4242, "C:\\my m\\man\\",
+               "movies-hd", "portraits-hd").strip()
+    got = _spied(line, tmp_path, shipped["frozen"])
+    assert got["unknown"] == [], got
+    ns = got["ns"]
+    assert (ns["game_dir"], ns["wait_pid"], ns["only_listed"], ns["modules"], ns["manifest"],
+            ns["update"]) == (game, 4242, True, "movies-hd,portraits-hd", "C:\\my m\\man\\", True), \
+        (line, got)
+    assert tuple(got["python"]) == ((3, 8) if rel == "runtime38" else (3, 12))
+
+
+@pytest.mark.parametrize("rel", _RUNTIMES)
+@pytest.mark.parametrize("game", RECEIVER_SHAPES)
+def test_the_shipped_check_parser_gets_the_game_dir(exe, shipped, tmp_path, rel, game):
+    up = _updater(shipped, rel)
+    line = run(exe, "buildcmd", up / "tools" / "python" / "python.exe", up / "scripts" / "install.py",
+               game, "C:\\my m\\man\\").strip()
+    got = _spied(line, tmp_path, shipped["frozen"])
+    assert got["unknown"] == [], got
+    ns = got["ns"]
+    assert (ns["game_dir"], ns["manifest"], ns["check"]) == (game, "C:\\my m\\man\\", True), (line, got)
+    assert tuple(got["python"]) == ((3, 8) if rel == "runtime38" else (3, 12))
 
 
 def test_handoff_modules_are_the_listed_stale_packs_plus_the_accepted_new_ones(exe, tmp_path):

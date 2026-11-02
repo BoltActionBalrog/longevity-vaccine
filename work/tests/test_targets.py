@@ -575,3 +575,18 @@ def test_an_overlay_is_for_its_own_exe_name_only(targets):
     assert ap.resolve_target(md5, targets, present_files=files, exe_name="TERRANX.EXE").id == "pracx_thinker"
     assert ap.resolve_target(md5, targets, present_files=files, exe_name="terranx_PRACX.exe").id == "pracx"
     assert ap.resolve_target(md5, targets, present_files=files).id == "pracx_thinker", "no name -> folder decides"
+
+
+def test_known_patched_is_the_release_history(targets):
+    t = ap.TargetSpec("x", {"base_md5": "a" * 32, "patched_md5": "B" * 32,
+                            "known_patched": ["C" * 32, " " + "d" * 32 + " "]})
+    assert t.known_patched == ["c" * 32, "d" * 32]
+    assert t.builds == {"b" * 32, "c" * 32, "d" * 32}
+    assert ap.TargetSpec("y", {"base_md5": "a" * 32}).builds == set()
+
+
+@pytest.mark.parametrize("bad", ["c" * 32, ["not-an-md5"], ["c" * 31], [""], [5]])
+def test_a_malformed_known_patched_is_refused_not_skipped(bad):
+    """A typo would make a released build "not ours" again, silently."""
+    with pytest.raises(ValueError, match="known_patched"):
+        ap.TargetSpec("x", {"base_md5": "a" * 32, "known_patched": bad})
