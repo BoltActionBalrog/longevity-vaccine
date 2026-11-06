@@ -80,7 +80,7 @@ def _payload_root(tmp_path_factory) -> Path:
         shutil.copy2(f, root / "scripts" / f.name)
     shutil.copy2(_REPO / "work" / "run-install.bat", root / "scripts" / "run-install.bat")
     shutil.copytree(_REPO / "work" / "patches", root / "patches")
-    shutil.copy2(_REPO / "work" / "CHANGELOG.md", root / "CHANGELOG.md")
+    shutil.copy2(_REPO / "work" / "CHANGELOG.md", root / "CHANGELOG.txt")
     shutil.copytree(runtime, root / "tools" / "python")
     dll = _REPO / "src" / "uimod" / "build" / "Release" / "uimod.dll"
     (root / "src" / "uimod" / "build" / "Release").mkdir(parents=True)
@@ -117,6 +117,11 @@ def _installed_template(tmp_path_factory, bak_path, _payload_root):
     rcode, out = _run("--ai", "off", game=g,
                       env_extra={"LONGEVITY_PAYLOAD_ROOT": str(_payload_root)})
     assert "INSTALLATION SUCCESSFUL" in out, out
+    # `--ai off` turns the HD cinematics down exactly as the game's "Don't ask me again" does
+    # (user 2026-11-01). The template stands for an install that decided nothing about packs, so
+    # the tests built on it (new-pack offers, the extras notice) start without that decline.
+    assert rc.declined(g) == {"new:movies-hd": rc.DECLINE_ANY}, rc.declined(g)
+    assert rc.clear_declines(g)
     size = sum(p.stat().st_size for p in g.rglob("*") if p.is_file())
     assert size < 150 << 20, f"installed template is {size >> 20} MB: not the trimmed payload"
     return g

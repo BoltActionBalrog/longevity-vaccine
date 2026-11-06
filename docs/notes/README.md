@@ -18,7 +18,7 @@ own setup stay private.
 Addresses are for the PRACX-patched GOG binary the mod targets. `g` is the runtime
 scale (16 = the native 1024x768 layout); `s(v)` is `floor(v*g/16)`.
 
-## Lessons (88)
+## Lessons (89)
 
 A rule learned the hard way, with the failure that taught it.
 
@@ -69,6 +69,7 @@ A rule learned the hard way, with the failure that taught it.
 - [feedback-negative-height-saved-copy](feedback-negative-height-saved-copy.md): Buffer h (+0x84) is stored NEGATIVE (top-down DIB) — and so are its SAVED COPIES (globals, button +0x4c8); NEG before using as a dimension or a *stride offset or it crashes
 - [feedback-never-test-installer-on-live-game](feedback-never-test-installer-on-live-game.md): Never smoke-test install.py against the real game directory — always pass a scratch --game-dir
 - [feedback-no-external-movie-player](feedback-no-external-movie-player.md): Hard requirement — the movie solution must play IN-PROCESS, never spawn an external app like PRACX's playuv15
+- [feedback-no-installer-changelog-lines](feedback-no-installer-changelog-lines.md): The installer gets NO changelog lines -- it is a net-new program, not a change to the game
 - [feedback-no-maintainer-paths-as-instructions](feedback-no-maintainer-paths-as-instructions.md): Never state the maintainer's own disk paths (D:\SmacxUi, the GOG Galaxy install) in public/player text as if they would work for users
 - [feedback-parity-blit-key-exclusion](feedback-parity-blit-key-exclusion.md): A keyless (0x100) t_rwk_parity_nn / any palette-nearest blend blit lets index 9 (the transparency key, RGB 9,0,0) win dark blends and punches holes to the layer beneath; always pass key 9 and pre-remap literal 9s in runtime dumps
 - [feedback-parity-nn-single-row-art](feedback-parity-nn-single-row-art.md): The parity-preserving NN (t_rwk_parity_nn) drops or doubles single-row art (1-px strokes, chamfers, separator lines) at 22/16 and 25/16; for chrome art use the edge-safe NN + pair-only restripe (t_hof_pairnn / scaling_laws.hof_pair_enlarge), brighter member wide

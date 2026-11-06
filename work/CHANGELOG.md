@@ -2,26 +2,22 @@
 
 UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
+## 0.2.2 -- 2026-11-05
+
 ## 0.2.1 -- 2026-11-01
 
 ### Windows 7
-- Runs on Windows 7 SP1 (with update KB2533623): the installer and the updater verify their downloads with root certificates shipped in the download, since Windows 7 no longer refreshes its own; replacement leader portraits load without the Platform Update; the desktop shortcut is placed; without a shader compiler the interface is scaled on the CPU and the log names the missing component.
-
-### Installer
-- INSTALL.bat finds the game folder itself: it lists the folders it knows (earlier installs, the GOG locations and the folders the GOG registry names) and lets you pick one, or asks for the folder with a Windows folder picker when it finds none. Every choice is checked before anything is written; installing never needs a command prompt.
-- A Thinker Mod folder needs no renaming by hand any more: the installer keeps the original terranx.exe as terranx_original.exe, puts a PRACX copy in its place and patches it for PRACX and Thinker; uninstalling puts the original back.
+- Runs on Windows 7 SP1 (with update KB2533623): replacement leader portraits load without the Platform Update, and without a shader compiler the interface is scaled on the CPU and the log names the missing component.
 
 ### Fixes
 - A game installed at the root of a drive (the folder is the drive letter itself) now updates and checks for updates; the folder's path was misread before.
-- When the installer cannot fetch the update list, it says why (the network error) instead of only that it failed.
-- The in-game update no longer refuses a game patched by an earlier release of the mod.
 
 ## 0.2.0 -- 2026-10-31
 
 ### High-resolution UI scaling
 - The entire interface now scales to your resolution (4K and beyond) instead of staying at its original size: every menu, screen, dialog, popup, tooltip, list, map label and map cursor (go-to, patrol, airdrop, artillery and the rest), with artwork enlarged smoothly, the interface's striped fills redrawn evenly at your resolution, and full-screen pictures kept at their original proportions.
 - Faction leader portraits, native-life portraits and the event pictures in popups are enlarged smoothly instead of as blocks, with crisp even scanlines, wherever they appear (diplomacy, the Planetary Council, the combat console, faction selection, the Datalinks, the faction PROFILE report, event popups); every other scanlined picture (the diplomacy BIOSCAN, logos) keeps the same even scanline thickness. `SmoothPortraits=0` under `[UIMod]` in `Alpha Centauri.ini` turns it off.
-- Leader and native-life portraits can be replaced with your own images: put them in the game's `portraits` folder (see the guide there). The optional Longevity HD Portrait Pack replaces all 14 leaders with AI-remastered portraits by Turovetsky (https://www.youtube.com/@Turovetsky, https://x.com/turovetsky). Longevity Mod Preferences has switches for both, plus optional scanlines.
+- Leader and native-life portraits can be replaced with your own images: put them in the game's `portraits` folder (see the guide there). Longevity Mod Preferences has a switch for them, plus optional scanlines.
 
 ### Display modes
 - New Fullscreen, Borderless and Windowed display modes, chosen with three checkboxes at the top of the Longevity Mod Preferences tab. The switch is instant and is remembered for the next launch; Alt+Enter still toggles, and the checkboxes follow it. None of the three changes your monitor's resolution, at startup or while you play: the monitor stays in its own mode and the game is scaled by the graphics card, so there is no display switch when the game starts, after a cinematic or when you Alt+Tab (the original game and PRACX switched the monitor to the game's resolution, which some monitors show with black-outs or flicker when they have no mode of that shape). Fullscreen keeps the game on top and minimises it when you switch to another program; Borderless and Windowed stay visible when you Alt+Tab away, so the game can share a desktop with other windows and recording tools. The picture always keeps its proportions: Borderless adds black bars when the game's resolution is not your monitor's shape, and the Windowed frame resizes in proportion. Cinematics play inside the window in every mode. `FullscreenModeSwitch=1` under `[UIMod]` in `Alpha Centauri.ini` brings back the real resolution switch in Fullscreen.
@@ -38,22 +34,17 @@ UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 - New accessibility setting on the Longevity Mod Preferences tab: a "Drag Hold Time" slider sets how long you hold the mouse button on the map before a unit's move line starts (100 ms to 2 seconds; the default is the unmodded game's 1/3 second). A longer time stops slow clicks from turning into accidental move orders; a shorter one starts the drag sooner. While you hold a slider, a tooltip shows its exact value (also on Base Font Size).
 
 ### Updates
-- The mod checks for updates when the game starts and offers to install them, at the main menu or at the start of a turn; in a game you can save first. Optional packs (HD cinematics, Longevity HD Portrait Pack) are offered separately with their download size. "Don't ask me again" skips an offer until the next release for something you already have installed; Longevity Mod Preferences has a "Check for Updates at Startup" switch and a "Reset Skipped Updates" button that brings every reminder back.
-- Updating hands over to the installer, which waits for the game to close, updates itself if needed, and reports in plain language what it did.
-
-### Installer
-- The installer lists the optional modules (HD cinematics, Longevity HD Portrait Pack) with their sizes and lets you pick the ones you want before anything is changed; each step ends in a one-line Success / Error / Skipped verdict instead of a wall of text.
-- After installing or updating, the installer names the executable to start (terranx_PRACX.exe), offers to create a desktop shortcut to it ("SMACX Longevity") if you have none, warns when Alpha Centauri.ini pins the game to a resolution other than your display's, with a one-key fix, and can start the game for you, closing its own window.
+- The mod checks for updates when the game starts and offers to install them, at the main menu or at the start of a turn; in a game you can save first. The optional HD cinematics pack is offered separately with its download size. "Don't ask me again" skips an offer until the next release for something you already have installed; Longevity Mod Preferences has a "Check for Updates at Startup" switch and a "Reset Skipped Updates" button that brings every reminder back.
 - If the mod's files are missing or damaged (after an antivirus quarantine or an interrupted update, say), the game now stops at startup with a message that names the problem and asks you to reinstall the mod, instead of silently starting without the mod's changes.
 
 ### Thinker Mod
-- If the game folder holds a Thinker Mod build other than the one this release supports, the game says so once at start (with a "Don't Show Again" option) and the installer says so too, pointing at the download page for an update.
-- Works alongside Thinker Mod 5.5: install into the Thinker folder and keep starting thinker.exe as before (the installer recognises the folder; starting terranx.exe directly plays with the mod but without Thinker). Everything above applies on top of Thinker, including its own base-screen lines (satellite bonuses, stockpile energy, population and nerve-staple notes), which are placed at your resolution; on a base under a Punishment Sphere or nerve staple its population line shows the citizens the base would have, like the badged citizens row.
+- If the game folder holds a Thinker Mod build other than the one this release supports, the game says so once at start (with a "Don't Show Again" option).
+- Works alongside Thinker Mod 5.5: install into the Thinker folder and keep starting thinker.exe as before (starting terranx.exe directly plays with the mod but without Thinker). Everything above applies on top of Thinker, including its own base-screen lines (satellite bonuses, stockpile energy, population and nerve-staple notes), which are placed at your resolution; on a base under a Punishment Sphere or nerve staple its population line shows the citizens the base would have, like the badged citizens row.
 
 ### Cinematics
 - The intro and in-game movies now play in-window, without switching your desktop resolution and without an external player. The video is scaled to your resolution with the correct aspect ratio (black bars, never stretched), and can be skipped with Esc or a click.
 - Secret project movies once again end with the project's name and a typed-out description of its benefits over the final frame, scaled to your resolution. The unmodded game showed this; PRACX's external movie player dropped it.
-- Added an optional AI-upscaled HD cinematics pack: all 61 movies remastered at 4x resolution, installed on request by the installer (choose "original" at install time, or set UpscaledVideos=0 in Alpha Centauri.ini, to keep the classic versions).
+- Added an optional AI-upscaled HD cinematics pack: all 61 movies remastered at 4x resolution (UpscaledVideos=0 in Alpha Centauri.ini keeps the classic versions).
 
 ### Fixes
 - Holding Shift or Ctrl no longer makes the game swallow your next map click (base-game bug: the key's auto-repeat cancelled the click you were making, so Shift+click only worked once per key press). Shift+click on the map is now an ordinary click; in the unmodded game it flashed a unit's move line for a moment and then did nothing.

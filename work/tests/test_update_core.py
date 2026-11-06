@@ -339,9 +339,12 @@ def test_label_file_body_is_wrapped_into_short_physical_lines(exe, tmp_path):
     must come out as lines of <= 96 chars broken at spaces, which the engine re-joins with a
     space -- so joining them back must give the sanitised body exactly."""
     body = tmp_path / "body.txt"
+    # The real closing paragraph (user wording 2026-11-04): it must survive the wrap with its two
+    # spaces after the label, on one physical line of its own.
+    never = "\"Don't ask me again\"  Skips this update (undo in Preferences)."
     text = ("An update is available:\nLongevity Mod 0.1.0 -> 9.9.9\n\nUpdating closes the game and opens the updater "
-            "in its own window.\nYour saved games are not affected.\n\n\"Not now\" asks again the next time you start "
-            "the game.\n\"Don't ask me again\" skips these until the next release for something you have installed (undo in Preferences).")
+            "in its own window.\nYour saved games are not affected. If you update without saving, progress since "
+            "your last save is lost.\n\n" + never)
     body.write_text(text, encoding="ascii")
     out = run(exe, "label", body, 460, "longevity_sm.pcx", "Quit and update", "Not now", "Don't ask me again")
     lines = out.split("\n")
@@ -360,6 +363,7 @@ def test_label_file_body_is_wrapped_into_short_physical_lines(exe, tmp_path):
             rebuilt += (" " if rebuilt and not rebuilt.endswith("\n") else "") + ln
     assert rebuilt == text, rebuilt
     assert "^" in "".join(body_lines) and all(not ln.startswith(("#", ";")) and not ln.endswith(" ") for ln in body_lines)
+    assert "^" + never in body_lines, body_lines
     assert "^" in body_lines and body_lines.index("^") > 0, "an empty paragraph is a lone ^ line"
     # a single very long word cannot overflow the reader either
     body.write_text("x" * 300, encoding="ascii")
@@ -437,8 +441,8 @@ def test_update_body_names_every_item_and_the_action(exe, tmp_path):
     text = "latest=0.2.0\nbase=0.1.0>0.2.0\nstale=movies-hd|HD cinematics|0.1.0>0.2.0|671088640\n"
     p = tmp_path / "in.txt"
     p.write_bytes(text.encode())
-    NO = ('"Not now" asks again the next time you start the game. '
-          '"Don\'t ask me again" skips these until the next release for something you have installed (undo in Preferences).\n')
+    # user wording 2026-11-04: the label, two spaces, the meaning; "Not now" unexplained
+    NO = '"Don\'t ask me again"  Skips these updates (undo in Preferences).\n'
     menu = run(exe, "body", "update", 0, 10, p)
     assert menu == ("Updates are available:\nLongevity Mod 0.1.0 -> 0.2.0\nHD cinematics 0.1.0 -> 0.2.0 (640 MB)\n\n"
                     "Updating closes the game and opens the updater in its own window. "
@@ -452,15 +456,17 @@ def test_update_body_names_every_item_and_the_action(exe, tmp_path):
             assert not ln or ln.endswith((".", ":", ")", "?")) or " -> " in ln, ln
     one = tmp_path / "one.txt"
     one.write_bytes(b"latest=0.2.0\nbase=0.1.0>0.2.0\n")
-    assert run(exe, "body", "update", 0, 10, one).startswith("An update is available:\n")
+    single = run(exe, "body", "update", 0, 10, one)
+    assert single.startswith("An update is available:\n")
+    assert single.endswith('\n\n"Don\'t ask me again"  Skips this update (undo in Preferences).\n')
+    assert "Not now" not in menu + single
 
 
 def test_pack_body_variants(exe, tmp_path):
     text = "latest=0.2.0\nnew=movies-hd|HD cinematics|0.2.0|1395864371\nnew=portraits-hd|Longevity HD Portrait Pack|0.2.0|\n"
     p = tmp_path / "in.txt"
     p.write_bytes(text.encode())
-    NO = ('"Not now" asks again the next time you start the game. '
-          '"Don\'t ask me again" skips this pack until the next release for something you have installed (undo in Preferences).\n')
+    NO = '"Don\'t ask me again"  Skips this pack (undo in Preferences).\n'      # user wording 2026-11-04
     standalone = run(exe, "body", "pack", 0, 1, 0, "0.2.0", 10, p)
     assert standalone == ("HD cinematics 0.2.0 is available. It is an optional 1.3 GB download. "
                           "Installing it also brings Longevity Mod up to 0.2.0 (required).\n\n"

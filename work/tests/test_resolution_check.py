@@ -14,6 +14,8 @@ sys.path.insert(0, str(_SCRIPTS))
 
 import install as inst        # noqa: E402
 
+inst._load_modules()          # apply_patches etc.; run alone, nothing else in the worker loads them
+
 
 @pytest.mark.parametrize("w,h,display,want", [
     ("1920", "1080", (3840, 2160), (1920, 1080)),      # pinned below native: stretched
@@ -75,6 +77,18 @@ def test_the_question_is_asked_even_under_the_workers_no_prompt(tmp_path, monkey
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
     inst.check_display_resolution(g, "pracx", no_prompt=True)
     assert inst.read_ini_str(g, "PRACX", "ScreenWidth", "") == "<DEFAULT>"
+
+
+def test_a_first_installs_no_prompt_only_warns(tmp_path, monkeypatch, capsys):
+    """The PLAYER's --no-prompt on a first install ("never ask anything"): the hint, no question,
+    the ini untouched -- even with a keyboard attached."""
+    g = _game(tmp_path, "ScreenWidth=1920\nScreenHeight=1080")
+    monkeypatch.setattr(inst, "current_display_mode", lambda: (3840, 2160))
+    monkeypatch.setattr(ix, "can_ask", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    inst.check_display_resolution(g, "pracx", ask=False)
+    assert inst.read_ini_str(g, "PRACX", "ScreenWidth", "") == "1920"
+    assert "Set [PRACX] ScreenWidth and ScreenHeight to <DEFAULT>" in capsys.readouterr().out
 
 
 def test_without_a_keyboard_it_only_warns(tmp_path, monkeypatch, capsys):

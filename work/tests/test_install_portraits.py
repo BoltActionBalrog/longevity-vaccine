@@ -172,12 +172,17 @@ def test_release_refuses_anything_else(tmp_path, damage):
 
 
 def test_the_installer_credits_the_artist():
+    """The pack's credit stays wherever the pack goes (the installer's line, shown only with the pack installed;
+    the pack's provenance). The player-portrait guide shipped to EVERY install says nothing of the pack while it is
+    withheld (user 2026-11-04: the artist's licence has not arrived); restoring the pack restores the guide's pack
+    sections and their credit (ACTION_ITEMS: the pack is off the website and the guide)."""
     assert "Turovetsky" in inst.PORTRAIT_ART_CREDIT
     assert "youtube.com/@Turovetsky" in inst.PORTRAIT_ART_CREDIT and "x.com/turovetsky" in inst.PORTRAIT_ART_CREDIT
-    readme = (_REPO / "work" / "art" / "portraits-README.txt").read_text(encoding="utf-8")
     prov = (_REPO / "work" / "art" / "portraits-hd-PROVENANCE.txt").read_text(encoding="utf-8")
-    for text in (readme, prov):
-        assert "Turovetsky" in text and "youtube.com/@Turovetsky" in text and "x.com/turovetsky" in text
+    assert "Turovetsky" in prov and "youtube.com/@Turovetsky" in prov and "x.com/turovetsky" in prov
+    readme = (_REPO / "work" / "art" / "portraits-README.txt").read_text(encoding="utf-8")
+    for gone in ("Turovetsky", "HD Portrait Pack", "portraits\\hd"):
+        assert gone not in readme, gone
 
 
 def _junction(link: Path, target: Path) -> bool:

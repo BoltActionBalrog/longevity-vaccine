@@ -213,8 +213,12 @@ def test_the_archive_has_the_one_payload_layout(built):
     for required in ("INSTALL.bat", "scripts/run-install.bat", "scripts/install.py",
                      "scripts/apply_patches.py", "scripts/config.py", "scripts/version.py",
                      "scripts/installer_exit.py", "patches/patches.yaml",
-                     "src/uimod/build/Release/uimod.dll", "art/longevity_sm.pcx"):
+                     "src/uimod/build/Release/uimod.dll", "art/longevity_sm.pcx", "CHANGELOG.txt"):
         assert required in names, f"missing {required}"
+    assert "CHANGELOG.md" not in names, "the changelog ships as .txt, which Notepad opens"
+    # CRLF on every checkout (.gitattributes): Notepad before Windows 10 1809 shows LF text as one line.
+    attrs = (_REPO / ".gitattributes").read_text(encoding="utf-8").split("\n")
+    assert "work/CHANGELOG.md text eol=crlf" in [a.strip() for a in attrs]
     assert not [n for n in names if n.split("/")[0] == "work"], \
         "the checkout's `work` folder reached the archive"
     assert sum(1 for n in names if n.startswith("src/uimod/third_party/ffmpeg/bin/")) == 5

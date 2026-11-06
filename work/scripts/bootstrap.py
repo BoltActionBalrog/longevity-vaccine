@@ -215,7 +215,8 @@ PAYLOAD = (
     ("scripts/run-install.bat", "work/run-install.bat"),
     ("scripts", "work/scripts"),
     ("patches", "work/patches"),
-    ("CHANGELOG.md", "work/CHANGELOG.md"),
+    ("CHANGELOG.txt", "work/CHANGELOG.md"),   # .txt opens in Notepad; up to 0.2.1 it shipped as .md,
+                                              # and those bootstraps skip the .md this payload lacks
     ("tools/python", "tools/python"),
     ("tools/python38", "tools/python38"),    # the Windows 7 / 8 interpreter (fetch_python38.py; absent on a bare dev tree)
     ("src/uimod/build/Release/uimod.dll", "src/uimod/build/Release/uimod.dll"),
@@ -632,7 +633,7 @@ def run(argv: list = None) -> int:
         global _VERDICT, _NOTE_ARGS
         current = {n: v for n, v in content.items() if n not in left}
         _VERDICT = ("ALREADY UP TO DATE", _idle_verdict(inst, installed, current,
-                                                        inst.absent_modules(doc, sorted(content)),
+                                                        inst.announced_modules(game_dir, doc, sorted(content)),
                                                         left=[inst.MODULE_LABELS.get(n, n)
                                                               for n in sorted(left)]))
         return ix.EXIT_OK
@@ -982,9 +983,21 @@ def _closing_note() -> None:
         inst.print_play_note(*_NOTE_ARGS)
 
 
+def _relaunch_exe():
+    """The program to offer to start after an update that completed here: the one the closing note
+    names (thinker.exe in a Thinker folder). An update ended without the offer a first install
+    makes, though the game had just been closed for it (user 2026-11-05). None on a hand-over or a
+    failure, where there is no closing note either."""
+    if not _NOTE_ARGS:
+        return None
+    import install as inst
+    return inst.mod_exe(*_NOTE_ARGS)
+
+
 if __name__ == "__main__":
     sys.exit(ix.run_guarded(
         main,
+        relaunch_exe=_relaunch_exe,
         success_title=lambda: _VERDICT[0] if _VERDICT else "UPDATE COMPLETE",
         success_body=lambda: _VERDICT[1] if _VERDICT else
         "Your installation is up to date.",

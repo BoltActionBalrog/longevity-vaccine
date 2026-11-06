@@ -6,14 +6,17 @@ Usage: py make_longevity_sm.py <game_dir> <out_dir>
 """
 import sys
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 GAME = Path(sys.argv[1])
 OUT = Path(sys.argv[2])
 OUT.mkdir(parents=True, exist_ok=True)
 
 W, H = 200, 120           # popup art size (every *_sm.pcx)
-MARK = 104                # mark height in art pixels (64 svg units -> MARK px)
+# Mark size in art pixels (64 svg units -> MARK px). The drawn mark spans svg 2.5..61.5 (the frame's
+# stroke), so 124 leaves ~3 px above and below in the 120-row art (user 2026-11-04: fill the box);
+# the mark's transparent margin past the frame is cropped by the paste.
+MARK = 124
 S = 8                     # supersampling
 U = MARK * S / 64.0       # px per svg unit at supersample
 PALE = (0xB9, 0xD3, 0xD1) # website "pale icon tone"
@@ -81,15 +84,9 @@ mark.paste(Image.new('RGBA', (size, size), PALE + (255,)), mask=sky)
 mark.paste(Image.new('RGBA', (size, size), PALE + (255,)), mask=frame)
 mark = mark.resize((MARK, MARK), Image.LANCZOS)
 
-# --- backdrop: black with a faint teal glow low-centre (behind the planet) ---
+# --- backdrop: plain black. The faint teal glow that sat low-centre read as a shadow planet
+# under the logo once quantised (user 2026-11-04: removed). ---
 art = Image.new('RGB', (W, H), (0, 0, 0))
-glow = Image.new('L', (W, H), 0)
-gd = ImageDraw.Draw(glow)
-gcx, gcy = W // 2, H - 10
-for rr, v in ((70, 22), (52, 40), (34, 58)):
-    gd.ellipse([gcx - rr, gcy - rr * 0.55, gcx + rr, gcy + rr * 0.55], fill=v)
-glow = glow.filter(ImageFilter.GaussianBlur(10))
-art.paste(Image.new('RGB', (W, H), (10, 40, 44)), mask=glow)
 art.paste(mark, ((W - MARK) // 2, (H - MARK) // 2), mark)
 
 # --- quantise to the game's popup-art palette (space_sm.pcx == ac_logo_sm.pcx) ---

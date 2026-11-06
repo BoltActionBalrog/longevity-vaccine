@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent       # ...\work\scripts
@@ -363,9 +364,9 @@ def _backup_name(game_dir: Path, ov, md5: str) -> Path:
     return game_dir / f"{stem}{THINKER_ORIGINAL_STEM}-{md5[:8]}{suf}"
 
 
-def _ask_yes(question: str, default_yes: bool) -> bool:
+def _ask_yes(question: str, default_yes: bool, title: str) -> bool:
     try:
-        ans = input(question + (" [Y/n] " if default_yes else " [y/N] ")).strip().lower()
+        ans = ix.ask(question + (" [Y/n] " if default_yes else " [y/N] "), title=title).strip().lower()
     except (EOFError, KeyboardInterrupt):
         return False
     return ans in (("", "y", "yes") if default_yes else ("y", "yes"))
@@ -455,7 +456,7 @@ def plan_thinker_setup(game_dir: Path, args):
         ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and the {ov.exe} here is a version the installer does not recognise (MD5 {md5}).")
         ix.say(f"  The installer can keep it as {backup.name} and put a copy of {_plain_name(src)} in its place as {ov.exe}; --uninstall puts it back.")
     if ask:
-        if not _ask_yes("  Set this folder up to play with Thinker?", default_yes=known):
+        if not _ask_yes("Set this folder up to play with Thinker?", default_yes=known, title="Thinker"):
             ix.say("  Left as it is: the mod is installed for PRACX without Thinker. Run the installer again to set up Thinker later.")
             return release if record else None
     elif not known:
@@ -1489,7 +1490,7 @@ def resolution_check_applies(target_id) -> bool:
     return spec is not None and bool(spec.companion)
 
 
-def check_display_resolution(game_dir: Path, target_id, no_prompt: bool = False) -> None:
+def check_display_resolution(game_dir: Path, target_id, no_prompt: bool = False, ask: bool = True) -> None:
     """Warn about a pinned [PRACX] resolution that differs from the display; offer to reset it.
     Never raises: it runs after the install has succeeded."""
     if not resolution_check_applies(target_id):
@@ -1508,13 +1509,14 @@ def check_display_resolution(game_dir: Path, target_id, no_prompt: bool = False)
     # Ask whenever a keyboard is attached. `no_prompt` alone is not the gate: the bootstrap's
     # worker always carries --no-prompt (for optional extras) yet runs in the console the player
     # is watching (2026-09-27: the question was skipped there and only the hint printed).
-    if not ix.can_ask():
+    # `ask` is False only for a first install run with the PLAYER's --no-prompt ("never ask").
+    if not ix.can_ask() or not ask:
         ix.say("Set [PRACX] ScreenWidth and ScreenHeight to <DEFAULT> in Alpha Centauri.ini to fix this.")
         return
     left = ("Left your resolution as is. Your game will likely appear stretched until you fix this! "
             "Set [PRACX] ScreenWidth and ScreenHeight to <DEFAULT> in Alpha Centauri.ini.")
     try:
-        ans = input("Let the installer set the game to your display's resolution? [Y/n] ").strip().lower()
+        ans = ix.ask("Let the installer set the game to your display's resolution? [Y/n] ", title="Game resolution").strip().lower()
     except (EOFError, KeyboardInterrupt):
         ix.warn(left)
         return
@@ -1621,11 +1623,20 @@ def module_catalogue(game_dir: Path, args) -> tuple:
 
 
 def choose_modules(catalogue: dict, args, game_dir: Path) -> list:
-    """Which optional modules to install.
+    """Which optional modules to install (pick_modules without the declines)."""
+    return pick_modules(catalogue, args, game_dir)[0]
 
-    Flags decide unattended (`--modules a,b`, `--ai on|off`); otherwise the player picks from a
-    numbered list and the installer WAITS for the answer -- an install must not run past this
-    point on its own (user, 2026-09-27). Enter takes everything listed.
+
+def pick_modules(catalogue: dict, args, game_dir: Path) -> tuple:
+    """(the optional modules to install, the ones the player turned down, the ones the player
+    ticked in the list -- [] when no list was shown).
+
+    Flags decide without asking (`--modules a,b`, `--ai on|off`, `--no-prompt`); otherwise the
+    player ticks packs in a list and the installer WAITS for Confirm -- an install must not run
+    past this point on its own (user, 2026-09-27). Turned down = shown in the list and left
+    unticked, or `--ai off` for the HD cinematics: the install records each as the game's
+    "Don't ask me again" (user 2026-11-01). Nothing is turned down when nobody chose: an
+    unattended run, `--no-prompt`, a pack already on disk.
     """
     names = [n for n in GAME_CONTENT_MODULES if n in catalogue]
     if args.modules:
@@ -1638,46 +1649,215 @@ def choose_modules(catalogue: dict, args, game_dir: Path) -> list:
                 "right now.", code=ix.EXIT_ABORTED, changed=False,
                 remedy="run the installer without --modules; the pack can be added later from "
                        "the game's update prompt.")
-        return wanted
+        return wanted, [], []
     if args.ai == "on":
-        return ["movies-hd"] if "movies-hd" in catalogue else []
-    if args.ai == "off" or not names:
-        return []
+        return (["movies-hd"] if "movies-hd" in catalogue else []), [], []
+    if args.ai == "off":
+        # Not read from the catalogue: --ai off never fetches the manifest.
+        return [], ([] if pack_on_disk(game_dir, "movies-hd") else ["movies-hd"]), []
+    if not names:
+        return [], [], []
+    import receipt as rc
+    declines = rc.declined(game_dir)
+    ticked = {n: _starts_ticked(n, catalogue, game_dir, declines) for n in names}
+    if getattr(args, "no_prompt", False):
+        # The PLAYER's --no-prompt (only --update workers get the bootstrap's): nothing asked, and
+        # the list taken as it would start (user 2026-11-01) -- every module on a first install;
+        # on a re-run a pack the player said no to stays out (a default here once reversed an
+        # opt-out, see below).
+        chosen = [n for n in names if ticked[n]]
+        ix.say("Selected: " + (", ".join(_pack_label(n) for n in chosen) if chosen else "none")
+               + " (--no-prompt)")
+        return chosen, [], []
     if not ix.can_ask():
         # Unattended: a first install takes the headline pack, a re-run keeps the earlier choice
         # (set_ini_flag runs every time, and a hardcoded default here once reversed an opt-out).
         state = ini_flag_state(game_dir, "UpscaledVideos")
-        return ["movies-hd"] if (state is None or state) and "movies-hd" in names else []
+        return (["movies-hd"] if (state is None or state) and "movies-hd" in names else []), [], []
 
-    ix.say("Optional modules (downloaded after the game is patched):")
-    for i, n in enumerate(names, 1):
+    chosen = _tick_picker(names, catalogue, ticked)
+    ix.say("Selected: " + (", ".join(_pack_label(n) for n in chosen) if chosen else "none"))
+    return chosen, [n for n in names if n not in chosen and not catalogue[n].get("on_disk")], chosen
+
+
+def record_module_choice(game_dir: Path, wanted: list, turned_down: list) -> None:
+    """A pack turned down at install time is declined exactly as the game's "Don't ask me again"
+    on its offer declines it (`new:<id>:*`): hidden from the update prompt, undone by Preferences'
+    "Reset Skipped Updates", void under check_report's reset rule. A pack in `wanted` -- ticked
+    by the player, or installed by this run -- forgets any earlier decline; one a flag or an
+    unattended run merely tried and failed to fetch keeps it. Written after the install, never
+    before (a cancelled install changes nothing); a failed write only means the game asks
+    again. Never raises."""
+    try:
+        import receipt as rc
+        for n in turned_down:
+            rc.decline(game_dir, NEW_PACK_PREFIX + n, rc.DECLINE_ANY)
+        for n in wanted:
+            rc.forget_decline(game_dir, NEW_PACK_PREFIX + n)
+    except Exception:  # noqa: BLE001 - bookkeeping must not fail a finished install
+        pass
+
+
+def _starts_ticked(name: str, catalogue: dict, game_dir: Path, declines: dict) -> bool:
+    """Ticked unless the player said no before (user 2026-11-01: everything on a first run).
+    No = "Don't ask me again" on the pack's offer (in game or by an earlier unticked install), or
+    the HD cinematics switched off. A pack already on disk is always ticked."""
+    if catalogue[name].get("on_disk"):
+        return True
+    if NEW_PACK_PREFIX + name in declines:
+        return False
+    return not (name == "movies-hd" and ini_flag_state(game_dir, "UpscaledVideos") is False)
+
+
+#: The DeclinedUpdates item for a pack the player does not have (update_core.h writes
+#: `new:<id>:*` for "Don't ask me again" on a NEW pack's offer; check_report reads it).
+NEW_PACK_PREFIX = "new:"
+
+
+class _KeyEventRecord(ctypes.Structure):
+    _fields_ = [("bKeyDown", ctypes.c_int), ("wRepeatCount", ctypes.c_ushort),
+                ("wVirtualKeyCode", ctypes.c_ushort), ("wVirtualScanCode", ctypes.c_ushort),
+                ("uChar", ctypes.c_wchar), ("dwControlKeyState", ctypes.c_ulong)]
+
+
+class _InputRecord(ctypes.Structure):
+    class _Event(ctypes.Union):
+        _fields_ = [("KeyEvent", _KeyEventRecord), ("_size", ctypes.c_byte * 16)]
+    _fields_ = [("EventType", ctypes.c_ushort), ("Event", _Event)]
+
+
+_K32 = None
+
+
+def _poll_key():
+    """The next key PRESS waiting in the console's input buffer, as (virtual-key code, character),
+    or None when nothing is waiting; never blocks. Read as the console's own key records, not
+    through msvcrt.getwch: getwch hands out an arrow as "\\xe0" and its second code only on the
+    NEXT call, so an arrow cannot be told from a typed a-grave (2026-11-03: every arrow was read
+    as one and ignored, in a plain Command Prompt). The record says VK_UP outright."""
+    global _K32
+    if _K32 is None:
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.GetStdHandle.restype = ctypes.c_void_p
+        k.GetStdHandle.argtypes = [ctypes.c_ulong]
+        k.GetNumberOfConsoleInputEvents.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        k.ReadConsoleInputW.argtypes = [ctypes.c_void_p, ctypes.POINTER(_InputRecord), ctypes.c_ulong,
+                                        ctypes.POINTER(ctypes.c_ulong)]
+        _K32 = k
+    h = _K32.GetStdHandle(ctypes.c_ulong(-10 & 0xFFFFFFFF))      # STD_INPUT_HANDLE
+    n, rec = ctypes.c_ulong(), _InputRecord()
+    while _K32.GetNumberOfConsoleInputEvents(h, ctypes.byref(n)) and n.value:
+        if not _K32.ReadConsoleInputW(h, ctypes.byref(rec), 1, ctypes.byref(n)) or not n.value:
+            return None
+        e = rec.Event.KeyEvent
+        if rec.EventType == 0x0001 and e.bKeyDown:            # KEY_EVENT, pressed (not released)
+            return e.wVirtualKeyCode, e.uChar
+    return None                                                 # mouse / focus / resize events: skipped
+
+
+_VK_KEYS = {0x26: "up", 0x28: "down", 0x0D: "enter", 0x20: "space"}
+
+
+def _read_key() -> str:
+    """One key from the console: "up", "down", "enter", "space", or "" for any other key.
+    Ctrl-C raises KeyboardInterrupt, as at every other prompt. No console on stdin raises
+    EOFError: the console would be waited on for a key nobody can press (only a caller that
+    skipped ix.can_ask() gets here -- a test that forgot to supply the keys)."""
+    if sys.stdin is None or not sys.stdin.isatty():
+        raise EOFError("no console to read a key from")
+    # Poll, never block: Python delivers a console Ctrl-C between bytecodes, so a blocking read
+    # would hold the cancel back until the player pressed some other key.
+    while True:
+        key = _poll_key()
+        if key is not None:
+            break
+        time.sleep(0.03)
+    vk, ch = key
+    if ch == "\x03":
+        raise KeyboardInterrupt
+    if ch == "\x1b":
+        # A console with virtual-terminal input on hands an arrow over as text, ESC [ A / ESC O A,
+        # one character per record. The rest follows within milliseconds; a lone ESC (the Esc
+        # key) is no key of ours.
+        seq = ""
+        while len(seq) < 8:
+            deadline, nxt = time.monotonic() + 0.05, _poll_key()
+            while nxt is None and time.monotonic() < deadline:
+                time.sleep(0.005)
+                nxt = _poll_key()
+            if nxt is None:
+                break
+            seq += nxt[1]
+            if len(seq) > 1 and (seq[-1].isalpha() or seq[-1] == "~"):
+                break
+        return {"[A": "up", "OA": "up", "[B": "down", "OB": "down"}.get(seq, "")
+    if vk in _VK_KEYS:
+        return _VK_KEYS[vk]
+    return {"\r": "enter", "\n": "enter", " ": "space"}.get(ch, "")
+
+
+def _drop_typed_ahead() -> None:
+    """Forget keys pressed before the list was drawn: an extra Enter at the folder prompt, typed
+    while the manifest was fetched, would otherwise untick the first pack unseen. Never raises."""
+    try:
+        if sys.stdin is not None and sys.stdin.isatty():
+            for _ in range(1000):
+                if _poll_key() is None:
+                    break
+    except Exception:  # noqa: BLE001 - a key we could not drop only flips a box the player sees
+        pass
+
+
+def _picker_rows(names: list, catalogue: dict, ticked: dict, at: int) -> list:
+    """The pick list as printed: a box per pack (green ticked, red not), then the row that ends
+    the pick: "Install selected modules", or "Skip optional modules" with nothing ticked (user
+    wording 2026-11-04)."""
+    rows = []
+    for i, n in enumerate(names):
         c = catalogue[n]
         note = "   already on disk" if c.get("on_disk") else ""
-        ix.say(f"  {i}. {_pack_label(n):<22}{human_size(c['size']):>8}{note}")
-    # No implicit default: Enter re-asks. Every earlier prompt trains Enter as "yes", and a
-    # reflex Enter here would commit to gigabytes (audit 2026-09-27). Ctrl-C is NOT an answer:
-    # it propagates to run_guarded, which cancels with nothing changed.
+        box = "[X]" if ticked[n] else "[ ]"
+        row = ix.painted(f"{box} {_pack_label(n):<28}{human_size(c['size']):>8}{note}",
+                         "good" if ticked[n] else "bad")
+        rows.append((" > " if i == at else "   ") + row)
+    last = INSTALL_SELECTED if any(ticked[n] for n in names) else SKIP_MODULES
+    rows.append((" > " if at == len(names) else "   ") + last)
+    return rows + [ix.RULE]                 # the block's closing rule, redrawn with the rows
+
+
+INSTALL_SELECTED = "Install selected modules"
+SKIP_MODULES = "Skip optional modules"
+
+
+def _tick_picker(names: list, catalogue: dict, ticked: dict) -> list:
+    """Up / Down move the marker, Enter (or Space) ticks or unticks the pack under it, and Enter
+    on Confirm -- the last row -- ends the pick (user 2026-11-01). The marker starts on the first
+    pack, never on Confirm: a reflex Enter (every earlier prompt trains Enter as "yes") then flips
+    a box the player can see, instead of committing to gigabytes (audit 2026-09-27). Ctrl-C is NOT
+    an answer: it propagates to run_guarded, which cancels with nothing changed."""
+    ticked = dict(ticked)
+    at = 0
+    rows = _picker_rows(names, catalogue, ticked, at)
+    _drop_typed_ahead()
+    ix.ask_block("Choose the optional modules",
+                 # user wording 2026-11-04. "Later": Preferences' "Reset Skipped Updates" makes the
+                 # game's update prompt offer a pack left unticked here again.
+                 ["Select which optional modules you would like to install. You can download these "
+                  "later from the in-game preferences menu."],
+                 rows, keys="Up/Down: move   Enter: tick or untick, or install")
     while True:
-        try:
-            ans = input('Type the numbers of the modules to install (for example "1 2"), '
-                        '"all", or "none": ').strip().lower()
-        except EOFError:
-            ix.say("Selected: none")
-            return []
-        if ans in ("all", "a"):
-            picks = list(range(1, len(names) + 1))
-        elif ans in ("none", "n", "0"):
-            picks = []
+        key = _read_key()
+        if key == "up":
+            at = max(0, at - 1)
+        elif key == "down":
+            at = min(len(names), at + 1)
+        elif key in ("enter", "space") and at < len(names):
+            ticked[names[at]] = not ticked[names[at]]
+        elif key == "enter":
+            return [n for n in names if ticked[n]]
         else:
-            toks = ans.replace(",", " ").split()
-            if not toks or not all(t.isascii() and t.isdigit() and len(t) < 4
-                                   and 1 <= int(t) <= len(names) for t in toks):
-                ix.say(f'Please type numbers between 1 and {len(names)}, "all", or "none".')
-                continue
-            picks = sorted({int(t) for t in toks})
-        chosen = [names[i - 1] for i in picks]
-        ix.say("Selected: " + (", ".join(_pack_label(n) for n in chosen) if chosen else "none"))
-        return chosen
+            continue
+        rows = ix.redraw(rows, _picker_rows(names, catalogue, ticked, at))
 
 
 def cinematics_flag(chosen: list, game_dir: Path, args, offered: list = ()) -> bool:
@@ -1706,13 +1886,13 @@ def banner() -> None:
     print(f"   version {ver.VERSION}")
     print(line)
     if any(a in ("--update", "--generation") for a in sys.argv[1:]):
-        # Just the header: "This will patch the game ..." on an update read as a threat, and the
+        # Just the header: "This installer will patch ..." on an update read as a threat, and the
         # update flow says what it is doing line by line (waiting / updating / the verdict).
         # (--generation: the bootstrap's second generation, which has no --update on its line.)
         return
-    print("This will patch the game, installing features such as high-resolution UI, crash fixes, "
-          "and quality of life changes. Your original game .exe will be backed up (.bak) and can be "
-          "restored at any time.\n")
+    # ix.say, not print: the blank line it ends with must count for ix.blank() (one, never two).
+    ix.say("This installer will patch Alpha Centauri: Alien Crossfire with Longevity Vaccine. Your "
+           "original game .exe will be backed up (.bak) and can be restored at any time.\n")
 
 
 #: Modules whose payload belongs in the GAME directory, and the ONLY subtrees each may write to.
@@ -2257,7 +2437,7 @@ def create_shortcut(lnk: Path, exe: Path) -> str:
     return "the shortcut could not be written to the desktop"
 
 
-def check_desktop_shortcut(game_dir: Path, target_id) -> None:
+def check_desktop_shortcut(game_dir: Path, target_id, ask: bool = True) -> None:
     """Stop and offer a desktop shortcut to the mod's exe when the player has none. Never raises."""
     global _SHORTCUT_NAME
     try:
@@ -2270,12 +2450,12 @@ def check_desktop_shortcut(game_dir: Path, target_id) -> None:
             return
         ix.say("")
         ix.say("You do not have a desktop shortcut that starts the game with the mod.")
-        if not ix.can_ask():
+        if not ix.can_ask() or not ask:
             ix.say(f"Run the installer again to create one, or start {exe.name} from the game folder.")
             return
-        ix.say("Create a desktop shortcut that starts the game with the Longevity Vaccine mod?")
         try:
-            ans = input("[Y/n] ").strip().lower()
+            ans = ix.ask("Create a desktop shortcut that starts the game with the Longevity Vaccine mod? [Y/n] ",
+                         title="Desktop shortcut").strip().lower()
         except (EOFError, KeyboardInterrupt):
             ans = "n"
         if ans not in ("", "y", "yes"):
@@ -2288,9 +2468,8 @@ def check_desktop_shortcut(game_dir: Path, target_id) -> None:
         lnk = dirs[0] / (MOD_SHORTCUT_NAME + ".lnk")
         if lnk.exists():
             ix.say(f'A desktop shortcut named "{MOD_SHORTCUT_NAME}" already exists but starts something else.')
-            ix.say("Replace it?")
             try:
-                ans = input("[Y/n] ").strip().lower()
+                ans = ix.ask("Replace it? [Y/n] ", title="Desktop shortcut").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 ans = "n"
             if ans not in ("", "y", "yes"):
@@ -2786,7 +2965,7 @@ def do_update(game_dir: Path, args) -> int:
                 + " a newer version that was not part of this update; it was left as it is.")
         _VERDICT = ("ALREADY UP TO DATE",
                     body + ("  An optional extra is available -- see \"optional extras\" above."
-                            if absent_modules(pf.doc, installed) else ""))
+                            if announced_modules(game_dir, pf.doc, installed) else ""))
         return ix.EXIT_OK
     wanted = list(pf.wanted)
     for n in sorted(installed_modules):
@@ -3054,6 +3233,23 @@ def absent_modules(doc: dict, installed: list) -> list:
             if n not in installed and isinstance(mods.get(n), dict)]
 
 
+def announced_modules(game_dir: Path, doc: dict, installed: list) -> list:
+    """absent_modules less the packs the player turned down ("Don't ask me again" on the game's
+    offer, or left unticked at install): what the console tells an up-to-date player about.
+    The game's own offer (--check) applies the declines through check_report's reset rule."""
+    import receipt as rc
+    declines = rc.declined(game_dir)
+    mods = doc.get("modules") if isinstance(doc, dict) else None
+
+    import version as _ver           # this runs from the bootstrap too, before _load_modules
+
+    def offered(n):
+        v = str((mods.get(n) or {}).get("version") or "")
+        return _ver.normalise(v) if _ver.is_valid(v) else v    # as check_report compares it
+    return [n for n in absent_modules(doc, installed)
+            if not rc.is_declined(declines, NEW_PACK_PREFIX + n, offered(n))]
+
+
 def offer_optional_modules(game_dir: Path, doc: dict, installed: list, args) -> None:
     """After everything else is done, announce the optional modules that are NOT installed.
 
@@ -3067,7 +3263,7 @@ def offer_optional_modules(game_dir: Path, doc: dict, installed: list, args) -> 
     # ever heard about a pack on an idle check.
     if not doc:
         return
-    absent = absent_modules(doc, installed)
+    absent = announced_modules(game_dir, doc, installed)
     if not absent:
         return
     import manifest as mfmod
@@ -3876,16 +4072,28 @@ def _show_folder_dialog(ole32, title: str):
         _com_call(dlg, _RELEASE, ctypes.c_ulong)
 
 
-def _ask_line(prompt: str) -> str:
-    try:
-        return input(prompt).strip()
-    except (EOFError, KeyboardInterrupt):
-        raise ix.InstallerError("No game folder was chosen.", code=ix.EXIT_ABORTED, changed=False,
-                                remedy="run the installer again and choose the folder.")
+def _no_folder_chosen(installed: bool) -> "ix.InstallerError":
+    return ix.InstallerError("No game folder was chosen, so nothing was installed."
+                             if not installed else "No game folder was chosen.",
+                             code=ix.EXIT_ABORTED, changed=False,
+                             remedy="run the installer again and choose the folder.")
 
 
-def _typed_folder(text: str) -> Path:
-    return Path(os.path.expandvars(text.strip().strip('"').strip()))
+def copy_error_summary(e: BaseException) -> str:
+    """One readable line for a failed copy. shutil.copytree raises shutil.Error carrying a list
+    of (source, destination, reason) for EVERY file it could not copy, and printing that dumped
+    a screenful of paths (2026-11-04). The count, the first destination and its reason; plus a
+    plain word when Windows refused a path for its length (WinError 206)."""
+    errors = e.args[0] if isinstance(e, shutil.Error) and e.args and isinstance(e.args[0], list) else None
+    if not errors:
+        return str(e)
+    first = errors[0]
+    where, why = (first[1], first[2]) if isinstance(first, tuple) and len(first) == 3 else (first, "")
+    text = (f"{len(errors)} file{'s' if len(errors) != 1 else ''} could not be copied, the first "
+            f"{where}: {why}")
+    if any("WinError 206" in str(x) for x in errors):
+        text += "; some paths in the game folder are longer than Windows allows (260 characters)"
+    return text
 
 
 def _absolute(d) -> Path:
@@ -3894,59 +4102,72 @@ def _absolute(d) -> Path:
     return Path(os.path.abspath(str(d)))
 
 
-def _say_rejected(rejected: list) -> None:
-    for d, why in rejected:
-        ix.say(f"  Found {d}, but {why}.")
+def _arrow_menu(title: str, items: list, before=(), at: int = 0) -> int:
+    """A ruled question block (ix.ask_block) whose rows the arrow keys move through: Up / Down move
+    the marker over `items` -- each a list of printed lines, the marker on the first, which is
+    shown green -- and Enter takes the one under it: its index. `before`: output lines printed
+    above the block (why the list is what it is). Keys typed before the list was drawn are
+    dropped. Ctrl-C raises KeyboardInterrupt."""
+    def rows(at):
+        out = []
+        for i, lines in enumerate(items):
+            out.append((" > " + ix.painted(lines[0], "good")) if i == at else ("   " + lines[0]))
+            out += ["   " + ln for ln in lines[1:]]
+        return out + [ix.RULE]
+    shown = rows(at)
+    _drop_typed_ahead()
+    if before:
+        ix.blank()
+        for line in before:
+            ix.say(line)
+    ix.ask_block(title, [], shown, keys="Up/Down: move   Enter: choose")
+    while True:
+        key = _read_key()
+        if key == "enter":
+            return at
+        nxt = max(0, at - 1) if key == "up" else min(len(items) - 1, at + 1) if key == "down" else at
+        if nxt != at:
+            at = nxt
+            shown = ix.redraw(shown, rows(at))
 
 
 def pick_game_folder(found: list, installed: bool, rejected: list = ()) -> Path:
-    """Ask the player which folder to use. `found`: [(folder, label)] that already checked out;
-    `rejected`: [(folder, reason)] that were looked at and do not. Loops until a folder checks out
-    or the player quits; every rejection says why."""
-    verb = "use" if installed else "install into"
+    """Ask the player which folder to use: a list the arrow keys move through (user 2026-11-03) --
+    each folder found, then Browse, then Quit -- and Enter takes the highlighted row. A folder is
+    chosen from the list or in the Windows folder window; a typed or pasted path is not taken
+    (user 2026-11-03). `found`: [(folder, label)] that already checked out; `rejected`: [(folder,
+    reason)] that were looked at and do not. Loops until a folder checks out or the player quits;
+    every rejection says why. Ctrl-C is "no folder chosen": nothing was written yet."""
+    verb = "Use" if installed else "Install into"
     browse_title = "Choose your Alpha Centauri folder (the one with terranx.exe)"
     while True:
         if found:
-            ix.say("\nAlpha Centauri was found here:")
-            for i, (d, label) in enumerate(found, 1):
-                ix.say(f"  {i}. {d}")
-                ix.say(f"       {label}")
-            more = "type a number to choose, " if len(found) > 1 else ""
-            ans = _ask_line(f"Press Enter to {verb} 1, {more}B to browse for a different folder, "
-                            "type or paste a folder's path, or Q to quit: ")
+            before = []
+            items = [[f"{verb} {d}   ({label})"] for d, label in found]     # user 2026-11-04
+            items.append(["Browse for a different folder"])
         else:
             if rejected:
-                ix.say("\nNo folder the installer found can be used:")
-                _say_rejected(rejected)
+                before = ["No folder the installer found can be used:"]
+                before += [f"  Found {d}, but {why}." for d, why in rejected]
             elif installed:
-                ix.say("\nThe installer could not find a game folder Longevity Vaccine is installed in.")
+                before = ["The installer could not find a game folder Longevity Vaccine is installed in."]
             else:
-                ix.say("\nThe installer could not find Alpha Centauri on this PC by itself.")
-            ans = _ask_line("Press Enter to choose the game folder in a window, type or paste "
-                            "the folder's path, or Q to quit: ")
-        low = ans.lower()
-        if low in ("q", "quit", "exit"):
-            raise ix.InstallerError("No game folder was chosen, so nothing was installed."
-                                    if not installed else "No game folder was chosen.",
-                                    code=ix.EXIT_ABORTED, changed=False,
-                                    remedy="run the installer again when you know where the game is.")
-        if found and low == "":
-            return found[0][0]
-        if found and low.isdecimal() and len(low) <= 4 and 1 <= int(low) <= len(found):
-            return found[int(low) - 1][0]
-        if low in ("", "b", "browse"):
-            chosen = browse_for_folder(browse_title)
-            if chosen is None:
-                ix.say("  No folder chosen in the window. You can also type or paste the path here.")
-                continue
-        else:
-            chosen = _typed_folder(ans)
-        chosen = _absolute(chosen)
+                before = ["The installer could not find Alpha Centauri on this PC by itself."]
+            items = [["Choose the game folder in a window"]]
+        items.append(["Quit"])
         try:
-            if chosen.suffix.lower() == ".exe" and chosen.is_file():
-                chosen = chosen.parent          # the game's program, dragged in: its folder is meant
-        except OSError:
-            pass
+            pick = _arrow_menu("Choose the game folder", items, before)
+        except KeyboardInterrupt:
+            raise _no_folder_chosen(installed)
+        if pick == len(items) - 1:
+            raise _no_folder_chosen(installed)
+        if pick < len(found):
+            return found[pick][0]
+        chosen = browse_for_folder(browse_title)
+        if chosen is None:
+            ix.say("  No folder chosen in the window.")
+            continue
+        chosen = _absolute(chosen)
         status, why = check_game_folder(chosen, installed=installed)
         if status == FOLDER_OK:
             ix.say(f"  {chosen}: {why}")
@@ -4049,7 +4270,11 @@ def main() -> int:
     apr.add_argument("--offline", action="store_true",
                      help="Do not touch the network; use only what is already in staging.")
     apr.add_argument("--no-prompt", action="store_true",
-                     help="Never ask anything; decline every optional extra.")
+                     help="Never ask anything: install every optional module on offer, set a "
+                          "Thinker folder up when its game file is recognised, and create no "
+                          "desktop shortcut and leave the game's resolution setting as it is "
+                          "(each says how to do it yourself). --modules and --ai still choose "
+                          "the modules when given.")
     apr.add_argument("--wait-pid", type=int, default=None, metavar="PID",
                      help="(used by the game) wait for this process -- the game that launched "
                           "the update -- to exit before checking or touching anything.")
@@ -4164,7 +4389,7 @@ def _install(game_dir: Path, args) -> int:
     # themselves happen after the game is patched.
     ix.say("\n--- optional modules ---")
     catalogue, manifest = module_catalogue(game_dir, args)
-    chosen = choose_modules(catalogue, args, game_dir)
+    chosen, turned_down, ticked_now = pick_modules(catalogue, args, game_dir)
     if args.ai == "off" and not args.modules:
         ix.say("  none requested")
     elif manifest is not None and not catalogue:
@@ -4257,13 +4482,18 @@ def _install(game_dir: Path, args) -> int:
     # (audit 2026-09-27). Content left by an uninstall is re-offered and, once the archive is
     # verified, install_modules skips every file that is already current.
     set_ini_flag(game_dir, cinematics_flag(chosen, game_dir, args, offered=list(catalogue)))
+    record_module_choice(game_dir, sorted(set(ticked_now) | {n for n, s in pack_status.items() if s == "ok"}),
+                         turned_down)
     ensure_in_process_movies(game_dir)
     failed_packs = [n for n in GAME_CONTENT_MODULES if pack_status.get(n) == "error"]
 
     # A PRACX install carried over from before may pin an old resolution: warn, offer the fix.
-    check_display_resolution(game_dir, target_id, no_prompt=bool(getattr(args, "no_prompt", False)))
+    # A first install's --no-prompt is the PLAYER's (only --update workers get the bootstrap's):
+    # neither question is asked, and each prints how to do it by hand.
+    asks = not getattr(args, "no_prompt", False)
+    check_display_resolution(game_dir, target_id, ask=asks)
     # ... and the player needs a way to start the RIGHT exe.
-    check_desktop_shortcut(game_dir, target_id)
+    check_desktop_shortcut(game_dir, target_id, ask=asks)
     global _NOTE_ARGS
     _NOTE_ARGS = (game_dir, target_id)
 
@@ -4272,6 +4502,10 @@ def _install(game_dir: Path, args) -> int:
     # Make the installer RESIDENT. Without this the in-game update prompt has nothing to spawn
     # once the player deletes their download, and whatever they kept would be the version they
     # first installed -- while patches.yaml changes every release.
+    # Said BEFORE the copy: it is the slowest step after the questions, and a silent console
+    # right after the shortcut question read as a hang (user 2026-11-04).
+    ix.say("")
+    ix.say("Setting up the mod's updater in the game folder (this can take a minute)...")
     try:
         import bootstrap as bsmod
         bsmod.reconcile(game_dir, say=ix.say)
@@ -4281,7 +4515,7 @@ def _install(game_dir: Path, args) -> int:
         if not bsmod.is_usable(bsmod.updater_dir(game_dir)):
             raise OSError("missing " + ", ".join(bsmod.missing_parts(bsmod.updater_dir(game_dir))))
     except Exception as e:  # noqa: BLE001 - a resident copy is not worth failing the install for
-        ix.say(f"  WARNING: could not install the resident updater ({e}).")
+        ix.say(f"  WARNING: could not install the resident updater ({copy_error_summary(e)}).")
         ix.say("  The mod itself IS installed and playable, but this copy cannot update itself:")
         ix.say("  future updates will have to be downloaded and run by hand.")
 

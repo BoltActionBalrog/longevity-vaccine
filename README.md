@@ -25,7 +25,7 @@ You need *Sid Meier's Alpha Centauri Planetary Pack* from GOG, on Windows 7+.
 3. Run `INSTALL.bat`.
 4. Play with `terranx_PRACX.exe` or the "SMACX Longevity" shortcut. The GOG Galaxy shortcut does NOT work.
 
-**Thinker Mod 5.5** is supported. Install into your Thinker folder and start `thinker.exe` as usual. The installer sets the folder up itself: the original `terranx.exe` is kept as `terranx_original.exe` and a PRACX copy takes its place; uninstalling puts the original back.
+**Thinker Mod 5.5** is supported. Install into your Thinker folder and start `thinker.exe` as usual. The installer sets the folder up for you. It keeps your original `terranx.exe` and puts it back when you uninstall.
 
 Other mods and the base game without Alien Crossfire are not supported.
 

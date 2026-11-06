@@ -185,6 +185,21 @@ def test_deploy_creates_the_one_shipped_layout(game, payload):
     assert bs.is_usable(d)
 
 
+def test_the_changelog_ships_as_txt_and_an_older_payload_list_still_deploys(game, payload, monkeypatch):
+    """CHANGELOG.txt opens in Notepad; the .md it was up to 0.2.1 opened in nothing on a stock
+    Windows. A 0.2.0 / 0.2.1 bootstrap still lists CHANGELOG.md: staging a payload without it
+    must skip the entry, not refuse the update."""
+    assert ("CHANGELOG.txt", "work/CHANGELOG.md") in bs.PAYLOAD
+    assert not [d for d, _s in bs.PAYLOAD if d == "CHANGELOG.md"]
+    (payload / "CHANGELOG.txt").write_text("## 9.9.9\n", encoding="ascii")
+    d = bs.deploy(game, payload, "1.2.3", say=lambda *a: None)
+    assert (d / "CHANGELOG.txt").is_file() and not (d / "CHANGELOG.md").exists()
+    old = tuple(("CHANGELOG.md", s) if dst == "CHANGELOG.txt" else (dst, s) for dst, s in bs.PAYLOAD)
+    monkeypatch.setattr(bs, "PAYLOAD", old)
+    d = bs.deploy(game, payload, "1.2.4", say=lambda *a: None)
+    assert bs.is_usable(d) and not (d / "CHANGELOG.md").exists()
+
+
 def test_deploy_refuses_an_incomplete_payload(game, tmp_path):
     """It used to warn per missing item and publish anyway -- which is how --repair, run from a
     resident copy whose layout it could not read, replaced a working updater with one file."""
@@ -978,6 +993,29 @@ def test_a_pack_only_update_names_the_pack_in_its_verdict(game, payload, tmp_pat
     assert bs._NOTE_ARGS and bs._NOTE_ARGS[0] == game, "the closing note (exe + shortcut) follows every completed update"
 
 
+def test_a_completed_update_offers_to_start_the_game(game, monkeypatch):
+    """User 2026-11-05: an update ended with "Press Enter to close" and no "Start the game now?",
+    which a first install offers. The bootstrap's guard now offers the exe its closing note names
+    -- after a completed update only (no note on a hand-over or a failure: no offer either)."""
+    import install as inst
+    exe = game / "terranx_PRACX.exe"
+    exe.write_bytes(b"MZ")
+    monkeypatch.setattr(inst, "mod_exe", lambda gd, tid: exe if (gd, tid) == (game, "pracx") else None)
+    monkeypatch.setattr(bs, "_NOTE_ARGS", None)
+    assert bs._relaunch_exe() is None
+    monkeypatch.setattr(bs, "_NOTE_ARGS", (game, "pracx"))
+    assert bs._relaunch_exe() == exe
+    src = (_SCRIPTS / "bootstrap.py").read_text(encoding="utf-8")
+    main_block = src[src.index('if __name__ == "__main__":'):]
+    assert "relaunch_exe=_relaunch_exe" in main_block, "the guard must be handed the offer"
+    # ...and the guard turns it into the question, as after an install.
+    asked = []
+    monkeypatch.setattr(ix, "offer_relaunch", lambda e: asked.append(e) or False)
+    monkeypatch.setattr(ix, "wait_for_key", lambda *a, **k: None)
+    assert ix.run_guarded(lambda: ix.EXIT_OK, relaunch_exe=bs._relaunch_exe) == ix.EXIT_OK
+    assert asked == [exe]
+
+
 def test_a_kill_switch_stops_everything_before_any_download(game, payload, tmp_path, trust,
                                                             monkeypatch):
     """SAFEGUARD 6, and the ordering that matters: the kill switch is honoured BEFORE any version
@@ -1329,3 +1367,11 @@ def test_an_already_current_run_announces_a_pack_the_player_does_not_have(game, 
     capsys.readouterr()
     bs.run(["--game-dir", str(game), "--manifest", str(m), "--no-wait", "--no-prompt"])
     assert "optional extras" in capsys.readouterr().out
+    # Turned down -- "Don't ask me again" in game, or left unticked at install: neither the
+    # notice nor the verdict mentions it (user 2026-11-01).
+    import receipt as rc
+    assert rc.decline(game, "new:movies-hd", rc.DECLINE_ANY)
+    bs.run(["--game-dir", str(game), "--manifest", str(m), "--no-wait"])
+    out = capsys.readouterr().out
+    assert "optional extras" not in out and "available, not installed" not in out, out
+    assert "optional extras" not in bs._VERDICT[1]

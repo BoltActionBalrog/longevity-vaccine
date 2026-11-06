@@ -60,7 +60,7 @@ def build_base_archive(out: Path, stamp: str = REAL_VERSION) -> Path:
         shutil.copy2(f, root / "scripts" / f.name)
     shutil.copy2(_REPO / "work" / "run-install.bat", root / "scripts" / "run-install.bat")
     shutil.copytree(_REPO / "work" / "patches", root / "patches")
-    shutil.copy2(_REPO / "work" / "CHANGELOG.md", root / "CHANGELOG.md")
+    shutil.copy2(_REPO / "work" / "CHANGELOG.md", root / "CHANGELOG.txt")
     shutil.copytree(runtime, root / "tools" / "python")
     (root / "src" / "uimod" / "build" / "Release").mkdir(parents=True)
     shutil.copy2(dll, root / "src" / "uimod" / "build" / "Release" / "uimod.dll")

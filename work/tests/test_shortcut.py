@@ -65,11 +65,13 @@ def test_mod_exe_prefers_the_targets_exe(game):
 
 def test_yes_creates_the_named_shortcut_and_the_note_names_it(desk, game, monkeypatch, capsys):
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or "")
     inst.check_desktop_shortcut(game, "pracx")
     out = capsys.readouterr().out
-    assert "You do not have a desktop shortcut that starts the game with the mod." in out
-    assert "Create a desktop shortcut that starts the game with the Longevity Vaccine mod?" in out
+    assert f"You do not have a desktop shortcut that starts the game with the mod.\n\n{ix.RULE}\n" \
+           f" DESKTOP SHORTCUT\n{ix.RULE}\n" in out
+    assert asked == [" Create a desktop shortcut that starts the game with the Longevity Vaccine mod? [Y/n] "]
     assert f'Created "{inst.MOD_SHORTCUT_NAME}" on your desktop.' in out
     lnk = desk[0] / (inst.MOD_SHORTCUT_NAME + ".lnk")
     assert lnk.is_file() and inst.find_shortcut_to(game / "terranx_PRACX.exe") == inst.MOD_SHORTCUT_NAME
@@ -80,6 +82,15 @@ def test_yes_creates_the_named_shortcut_and_the_note_names_it(desk, game, monkey
     assert "Alien Crossfire" not in "\n".join(note)
     assert note[2] == f'Your desktop shortcut "{inst.MOD_SHORTCUT_NAME}" starts the right one.'
     assert note[-1] == inst.ENJOY_LINE
+
+
+def test_a_first_installs_no_prompt_asks_nothing_and_makes_no_shortcut(desk, game, monkeypatch, capsys):
+    """The PLAYER's --no-prompt ("never ask anything"): the hint only, even with a keyboard."""
+    monkeypatch.setattr(ix, "can_ask", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    inst.check_desktop_shortcut(game, "pracx", ask=False)
+    assert "Run the installer again to create one" in capsys.readouterr().out
+    assert not (desk[0] / (inst.MOD_SHORTCUT_NAME + ".lnk")).exists()
 
 
 def test_no_leaves_the_desktop_alone(desk, game, monkeypatch, capsys):

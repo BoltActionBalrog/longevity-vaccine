@@ -11,8 +11,8 @@
 
 #define UIMOD_VERSION_MAJOR 0
 #define UIMOD_VERSION_MINOR 2
-#define UIMOD_VERSION_PATCH 1
-#define UIMOD_VERSION_STRING "0.2.1"
+#define UIMOD_VERSION_PATCH 2
+#define UIMOD_VERSION_STRING "0.2.2"
 
 // The Thinker Mod build every thinker.dll detour is pinned to (PE TimeDateStamp + SizeOfImage), and the version
 // the warning dialog / installer name. Mirrors work\scripts\version.py THINKER_SUPPORTED_*; test_version_sync pins it.

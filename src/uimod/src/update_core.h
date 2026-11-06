@@ -844,20 +844,17 @@ constexpr char kCaption[]    = "Longevity Mod";
 constexpr char kCoreLabel[]  = "Longevity Mod";
 constexpr int  kPromptXs     = 460;      // REALLYQUIT is 320 with two short replies; the game's menus use 420. UNMEASURED in-game.
 
-// The last paragraph of every offer: what the two "no" replies mean. (Popup text is PARAGRAPHS:
-// a '\n' only between paragraphs or list items, never inside a sentence -- the engine wraps to
-// the box width, and a break we chose reads as a ragged line at any other width.)
-// User rule 2026-10-31: "a decline of any pack is reset when any new update releases for a
-// module that is already installed." The DLL writes an UPDATE offer's decline at the offered
-// version (`<item>:<ver>`) and a NEW pack's at `*` (`new:<id>:*`); the installer's check lists
-// everything again as soon as one installed module has an offer the player has not declined,
-// and applies the declines otherwise (install.py check_report). So both texts say the same thing.
-constexpr char kNoMeaningUpdate[] =
-    "\"Not now\" asks again the next time you start the game. "
-    "\"Don't ask me again\" skips these until the next release for something you have installed (undo in Preferences).";
-constexpr char kNoMeaningPack[] =
-    "\"Not now\" asks again the next time you start the game. "
-    "\"Don't ask me again\" skips this pack until the next release for something you have installed (undo in Preferences).";
+// The last paragraph of every offer: what "Don't ask me again" does -- the reply's label, two
+// spaces, its meaning (user wording 2026-11-04; "Not now" is not explained). (Popup text is
+// PARAGRAPHS: a '\n' only between paragraphs or list items, never inside a sentence -- the engine
+// wraps to the box width, and a break we chose reads as a ragged line at any other width.)
+// User rule 2026-10-31, still in force though the text no longer says it (user 2026-11-04):
+// "a decline of any pack is reset when any new update releases for a module that is already
+// installed." The DLL writes an UPDATE offer's decline at the offered version (`<item>:<ver>`)
+// and a NEW pack's at `*` (`new:<id>:*`); install.py check_report applies the rule.
+constexpr char kNeverUpdate[]  = "\"Don't ask me again\"  Skips this update (undo in Preferences).";
+constexpr char kNeverUpdates[] = "\"Don't ask me again\"  Skips these updates (undo in Preferences).";
+constexpr char kNeverPack[]    = "\"Don't ask me again\"  Skips this pack (undo in Preferences).";
 
 // The DeclinedUpdates version an item is declined at: the offered version for an update of
 // something installed, kDeclineAny for a pack the player does not have. An update offer with
@@ -900,7 +897,7 @@ inline bool BuildUpdateBody(const UpdateInfo& u, Context ctx, char* out, size_t 
     if (ok && ctx == kCtxInGame)
         ok = PutRaw(out, cap, o, " If you update without saving, progress since your last save is lost.");
     if (ok) ok = PutRaw(out, cap, o, "\n\n");
-    if (ok) ok = PutRaw(out, cap, o, kNoMeaningUpdate);
+    if (ok) ok = PutRaw(out, cap, o, lines > 1 ? kNeverUpdates : kNeverUpdate);
     if (ok) out[o] = 0;
     return ok;
 }
@@ -929,13 +926,13 @@ inline bool BuildPackBody(const Item& it, const char* alsoCoreTo, Context ctx, P
         if (ok && ctx == kCtxInGame)
             ok = PutRaw(out, cap, o, " If you install without saving, progress since your last save is lost.");
     }
-    if (ok) ok = PutRaw(out, cap, o, "\n\n") && PutRaw(out, cap, o, kNoMeaningPack);
+    if (ok) ok = PutRaw(out, cap, o, "\n\n") && PutRaw(out, cap, o, kNeverPack);
     if (ok) out[o] = 0;
     return ok;
 }
 
 // F6: manual install required (the kill switch). One compiled reason line per manifest reason.
-// Paragraphs only (see kNoMeaningUpdate). The address sits on a line of its own on purpose.
+// Paragraphs only (see kNeverUpdate). The address sits on a line of its own on purpose.
 #define LVUPD_MANUAL_HEAD "Longevity Mod can no longer update itself. "
 #define LVUPD_MANUAL_TAIL " Your game and saved games are fine.\n\n" \
     "To keep getting updates, download and run the new installer. Type this address into your web browser:\n" \

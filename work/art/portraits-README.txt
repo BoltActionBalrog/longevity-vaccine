@@ -27,25 +27,10 @@ FORMAT
   ignored.
 
 WHICH FILE WINS
-  The Preferences setting decides, not where a file sits.  For each portrait the game uses the
-  first of these that exists and can be read:
-
-  "Use Longevity HD Portrait Pack" ON (the default once the pack is installed):
-    1. portraits\hd\<name>.png    the HD pack
-    2. portraits\<name>.png       your own
-    3. portraits\<name>.jpg       your own
-    4. the game's original portrait
-  So the pack's 14 leaders are shown, and your own images fill in whatever the pack does not
-  have: native life, custom factions, or a pack image that is missing or damaged.
-
-  "Use Longevity HD Portrait Pack" OFF, or the pack not installed:
+  For each portrait the game uses the first of these that exists and can be read:
     1. portraits\<name>.png   2. portraits\<name>.jpg   3. the game's original portrait
-  To show your own picture of a leader the pack covers, turn the pack setting off.
 
   "Enable User Portraits" OFF: the game's original portraits everywhere.
-
-  The portraits\hd\ folder belongs to the pack: the installer updates and tidies it (an update
-  also puts back a pack image you deleted), so keep your own images here, never in hd\.
 
 WHEN CHANGES SHOW
   Leaders: the next time the factions are loaded (start or load a game), or at once when you
@@ -53,12 +38,8 @@ WHEN CHANGES SHOW
 
 SETTINGS
   Preferences > Longevity Mod Preferences: "Enable User Portraits" turns all of this on or off;
-  under it, "Use Longevity HD Portrait Pack" (shown when the HD pack is installed) and
-  "Add Scanlines".  Scanlines apply to replacement images only; the
-  game's own portraits are unchanged.  Changes take effect at once and are saved with OK.
+  under it, "Add Scanlines".  Scanlines apply to replacement images only; the game's own
+  portraits are unchanged.  Changes take effect at once and are saved with OK.
 
 If an image cannot be used, the original portrait is shown and the reason is written to uimod.log
 in the game folder.
-
-The Longevity HD Portrait Pack: art by Turovetsky
-  https://www.youtube.com/@Turovetsky   https://x.com/turovetsky

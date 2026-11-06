@@ -117,6 +117,7 @@ endlocal & exit /b %RC%
 echo.
 echo  [installer] Could not create a status marker file, so this window cannot tell
 echo  [installer] whether the installer reported its result. Read the text above.
+echo.
 if not defined NOWAIT pause
 endlocal & exit /b %RC%
 

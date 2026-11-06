@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import types
@@ -36,7 +37,7 @@ CATALOGUE = {
 def _args(**kw):
     # portrait_pack: never this checkout's real dist\portraits-hd (tests choose their packs explicitly)
     base = dict(modules=None, ai="ask", pack=None, portrait_pack=str(_SCRIPTS / "_no_portrait_pack"),
-                manifest=None, offline=False)
+                manifest=None, offline=False, no_prompt=False)
     base.update(kw)
     return types.SimpleNamespace(**base)
 
@@ -47,24 +48,145 @@ def _answers(monkeypatch, *answers):
 
 
 # ---------------------------------------------------------------- the module picker
+#
+# Up / Down move the marker, Enter (or Space) ticks or unticks the pack under it, Enter on
+# Confirm (the last row) ends the pick (user 2026-11-01). The marker starts on the first pack.
 
-def test_the_list_names_every_module_with_its_size(monkeypatch, capsys, tmp_path):
+def _keys(monkeypatch, *keys):
+    it = iter(keys)
+
+    def read():
+        try:
+            return next(it)
+        except StopIteration:
+            pytest.fail("the picker wanted more keys than the test supplied")
+    monkeypatch.setattr(inst, "_read_key", read)
+
+
+def _rows(out: str) -> list:
+    return [ln for ln in out.split("\n") if ln.startswith((" > [", "   ["))
+            or ln[3:] in (inst.INSTALL_SELECTED, inst.SKIP_MODULES)]
+
+
+def _pick(catalogue, args, game_dir):
+    """(chosen, turned down); the third part (what the player ticked) is tested on its own."""
+    return inst.pick_modules(catalogue, args, game_dir)[:2]
+
+
+def test_only_a_shown_list_reports_what_the_player_ticked(monkeypatch, tmp_path):
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    _answers(monkeypatch, "all")
-    inst.choose_modules(CATALOGUE, _args(), tmp_path)
+    _keys(monkeypatch, "enter", "down", "down", "enter")
+    assert inst.pick_modules(CATALOGUE, _args(), tmp_path) == (["portraits-hd"], ["movies-hd"], ["portraits-hd"])
+    monkeypatch.setattr(ix, "can_ask", lambda: False)
+    monkeypatch.setattr(inst, "ini_flag_state", lambda g, k: None)
+    assert inst.pick_modules(CATALOGUE, _args(), tmp_path)[2] == []
+    assert inst.pick_modules(CATALOGUE, _args(no_prompt=True), tmp_path)[2] == []
+
+
+def _console(monkeypatch, *presses):
+    """The console's key records as _poll_key hands them out: (virtual-key code, character)."""
+    queue = list(presses)
+    monkeypatch.setattr(inst, "_poll_key", lambda: queue.pop(0) if queue else None)
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    return queue
+
+
+# The records a plain Command Prompt delivered on 2026-11-03 (keydump): Up vk 0x26 char '\x00',
+# Down 0x28 '\x00', Enter 0x0d '\r', a 0x41 'a'. VT input hands an arrow over as ESC [ A, one
+# character per record with no key code.
+@pytest.mark.parametrize("presses,want", [
+    (((0x26, "\x00"),), "up"), (((0x28, "\x00"),), "down"),
+    (((0x0D, "\r"),), "enter"), (((0x20, " "),), "space"),
+    (((0x25, "\x00"),), ""), (((0x41, "a"),), ""),          # left; a letter
+    (((0xC0, "\xe0"),), ""),                                 # a typed a-grave (AZERTY 0): NOT an arrow
+    (((0, "\x1b"), (0, "["), (0, "A")), "up"), (((0, "\x1b"), (0, "["), (0, "B")), "down"),
+    (((0, "\x1b"), (0, "O"), (0, "A")), "up"), (((0, "\x1b"), (0, "O"), (0, "B")), "down"),
+    (((0, "\x1b"), (0, "["), (0, "C")), ""),                 # right
+    (((0, "\x1b"), (0, "["), (0, "1"), (0, ";"), (0, "5"), (0, "A")), ""),   # Ctrl+Up
+    (((0x1B, "\x1b"),), ""),                                 # the Esc key alone
+    (((0, "\r"),), "enter"),                                 # Enter as VT text
+])
+def test_read_key_maps_the_console_records(monkeypatch, presses, want):
+    queue = _console(monkeypatch, *presses)
+    assert inst._read_key() == want
+    assert queue == []
+
+
+def test_an_arrow_then_a_typed_a_grave_are_two_keys(monkeypatch):
+    """The getwch bug (2026-11-03): an arrow's "\\xe0" prefix and a typed a-grave looked alike."""
+    _console(monkeypatch, (0x26, "\x00"), (0xC0, "\xe0"), (0x28, "\x00"))
+    assert [inst._read_key() for _ in range(3)] == ["up", "", "down"]
+
+
+def test_read_key_ctrl_c_cancels(monkeypatch):
+    _console(monkeypatch, (0x43, "\x03"))
+    with pytest.raises(KeyboardInterrupt):
+        inst._read_key()
+
+
+def test_keys_typed_before_the_list_is_drawn_are_dropped(monkeypatch):
+    queue = _console(monkeypatch, (0x0D, "\r"), (0x0D, "\r"))
+    inst._drop_typed_ahead()
+    assert queue == []
+
+
+def test_poll_key_reads_this_console_without_waiting():
+    """The real console API: nothing waiting (or no console at all) is None at once, never a hang."""
+    import time
+    t = time.monotonic()
+    got = inst._poll_key()
+    assert got is None or (isinstance(got, tuple) and len(got) == 2)
+    assert time.monotonic() - t < 1
+
+
+def test_the_list_names_every_module_with_its_size_ticked_on_a_first_run(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(ix, "can_ask", lambda: True)
+    _keys(monkeypatch, "down", "down", "enter")              # first pack -> Confirm
+    assert _pick(CATALOGUE, _args(), tmp_path) == (["movies-hd", "portraits-hd"], [])
     out = capsys.readouterr().out
-    assert "1. HD cinematics" in out and "1.4 GB" in out
-    assert "2. Longevity HD Portrait Pack" in out and "671 MB" in out
-    assert "already on disk" in out.split("\n")[2]           # the portraits row, not the movies row
+    rows = _rows(out)
+    assert rows[0].startswith(" > [X] HD cinematics") and "1.4 GB" in rows[0]
+    assert "[X] Longevity HD Portrait Pack" in rows[1] and "671 MB" in rows[1]
+    assert "already on disk" in rows[1] and "already on disk" not in rows[0]
+    assert rows[2] == "   Install selected modules" and rows[-1] == " > Install selected modules"
     assert "Selected: HD cinematics, Longevity HD Portrait Pack" in out
+    assert "Select which optional modules you would like to install. You can download these later from the in-game preferences menu." in out
 
 
-def test_enter_is_not_an_answer(monkeypatch, capsys, tmp_path):
-    """The gate: a reflex Enter must not commit to gigabytes (audit 2026-09-27)."""
+def test_enter_on_a_pack_ticks_it_and_never_confirms(monkeypatch, tmp_path):
+    """A reflex Enter (every earlier prompt trains Enter as "yes") must not commit to gigabytes
+    (audit 2026-09-27): the marker starts on a pack, where Enter only flips its box."""
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    _answers(monkeypatch, "", "", "none")
-    assert inst.choose_modules(CATALOGUE, _args(), tmp_path) == []
-    assert capsys.readouterr().out.count('Please type numbers between 1 and 2, "all", or "none".') == 2
+    _keys(monkeypatch, "enter", "enter", "enter", "down", "down", "enter")
+    assert _pick(CATALOGUE, _args(), tmp_path)[0] == ["portraits-hd"]
+    _keys(monkeypatch, "space", "down", "down", "enter")
+    chosen, turned_down = _pick(CATALOGUE, _args(), tmp_path)
+    assert chosen == ["portraits-hd"] and turned_down == ["movies-hd"]
+
+
+def test_unticking_a_pack_on_disk_turns_nothing_down(monkeypatch, tmp_path):
+    """A pack already in the folder is installed, not offered: unticking it only skips the
+    re-copy, and records no "Don't ask me again"."""
+    monkeypatch.setattr(ix, "can_ask", lambda: True)
+    _keys(monkeypatch, "enter", "down", "enter", "down", "enter")
+    assert _pick(CATALOGUE, _args(), tmp_path) == ([], ["movies-hd"])
+
+
+def test_the_last_row_says_install_or_skip(monkeypatch):
+    """User wording 2026-11-04: "Install selected modules", "Skip optional modules" when nothing
+    is ticked; the row follows every tick."""
+    monkeypatch.setattr(ix, "_colour_ok", lambda: False)
+    names = ["movies-hd", "portraits-hd"]
+    some = inst._picker_rows(names, CATALOGUE, {"movies-hd": True, "portraits-hd": False}, 2)
+    none = inst._picker_rows(names, CATALOGUE, {"movies-hd": False, "portraits-hd": False}, 0)
+    assert some[2] == " > Install selected modules" and none[2] == "   Skip optional modules"
+    assert some[-1] == none[-1] == ix.RULE
+
+
+def test_the_marker_stops_at_both_ends_and_other_keys_do_nothing(monkeypatch, tmp_path):
+    monkeypatch.setattr(ix, "can_ask", lambda: True)
+    _keys(monkeypatch, "up", "up", "", "", "down", "down", "down", "down", "enter")
+    assert _pick(CATALOGUE, _args(), tmp_path)[0] == ["movies-hd", "portraits-hd"]
 
 
 def test_ctrl_c_at_the_picker_cancels_the_install(monkeypatch, tmp_path):
@@ -72,32 +194,151 @@ def test_ctrl_c_at_the_picker_cancels_the_install(monkeypatch, tmp_path):
     with nothing changed. Swallowing it as "none" went on to patch the game (audit)."""
     monkeypatch.setattr(ix, "can_ask", lambda: True)
 
-    def interrupt(prompt=""):
+    def interrupt():
         raise KeyboardInterrupt
-    monkeypatch.setattr("builtins.input", interrupt)
+    monkeypatch.setattr(inst, "_read_key", interrupt)
     with pytest.raises(KeyboardInterrupt):
         inst.choose_modules(CATALOGUE, _args(), tmp_path)
 
 
-def test_numbers_pick_and_an_invalid_answer_asks_again(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(ix, "can_ask", lambda: True)
-    _answers(monkeypatch, "7", "x", "²", "①", "1" * 5000, "2")
-    assert inst.choose_modules(CATALOGUE, _args(), tmp_path) == ["portraits-hd"]
+def test_reading_a_key_without_a_console_raises_instead_of_waiting(monkeypatch):
+    monkeypatch.setattr(sys, "stdin", None)
+    with pytest.raises(EOFError):
+        inst._read_key()
+
+
+def test_what_starts_ticked_follows_the_players_earlier_no(monkeypatch, tmp_path):
+    """Everything on a first run (user 2026-11-01); a pack declined before -- "Don't ask me
+    again" in game, or left unticked by an earlier install -- or the HD cinematics switched off
+    start unticked. A pack on disk is always ticked."""
+    import receipt as rc
+    (tmp_path / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
+    cat = {"movies-hd": dict(CATALOGUE["movies-hd"]),
+           "portraits-hd": dict(CATALOGUE["portraits-hd"], on_disk=False)}
+    d = rc.declined(tmp_path)
+    assert inst._starts_ticked("movies-hd", cat, tmp_path, d)
+    assert inst._starts_ticked("portraits-hd", cat, tmp_path, d)
+    assert rc.decline(tmp_path, "new:portraits-hd", rc.DECLINE_ANY)
+    assert not inst._starts_ticked("portraits-hd", cat, tmp_path, rc.declined(tmp_path))
+    assert inst._starts_ticked("portraits-hd", dict(cat, **{"portraits-hd": CATALOGUE["portraits-hd"]}),
+                               tmp_path, rc.declined(tmp_path))
+    monkeypatch.setattr(inst, "ini_flag_state", lambda g, k: False)
+    assert not inst._starts_ticked("movies-hd", cat, tmp_path, d)
+
+
+def test_a_redraw_rewrites_the_rows_in_place_or_prints_them_again(monkeypatch, capsys):
+    monkeypatch.setattr(ix, "can_redraw", lambda: True)
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback=None: os.terminal_size((10, 24)))
+    ix.redraw(["a", "b"], ["c", "d"])
+    assert capsys.readouterr().out == "\x1b[2F\x1b[Jc\nd\n"
+    # A row longer than the window took two lines (colour codes take none): back over three.
+    ix.redraw(["\x1b[32m" + "x" * 15 + "\x1b[0m", "b"], ["c", "d"])
+    assert capsys.readouterr().out == "\x1b[3F\x1b[Jc\nd\n"
+    monkeypatch.setattr(ix, "can_redraw", lambda: False)
+    ix.redraw(["a", "b"], ["c", "d"])
+    assert capsys.readouterr().out == "\nc\nd\n"
+
+
+def test_every_prompt_gets_exactly_one_blank_line_above_it(monkeypatch, capsys):
+    """User rule 2026-11-01: one empty line between the installer's output and a question --
+    added when the output above did not end in one, never a second."""
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or "y")
+    ix.say("some output")
+    ix.ask("Q1? ")
+    ix.ask("Q2? ")                      # straight after an answer: still one blank line
+    ix.say("more\n")                    # output ending in an empty line already
+    ix.ask("Q3? [Y/n] ", title="Third question")
+    r = ix.RULE
+    assert capsys.readouterr().out == f"some output\n\n\nmore\n\n{r}\n THIRD QUESTION\n{r}\n{r}\n"
+    assert asked == ["Q1? ", "Q2? ", " Q3? [Y/n] "]
+
+
+def test_control_hints_are_blue_and_plain_without_colour(monkeypatch, capsys):
+    """User 2026-11-04: the keys to press in (bright) blue -- the block's key line and a yes/no
+    prompt's [Y/n]; plain text on a console without colour."""
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or "")
+    monkeypatch.setattr(ix, "_colour_ok", lambda: True)
+    ix.question_head("Choose", ["a note"], keys="Up/Down: move")
+    ix.ask("Replace it? [Y/n] ", title="Shortcut")
+    ix.ask("Sure? [y/N] ", title="Sure")
     out = capsys.readouterr().out
-    assert out.count("Please type numbers between 1 and 2") == 5
-    assert "Selected: Longevity HD Portrait Pack" in out
+    assert " \x1b[94mUp/Down: move\x1b[0m\n a note\n" in out
+    assert asked == [" Replace it? \x1b[94m[Y/n]\x1b[0m ", " Sure? \x1b[94m[y/N]\x1b[0m "]
+    monkeypatch.setattr(ix, "_colour_ok", lambda: False)
+    ix.question_head("Choose", keys="Up/Down: move")
+    ix.ask("Replace it? [Y/n] ", title="Shortcut")
+    assert " Up/Down: move\n" in capsys.readouterr().out and asked[-1] == " Replace it? [Y/n] "
 
 
-def test_none_and_a_closed_stdin_select_nothing(monkeypatch, capsys, tmp_path):
+def test_a_question_is_a_ruled_block_set_apart_from_output(monkeypatch, capsys):
+    """User 2026-11-03: a rule, the title in capitals, the notes (keys), a rule, then the
+    question; a rule under the answer. Plain '-': no colour or codepage needed to see it."""
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    ix.say("output")
+    assert ix.ask("Replace it? [Y/n] ", title="Desktop shortcut") == "n"
+    ix.question_head("Choose", ["Up/Down: move"])
+    assert set(ix.RULE) == {"-"} and len(ix.RULE) >= 40
+    r = ix.RULE
+    assert capsys.readouterr().out == (f"output\n\n{r}\n DESKTOP SHORTCUT\n{r}\n{r}\n"
+                                       f"\n{r}\n CHOOSE\n Up/Down: move\n{r}\n")
+
+
+def test_no_prompt_takes_every_module_without_asking(monkeypatch, capsys, tmp_path):
+    """The PLAYER's --no-prompt on a first install (user 2026-11-01): every module on offer,
+    nothing asked, nothing turned down. --modules / --ai still win."""
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    _answers(monkeypatch, "none")
-    assert inst.choose_modules(CATALOGUE, _args(), tmp_path) == []
+    monkeypatch.setattr(inst, "_read_key", lambda: pytest.fail("must not ask"))
+    assert _pick(CATALOGUE, _args(no_prompt=True), tmp_path) \
+        == (["movies-hd", "portraits-hd"], [])
+    assert "(--no-prompt)" in capsys.readouterr().out
+    assert _pick(CATALOGUE, _args(no_prompt=True, ai="off"), tmp_path)[0] == []
+    assert _pick(CATALOGUE, _args(no_prompt=True, modules="movies-hd"), tmp_path) \
+        == (["movies-hd"], [])
 
-    def eof(prompt=""):
-        raise EOFError
-    monkeypatch.setattr("builtins.input", eof)
-    assert inst.choose_modules(CATALOGUE, _args(), tmp_path) == []
-    assert capsys.readouterr().out.count("Selected: none") == 2
+
+def test_no_prompt_on_a_rerun_keeps_the_players_earlier_no(monkeypatch, tmp_path):
+    """--no-prompt takes the list as it would start: a pack declined before, or the HD
+    cinematics switched off, stay out -- a default here once reversed an opt-out (audit
+    2026-11-03); a pack on disk is still taken."""
+    import receipt as rc
+    (tmp_path / "Alpha Centauri.ini").write_text("[UIMod]\nUpscaledVideos=0\n", encoding="ascii")
+    cat = {"movies-hd": CATALOGUE["movies-hd"],
+           "portraits-hd": dict(CATALOGUE["portraits-hd"], on_disk=False)}
+    assert rc.decline(tmp_path, "new:portraits-hd", rc.DECLINE_ANY)
+    monkeypatch.setattr(inst, "_read_key", lambda: pytest.fail("must not ask"))
+    assert _pick(cat, _args(no_prompt=True), tmp_path) == ([], [])
+    assert _pick(CATALOGUE, _args(no_prompt=True), tmp_path) == (["portraits-hd"], [])   # on disk
+
+
+def test_ai_off_turns_the_cinematics_down_unless_they_are_on_disk(monkeypatch, tmp_path):
+    monkeypatch.setattr(inst, "pack_on_disk", lambda g, n: False)
+    assert _pick({}, _args(ai="off"), tmp_path) == ([], ["movies-hd"])
+    monkeypatch.setattr(inst, "pack_on_disk", lambda g, n: True)
+    assert _pick({}, _args(ai="off"), tmp_path) == ([], [])
+
+
+def test_a_turned_down_pack_is_declined_as_the_game_declines_it(tmp_path):
+    """The same `new:<id>:*` the DLL's "Don't ask me again" writes on a NEW pack's offer
+    (update.cpp `new:%s`, update_core.h DeclineVersionFor kDeclineAny); choosing it later
+    forgets it, and leaves every other decline as it was."""
+    import receipt as rc
+    (tmp_path / "Alpha Centauri.ini").write_text("[Longevity]\nDeclinedUpdates=base:9.9.9\n",
+                                                 encoding="ascii")
+    inst.record_module_choice(tmp_path, [], ["movies-hd"])
+    assert rc.declined(tmp_path) == {"base": "9.9.9", "new:movies-hd": rc.DECLINE_ANY}
+    assert rc.ini_get(tmp_path, rc.KEY_DECLINED) == "base:9.9.9;new:movies-hd:*"
+    inst.record_module_choice(tmp_path, ["movies-hd"], [])
+    assert rc.declined(tmp_path) == {"base": "9.9.9"}
+
+
+def test_unattended_and_flag_runs_turn_nothing_down(monkeypatch, tmp_path):
+    monkeypatch.setattr(ix, "can_ask", lambda: False)
+    monkeypatch.setattr(inst, "ini_flag_state", lambda g, k: None)
+    assert _pick(CATALOGUE, _args(), tmp_path) == (["movies-hd"], [])
+    assert _pick(CATALOGUE, _args(ai="on"), tmp_path) == (["movies-hd"], [])
+    assert _pick(CATALOGUE, _args(modules="portraits-hd"), tmp_path) == (["portraits-hd"], [])
 
 
 def test_flags_decide_without_asking(monkeypatch, tmp_path):
@@ -263,6 +504,17 @@ def test_summary_rows_are_success_error_or_skipped(monkeypatch, capsys):
     assert capsys.readouterr().out == "  x                      Success\n"
 
 
+def test_the_banner_says_what_the_installer_does_and_an_update_skips_it(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["install.py"])
+    inst.banner()
+    assert ("This installer will patch Alpha Centauri: Alien Crossfire with Longevity Vaccine. Your "
+            "original game .exe will be backed up (.bak) and can be restored at any time.\n\n") \
+        in capsys.readouterr().out                                   # user 2026-11-04
+    monkeypatch.setattr(sys, "argv", ["install.py", "--update"])
+    inst.banner()
+    assert "This installer will patch" not in capsys.readouterr().out
+
+
 def test_the_play_note_no_longer_explains_alien_crossfire(monkeypatch, capsys, tmp_path):
     (tmp_path / "terranx_PRACX.exe").write_bytes(b"MZ")
     monkeypatch.setattr(inst, "find_shortcut_to", lambda exe: None)
@@ -297,3 +549,14 @@ def test_declining_the_launch_still_holds_the_window(monkeypatch, capsys):
     monkeypatch.setattr(ix, "wait_for_key", lambda *a, **k: waited.append(1))
     assert ix.run_guarded(lambda: 0, relaunch_exe=Path("x.exe")) == ix.EXIT_OK
     assert waited == [1]
+
+
+def test_a_failed_copy_is_one_readable_line():
+    """shutil.copytree's error carries every failed file; printing it dumped a screenful of
+    paths (2026-11-04). The count, the first file and its reason, and a plain word for length."""
+    e = shutil.Error([("C:/src/a", "D:/game/LongevityMods/a", "[WinError 3] not found"),
+                      ("C:/src/b", "D:/game/LongevityMods/b", "[WinError 206] The filename or extension is too long")])
+    text = inst.copy_error_summary(e)
+    assert text.startswith("2 files could not be copied, the first D:/game/LongevityMods/a: [WinError 3] not found")
+    assert "longer than Windows allows" in text and "C:/src/b" not in text
+    assert inst.copy_error_summary(OSError("disk full")) == "disk full"

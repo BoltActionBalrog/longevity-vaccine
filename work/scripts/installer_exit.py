@@ -107,8 +107,10 @@ def say(*parts: object) -> None:
     stdout may be None (pythonw) or a broken pipe; neither may be allowed to turn a reportable
     failure into a silent one -- least of all from inside the `finally` that owns the guarantee.
     """
+    global _last_blank
     text = " ".join(str(p) for p in parts)
     _transcript.append(text)
+    _last_blank = text.endswith("\n") or text == ""
     if sys.stdout is None:
         return
     try:
@@ -128,6 +130,104 @@ def say(*parts: object) -> None:
                 pass
     except (OSError, ValueError):
         pass
+
+
+#: Did the last line this process printed end in an empty one? blank() reads it so a prompt gets
+#: exactly ONE empty line above it, never two. Unknown at start (a parent's output) = not blank.
+_last_blank = False
+
+
+def blank() -> None:
+    """Exactly one empty line here: printed unless the last line already was one."""
+    if not _last_blank:
+        say("")
+
+
+#: The rules a question sits between (user 2026-11-03: a question must not read as output). Plain
+#: '-': every console codepage has it, and Windows 7 shows no colour to tell the two apart.
+RULE = "-" * 60
+
+
+def question_head(title: str, notes=(), keys: str = None) -> None:
+    """The top of a question block, one empty line below the output above it (user rule
+    2026-11-01): a rule, the title in capitals, the keys to press (blue), the notes, a rule."""
+    blank()
+    say(RULE)
+    say(" " + title.upper())
+    if keys:
+        say(" " + painted(keys, "keys"))
+    for n in notes:
+        say(" " + n)
+    say(RULE)
+
+
+def _keys_blue(prompt: str) -> str:
+    """A yes/no prompt's own control hint, "[Y/n]" / "[y/N]", in blue like every key hint."""
+    for hint in ("[Y/n]", "[y/N]"):
+        prompt = prompt.replace(hint, painted(hint, "keys"))
+    return prompt
+
+
+def ask(prompt: str, title: str = None) -> str:
+    """input() for every question the installer puts. With `title` (every real question) it is a
+    ruled block: question_head, the prompt (its [Y/n] in blue), a rule under the answer. Without,
+    just the one empty line above. Raises what input() raises (EOFError, KeyboardInterrupt)."""
+    global _last_blank
+    if title:
+        question_head(title)
+    else:
+        blank()
+    try:
+        return input((" " + _keys_blue(prompt)) if title else prompt)
+    finally:
+        _last_blank = False         # the player's answer ended the prompt's line
+        if title:
+            say(RULE)
+
+
+def ask_block(title: str, notes, rows, keys: str = None) -> None:
+    """A question that is a list the arrow keys move through: question_head, then `rows` (the
+    caller ends them with RULE, so a redraw rewrites the closing rule with them)."""
+    global _last_blank
+    question_head(title, notes, keys)
+    for row in rows:
+        say(row)
+    _last_blank = False
+
+
+_ANSI_RX = None
+
+
+def _screen_lines(rows: list) -> int:
+    """How many console lines `rows` took when printed: a row longer than the window wraps (a
+    long game path does), and the cursor has to go back over every line, not every row."""
+    global _ANSI_RX
+    import re
+    import shutil
+    if _ANSI_RX is None:
+        _ANSI_RX = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    cols = max(1, shutil.get_terminal_size((80, 24)).columns)
+    return sum(max(1, -(-len(_ANSI_RX.sub("", r)) // cols)) for r in rows)
+
+
+def redraw(old_rows: list, new_rows: list) -> list:
+    """Replace the block of `old_rows` just printed with `new_rows` in place (cursor back over
+    every line the old rows took, then erase to the end of the screen, so a shorter or wrapped
+    row leaves nothing behind); on a console that cannot move the cursor, print the block again
+    below. Returns `new_rows`."""
+    out = sys.stdout
+    if out is None:
+        return new_rows
+    try:
+        if can_redraw():
+            out.write(f"\x1b[{_screen_lines(old_rows)}F\x1b[J" + "".join(r + "\n" for r in new_rows))
+            out.flush()
+        else:
+            out.write("\n" + "".join(r + "\n" for r in new_rows))
+            out.flush()
+    except (OSError, ValueError, UnicodeEncodeError):
+        pass
+    return new_rows
 
 
 def _show_message_box(title: str, body: str) -> bool:
@@ -174,7 +274,7 @@ def wait_for_key(prompt: str = "Press Enter to close this window... ") -> None:
         _vsay("\n(non-interactive session: not waiting for input)")
         return
     try:
-        input("\n" + prompt)
+        ask(prompt)
     except (EOFError, KeyboardInterrupt, OSError, ValueError):
         pass
 
@@ -208,11 +308,25 @@ def _vsay(*parts: object) -> None:
 DOWNLOAD_URL = "https://longevitymods.com/vaccine/download"
 
 _GREEN, _RED, _YELLOW, _RESET = "\x1b[32m", "\x1b[31m", "\x1b[33m", "\x1b[0m"
+_BLUE = "\x1b[94m"      # BRIGHT blue: the keys to press (user 2026-11-04); dark blue is unreadable on black
 
 
 def warn(text: str) -> None:
     """A warning the player should read: yellow on a colour console, plain otherwise."""
     say((_YELLOW + text + _RESET) if _colour_ok() else text)
+
+
+def painted(text: str, kind: str) -> str:
+    """`text` in green ("good"), red ("bad") or blue ("keys", a control hint) on a colour console,
+    unchanged otherwise -- so a caller's own marks ([X] / [ ]) must carry the meaning without it."""
+    colour = {"good": _GREEN, "bad": _RED, "keys": _BLUE}.get(kind)
+    return (colour + text + _RESET) if (colour and _colour_ok()) else text
+
+
+def can_redraw() -> bool:
+    """Can a printed block be rewritten in place (ANSI cursor movement)? The same virtual-terminal
+    switch colour needs; False on a console without it (Windows 7)."""
+    return _colour_ok()
 
 
 def good(text: str) -> None:
@@ -336,7 +450,7 @@ def offer_relaunch(exe: Path) -> bool:
     try:
         if not exe or not Path(exe).exists() or not interactive():
             return False
-        ans = input(f"\nStart the game ({Path(exe).name}) now? [Y/n] ").strip().lower()
+        ans = ask(f"Start the game ({Path(exe).name}) now? [Y/n] ", title="Start the game").strip().lower()
         if ans not in ("", "y", "yes"):
             return False
         subprocess.Popen([str(exe)], cwd=str(Path(exe).parent), close_fds=True)

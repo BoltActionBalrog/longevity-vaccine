@@ -301,6 +301,16 @@ def decline(game_dir: Path, item: str, version: str) -> bool:
     return ini_set(game_dir, KEY_DECLINED, value)
 
 
+def forget_decline(game_dir: Path, item: str) -> bool:
+    """Drop `item`'s decline, at whatever version (the player chose it after all). True when none
+    is left; the other entries are written back exactly as decline() writes them."""
+    d = declined(game_dir)
+    if item not in d:
+        return True
+    del d[item]
+    return ini_set(game_dir, KEY_DECLINED, ";".join(f"{k}:{v}" for k, v in sorted(d.items())))
+
+
 def clear_declines(game_dir: Path) -> bool:
     """Forget every decline (the game's "Reset Skipped Updates")."""
     return ini_set(game_dir, KEY_DECLINED, "")

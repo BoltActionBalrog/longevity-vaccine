@@ -55,19 +55,26 @@ def _args(**kw):
     return types.SimpleNamespace(**base)
 
 
-def _answers(monkeypatch, *answers):
-    it = iter(answers)
-    asked = []
+def _keys(monkeypatch, *keys):
+    """The folder list driven by keys ("up", "down", "enter"; an exception class is raised)."""
+    it = iter(keys)
 
-    def ask(prompt=""):
-        asked.append(prompt)
+    def read():
         try:
-            return next(it)
+            k = next(it)
         except StopIteration:
-            pytest.fail(f"asked once too often: {prompt!r}")
-    monkeypatch.setattr("builtins.input", ask)
+            pytest.fail("the folder list wanted more keys than the test supplied")
+        if isinstance(k, type):
+            raise k
+        return k
+    monkeypatch.setattr(inst, "_read_key", read)
+    monkeypatch.setattr("builtins.input", lambda p="": pytest.fail("the folder list takes no typed answer"))
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    return asked
+
+
+def _block(out: str, head: str) -> list:
+    """The printed lines from `head` to the end."""
+    return out[out.index(head):].split("\n")
 
 
 def _no_browse(monkeypatch):
@@ -202,36 +209,61 @@ def test_a_resident_updater_never_asks(games, monkeypatch):
 
 # ---------------------------------------------------------------- resolving, interactive
 
+# The folder prompt is a list the arrow keys move through (user 2026-11-03): each folder found,
+# then Browse, then Quit; Enter takes the highlighted row; no typed or pasted path.
+
 def test_enter_accepts_the_folder_found(games, monkeypatch, capsys):
     monkeypatch.setenv(config.CANDIDATES_ENV, str(games["good"]))
     _no_browse(monkeypatch)
-    _answers(monkeypatch, "")
+    _keys(monkeypatch, "enter")
     assert inst.resolve_game_dir(_args()) == games["good"]
     out = capsys.readouterr().out
-    assert "1. " + str(games["good"]) in out and "PRACX" in out
+    assert "1. " not in out and "Or type or paste" not in out
 
 
-def test_a_number_picks_another_folder_found(games, monkeypatch):
+def test_the_question_is_a_ruled_block_after_one_blank_line(games, monkeypatch, capsys):
+    """One empty line above the question; a ruled block with its title and keys (user
+    2026-11-03); the marker starts on the first folder, the only row shown green."""
+    monkeypatch.setenv(config.CANDIDATES_ENV, str(games["good"]))
+    monkeypatch.setattr(ix, "painted", lambda text, kind: f"<{kind}>{text}")
+    _no_browse(monkeypatch)
+    ix.say("earlier output")
+    _keys(monkeypatch, "enter")
+    inst.resolve_game_dir(_args())
+    lines = _block(capsys.readouterr().out, "earlier output")
+    label = inst.check_game_folder(games["good"])[1]
+    # The folder's kind in brackets on its own row, three spaces after the path (user 2026-11-04).
+    assert lines[:10] == ["earlier output", "", ix.RULE, " CHOOSE THE GAME FOLDER",
+                          " <keys>Up/Down: move   Enter: choose", ix.RULE,      # blue (user 2026-11-04)
+                          f" > <good>Install into {games['good']}   ({label})",
+                          "   Browse for a different folder", "   Quit", ix.RULE]
+
+
+def test_down_picks_another_folder_found(games, monkeypatch, capsys):
     monkeypatch.setenv(config.CANDIDATES_ENV, f"{games['good']}|{games['bad']}|{games['second']}")
     _no_browse(monkeypatch)
-    _answers(monkeypatch, "2")                       # the bad one is not listed: 2 is "second"
-    assert inst.resolve_game_dir(_args()) == games["second"]
-
-
-def test_a_typed_path_is_checked_and_a_bad_one_asked_again(games, monkeypatch, capsys):
-    monkeypatch.setenv(config.CANDIDATES_ENV, str(games["good"]))
-    _no_browse(monkeypatch)
-    asked = _answers(monkeypatch, str(games["empty"]), f'  "{games["outer"]}"  ', str(games["second"]))
+    _keys(monkeypatch, "down", "enter")              # the bad one is not listed: the second row is "second"
     assert inst.resolve_game_dir(_args()) == games["second"]
     out = capsys.readouterr().out
-    assert "terranx.exe" in out and '"Alpha Centauri"' in out and len(asked) == 3
+    assert f"   Install into {games['second']}" in out
+
+
+def test_the_marker_stops_at_both_ends(games, monkeypatch):
+    monkeypatch.setenv(config.CANDIDATES_ENV, str(games["good"]))
+    _no_browse(monkeypatch)
+    _keys(monkeypatch, "up", "up", "", "enter")
+    assert inst.resolve_game_dir(_args()) == games["good"]
+    _keys(monkeypatch, "down", "down", "down", "down", "enter")      # past Quit: still Quit
+    with pytest.raises(ix.InstallerError) as e:
+        inst.resolve_game_dir(_args())
+    assert e.value.code == ix.EXIT_ABORTED
 
 
 def test_browse_opens_the_picker_and_its_choice_is_checked(games, monkeypatch, capsys):
     monkeypatch.setenv(config.CANDIDATES_ENV, str(games["good"]))
     picks = iter([games["bad"], games["second"]])
     monkeypatch.setattr(inst, "browse_for_folder", lambda title: next(picks))
-    _answers(monkeypatch, "b", "B")
+    _keys(monkeypatch, "down", "enter", "down", "enter")             # Browse, rejected; Browse again
     assert inst.resolve_game_dir(_args()) == games["second"]
     assert "not a version this mod supports" in capsys.readouterr().out
 
@@ -239,22 +271,17 @@ def test_browse_opens_the_picker_and_its_choice_is_checked(games, monkeypatch, c
 def test_nothing_found_asks_and_enter_opens_the_picker(games, monkeypatch, capsys):
     picks = iter([None, games["good"]])                          # cancelled once, then chosen
     monkeypatch.setattr(inst, "browse_for_folder", lambda title: next(picks))
-    _answers(monkeypatch, "", "")
+    _keys(monkeypatch, "enter", "enter")
     assert inst.resolve_game_dir(_args()) == games["good"]
     out = capsys.readouterr().out
     assert "could not find Alpha Centauri" in out and "No folder chosen" in out
+    assert " > Choose the game folder in a window" in out and "   Quit" in out
     assert not any(m in out for m in ("SmacxUi", "GOG Galaxy")), out
 
 
-@pytest.mark.parametrize("answer", ["q", "Q", EOFError, KeyboardInterrupt])
-def test_quitting_changes_nothing(games, monkeypatch, answer):
-    monkeypatch.setattr(ix, "can_ask", lambda: True)
-
-    def ask(prompt=""):
-        if isinstance(answer, str):
-            return answer
-        raise answer
-    monkeypatch.setattr("builtins.input", ask)
+@pytest.mark.parametrize("keys", [("down", "enter"), (KeyboardInterrupt,)])
+def test_quitting_changes_nothing(games, monkeypatch, keys):
+    _keys(monkeypatch, *keys)                                    # nothing found: Choose / Quit
     with pytest.raises(ix.InstallerError) as e:
         inst.resolve_game_dir(_args())
     assert e.value.code == ix.EXIT_ABORTED and e.value.changed is False
@@ -265,7 +292,7 @@ def test_uninstall_lists_only_installed_folders(games, monkeypatch):
     (g / rc.JSON_NAME).write_text('{"target_id": "pracx", "modules": {}}', encoding="utf-8")
     monkeypatch.setenv(config.CANDIDATES_ENV, f"{games['good']}|{g}")
     _no_browse(monkeypatch)
-    _answers(monkeypatch, "")
+    _keys(monkeypatch, "enter")
     assert inst.resolve_game_dir(_args(), installed=True) == g
 
 
@@ -373,24 +400,10 @@ def test_the_folder_is_always_absolute(games, monkeypatch):
     monkeypatch.setattr(ix, "can_ask", lambda: False)
     got = inst.resolve_game_dir(_args(game_dir="good"))
     assert got.is_absolute() and got == games["good"]
-    _no_browse(monkeypatch)
-    _answers(monkeypatch, "second")
+    monkeypatch.setattr(inst, "browse_for_folder", lambda title: Path("second"))
+    _keys(monkeypatch, "enter")                                  # nothing found: Choose in a window
     got = inst.resolve_game_dir(_args())
     assert got.is_absolute() and got == games["second"]
-
-
-def test_a_dragged_in_exe_means_its_folder(games, monkeypatch):
-    _no_browse(monkeypatch)
-    _answers(monkeypatch, f'"{games["second"] / "terranx_PRACX.exe"}"')
-    assert inst.resolve_game_dir(_args()) == games["second"]
-
-
-def test_a_number_like_answer_is_a_path_not_a_crash(games, monkeypatch, capsys):
-    _no_browse(monkeypatch)
-    monkeypatch.setenv(config.CANDIDATES_ENV, str(games["good"]))
-    _answers(monkeypatch, "²", "7", "1")
-    assert inst.resolve_game_dir(_args()) == games["good"]
-    assert capsys.readouterr().out.count("Not that folder") == 2
 
 
 def test_unattended_says_which_folder_was_found_and_why_it_cannot_be_used(games, monkeypatch):
