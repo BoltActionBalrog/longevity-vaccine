@@ -7,7 +7,8 @@ set -e
 # MSYS coreutils ships /usr/bin/link.exe which shadows MSVC's link.exe -> rename it once.
 if [ -f /usr/bin/link.exe ]; then mv -f /usr/bin/link.exe /usr/bin/link-coreutils.exe; fi
 
-cd /d/SmacxUi/tools/ffmpeg-8.1
+TOOLS="$(cd "$(dirname "$0")" && pwd)"      # this script's folder (tools/), whatever the checkout's path
+cd "$TOOLS/ffmpeg-8.1"
 echo "=== toolchain ==="; which cl link lib nasm || true
 
 # Config changed (asm re-enabled) -> force a clean reconfigure.
@@ -24,10 +25,10 @@ make distclean >/dev/null 2>&1 || true
   --enable-demuxer=ea,mov \
   --enable-parser=h264,aac \
   --enable-protocol=file \
-  --prefix=/d/SmacxUi/tools/ffmpeg-slim
+  --prefix="$TOOLS/ffmpeg-slim"
 
 echo "=== configure OK, building ==="
 make -j8
 make install
 echo "=== BUILD COMPLETE ==="
-ls -la /d/SmacxUi/tools/ffmpeg-slim/bin/*.dll
+ls -la "$TOOLS"/ffmpeg-slim/bin/*.dll

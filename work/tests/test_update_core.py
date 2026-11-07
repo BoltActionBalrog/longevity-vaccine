@@ -60,11 +60,11 @@ def test_base_update(exe, tmp_path):
 
 def test_everything_in_the_fixed_order(exe, tmp_path):
     text = ("latest=1.1.0\nbase=0.0.0>1.1.0\nstale=movies-hd|HD cinematics|1.0.0>1.2.0|671088640\n"
-            "new=portraits-hd|Longevity HD Portrait Pack|1.0.0|\n")
+            "new=portraits-hd|Turovetsky's HD Portrait Pack|1.0.0|\n")
     out = parse(exe, tmp_path, 10, text)
     assert out == ["status=ok code=10 badline=0", "latest=1.1.0", "base=0.0.0>1.1.0",
                    "stale=movies-hd|HD cinematics|1.0.0>1.2.0|671088640",
-                   "new=portraits-hd|Longevity HD Portrait Pack|1.0.0|"]
+                   "new=portraits-hd|Turovetsky's HD Portrait Pack|1.0.0|"]
 
 
 @pytest.mark.parametrize("key,reason", [("protocol", 1), ("bootstrap_defect", 2), ("base_unsupported", 3),
@@ -137,7 +137,7 @@ def test_accepted_edges(exe, tmp_path):
     out = parse(exe, tmp_path, 10, text)
     assert out == ["status=ok code=10 badline=0", "latest=65535.65535.65535", "base=0.1.0>65535.65535.65535",
                    "stale=movies-hd|HD cinematics|10000.10000.10000>10000.10000.10001|1125899906842623",
-                   "new=portraits-hd|Longevity HD Portrait Pack|1.0.0|0"]
+                   "new=portraits-hd|Turovetsky's HD Portrait Pack|1.0.0|0"]
 
 
 def test_unknown_ids_are_skipped_not_fatal(exe, tmp_path):
@@ -145,7 +145,7 @@ def test_unknown_ids_are_skipped_not_fatal(exe, tmp_path):
     text = "latest=1.1.0\nbase=1.0.0>1.1.0\nnew=zzz-evil|Free V-Bucks|1.0.0|\nnew=portraits-hd|X|1.0.0|\n"
     out = parse(exe, tmp_path, 10, text)
     assert out == ["status=ok code=10 badline=0", "latest=1.1.0", "base=1.0.0>1.1.0",
-                   "new=portraits-hd|Longevity HD Portrait Pack|1.0.0|"]
+                   "new=portraits-hd|Turovetsky's HD Portrait Pack|1.0.0|"]
     # only unknown items: still a valid exit-10 answer, just nothing to show
     out = parse(exe, tmp_path, 10, "latest=1.0.0\n" + "".join(f"new=p{i}|P|1.0.0|\n" for i in range(5)))
     assert out == ["status=ok code=10 badline=0", "latest=1.0.0"]
@@ -339,9 +339,9 @@ def test_label_file_body_is_wrapped_into_short_physical_lines(exe, tmp_path):
     must come out as lines of <= 96 chars broken at spaces, which the engine re-joins with a
     space -- so joining them back must give the sanitised body exactly."""
     body = tmp_path / "body.txt"
-    # The real closing paragraph (user wording 2026-11-04): it must survive the wrap with its two
-    # spaces after the label, on one physical line of its own.
-    never = "\"Don't ask me again\"  Skips this update (undo in Preferences)."
+    # The real closing paragraph (user wording 2026-11-04, one space 2026-11-06): it must survive the
+    # wrap with its single space after the label, on one physical line of its own.
+    never = "\"Don't ask me again\" Skips this update (undo in Preferences)."
     text = ("An update is available:\nLongevity Mod 0.1.0 -> 9.9.9\n\nUpdating closes the game and opens the updater "
             "in its own window.\nYour saved games are not affected. If you update without saving, progress since "
             "your last save is lost.\n\n" + never)
@@ -441,8 +441,8 @@ def test_update_body_names_every_item_and_the_action(exe, tmp_path):
     text = "latest=0.2.0\nbase=0.1.0>0.2.0\nstale=movies-hd|HD cinematics|0.1.0>0.2.0|671088640\n"
     p = tmp_path / "in.txt"
     p.write_bytes(text.encode())
-    # user wording 2026-11-04: the label, two spaces, the meaning; "Not now" unexplained
-    NO = '"Don\'t ask me again"  Skips these updates (undo in Preferences).\n'
+    # user wording 2026-11-04, one space 2026-11-06: the label, a single space, the meaning; "Not now" unexplained
+    NO = '"Don\'t ask me again" Skips these updates (undo in Preferences).\n'
     menu = run(exe, "body", "update", 0, 10, p)
     assert menu == ("Updates are available:\nLongevity Mod 0.1.0 -> 0.2.0\nHD cinematics 0.1.0 -> 0.2.0 (640 MB)\n\n"
                     "Updating closes the game and opens the updater in its own window. "
@@ -458,22 +458,23 @@ def test_update_body_names_every_item_and_the_action(exe, tmp_path):
     one.write_bytes(b"latest=0.2.0\nbase=0.1.0>0.2.0\n")
     single = run(exe, "body", "update", 0, 10, one)
     assert single.startswith("An update is available:\n")
-    assert single.endswith('\n\n"Don\'t ask me again"  Skips this update (undo in Preferences).\n')
+    assert single.endswith('\n\n"Don\'t ask me again" Skips this update (undo in Preferences).\n')
+    assert '"  Skips' not in menu + single, "one space after the label (user 2026-11-06)"
     assert "Not now" not in menu + single
 
 
 def test_pack_body_variants(exe, tmp_path):
-    text = "latest=0.2.0\nnew=movies-hd|HD cinematics|0.2.0|1395864371\nnew=portraits-hd|Longevity HD Portrait Pack|0.2.0|\n"
+    text = "latest=0.2.0\nnew=movies-hd|HD cinematics|0.2.0|1395864371\nnew=portraits-hd|Turovetsky's HD Portrait Pack|0.2.0|\n"
     p = tmp_path / "in.txt"
     p.write_bytes(text.encode())
-    NO = '"Don\'t ask me again"  Skips this pack (undo in Preferences).\n'      # user wording 2026-11-04
+    NO = '"Don\'t ask me again" Skips this pack (undo in Preferences).\n'      # user wording 2026-11-04, one space 2026-11-06
     standalone = run(exe, "body", "pack", 0, 1, 0, "0.2.0", 10, p)
     assert standalone == ("HD cinematics 0.2.0 is available. It is an optional 1.3 GB download. "
                           "Installing it also brings Longevity Mod up to 0.2.0 (required).\n\n"
                           "Installing closes the game and opens the updater in its own window. "
                           "Your saved games are not affected.\n\n" + NO)
     pending = run(exe, "body", "pack", 1, 2, 1, "-", 10, p)
-    assert pending == "You chose to update. Add Longevity HD Portrait Pack to that update? It is optional.\n\n" + NO
+    assert pending == "You chose to update. Add Turovetsky's HD Portrait Pack to that update? It is optional.\n\n" + NO
     pending_sz = run(exe, "body", "pack", 0, 2, 0, "-", 10, p)
     assert "Add HD cinematics (1.3 GB) to that update?" in pending_sz
     ingame = run(exe, "body", "pack", 1, 1, 0, "-", 10, p)
@@ -815,7 +816,7 @@ def test_the_shipped_check_parser_gets_the_game_dir(exe, shipped, tmp_path, rel,
 def test_handoff_modules_are_the_listed_stale_packs_plus_the_accepted_new_ones(exe, tmp_path):
     p = tmp_path / "in.txt"
     p.write_bytes(b"latest=0.3.0\nbase=0.2.0>0.3.0\nstale=movies-hd|HD cinematics|0.1.0>0.2.0|10\n"
-                  b"stale=portraits-hd|Longevity HD Portrait Pack|0.1.0>0.2.0|20\n")
+                  b"stale=portraits-hd|Turovetsky's HD Portrait Pack|0.1.0>0.2.0|20\n")
     # the update popup accepted: every stale pack it listed, in the order it listed them
     assert run(exe, "handoffmods", 10, p, 1).strip() == "movies-hd,portraits-hd"
     # a new pack accepted in its own popup rides along after them

@@ -82,7 +82,7 @@ def img(path, size, colour, fmt="PNG"):
 
 
 def test_pack_on_wins_and_the_players_files_fill_in(tmp_path, decoder):
-    """The SETTING decides: with "Use Longevity HD Portrait Pack" on, the pack's image wins; a name the pack lacks
+    """The SETTING decides: with "Use Turovetsky's HD Portrait Pack" on, the pack's image wins; a name the pack lacks
     falls back to the player's own png, then jpg (user 2026-10-03)."""
     d = game(tmp_path, decoder)
     img(d / "portraits" / "gaians.png", (64, 80), (255, 0, 0))          # the player's own

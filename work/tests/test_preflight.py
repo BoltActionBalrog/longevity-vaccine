@@ -430,9 +430,9 @@ def test_explicit_modules_add_to_the_stale_set_and_a_missing_one_blocks(game, ta
     pf = pfm.run(game_dir=game, target=game / "terranx_PRACX.exe", patches=PATCHES, table=table,
                  manifest_raw=raw, manifest_sig=sig, installed_version="1.0.0",
                  wanted_modules=["portraits-hd"], installed_modules={"movies-hd": "1.0.0"},
-                 public_key_hex=PK_HEX, labels={"portraits-hd": "Longevity HD Portrait Pack"})
+                 public_key_hex=PK_HEX, labels={"portraits-hd": "Turovetsky's HD Portrait Pack"})
     assert pf.wanted == ["portraits-hd", "movies-hd"]
-    assert any(c.name == "Longevity HD Portrait Pack: not released yet" for c in pf.blockers), pf.checks
+    assert any(c.name == "Turovetsky's HD Portrait Pack: not released yet" for c in pf.blockers), pf.checks
     # movies-hd was attempted (an https URL that does not resolve -> advisory, not a blocker)
     assert any("movies-hd" in c.name for c in pf.warnings), pf.checks
 

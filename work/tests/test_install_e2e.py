@@ -313,6 +313,30 @@ def test_an_unattended_rerun_does_not_reverse_the_players_choice(game_installed)
     assert _uimod_flag(game) == "0", "an unattended re-run reversed an explicit opt-out"
 
 
+def test_an_unattended_first_install_leaves_update_checks_at_the_default_and_says_so(game):
+    """The update-check question (user 2026-11-06) needs a keyboard: the e2e runs have none (stdin is
+    DEVNULL), so the line says the default stands and the key is NOT written -- the installer never
+    writes a default, only an answer. A re-run says "the default" again and still writes nothing."""
+    import configparser
+    rcode, out = _run("--ai", "off", game=game)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert ("--- automatic updates ---\n  The game checks for updates when it starts (the default); change it in "
+            "Longevity Mod Preferences (\"Check for Updates at Startup\").") in out, out
+    assert "Check for updates when the game starts?" not in out
+    cp = configparser.ConfigParser(strict=False)
+    cp.read(game / "Alpha Centauri.ini", encoding="mbcs")
+    assert not cp.has_option("UIMod", "CheckForUpdates")
+    rcode, out = _run("--ai", "off", "--no-prompt", game=game)
+    assert "checks for updates when it starts (the default)" in out, out
+    cp.read(game / "Alpha Centauri.ini", encoding="mbcs")
+    assert not cp.has_option("UIMod", "CheckForUpdates")
+    # the player's own setting from the game is respected and reported on the next run
+    (game / "Alpha Centauri.ini").write_text((game / "Alpha Centauri.ini").read_text(encoding="mbcs")
+                                             .replace("[UIMod]", "[UIMod]\nCheckForUpdates=0", 1), encoding="mbcs")
+    rcode, out = _run("--ai", "off", game=game)
+    assert "The game does not check for updates when it starts (as before)" in out, out
+
+
 def test_a_first_install_defaults_the_cinematics_on(game):
     """GetPrivateProfileInt cannot tell "no key" from "key = 0", so a first install under
     --no-wait used to answer the EOF prompt with 0 and silently skip the headline feature."""
@@ -1035,8 +1059,8 @@ def test_asking_for_a_pack_the_manifest_does_not_offer_is_refused(game_installed
     code, out = _run("--update", "--manifest", str(m), "--modules", "portraits-hd",
                      "--no-prompt", game=game, env_extra=_ENV, expect_ok=False)
     assert code == 3, out
-    assert "[FAIL] Longevity HD Portrait Pack: not released yet" in out, out
-    assert "Longevity HD Portrait Pack is not available for download yet. Nothing was downloaded " \
+    assert "[FAIL] Turovetsky's HD Portrait Pack: not released yet" in out, out
+    assert "Turovetsky's HD Portrait Pack is not available for download yet. Nothing was downloaded " \
            "or changed." in out, out
     assert "NOTHING WAS CHANGED" in out and "CANCELLED" not in out, out
     assert "nothing to do now; your game is fine" in out, out
@@ -1058,7 +1082,7 @@ def test_a_pack_only_update_whose_download_fails_changes_nothing(game_installed,
     code, out = _run("--update", "--manifest", str(m2), "--no-prompt", game=game,
                      env_extra=_ENV, expect_ok=False)
     assert code == 3, out
-    assert "The HD cinematics v1.1.0 update could not be downloaded. Your HD cinematics v1.0.0 " \
+    assert "The update to HD cinematics v1.1.0 could not be downloaded. HD cinematics v1.0.0 " \
            "are still installed and work as before. Nothing was changed." in out, out
     assert "NOTHING WAS CHANGED" in out, out
     assert "UPDATE COMPLETE" not in out and "INSTALLATION SUCCESSFUL" not in out
@@ -1081,7 +1105,7 @@ def test_a_base_update_with_a_failed_pack_is_not_reported_as_complete(game_insta
     assert code == 1, out
     assert "UPDATE PARTLY COMPLETE" in out, out
     assert f"Longevity Vaccine v{ver.VERSION} is installed and the game is ready to play. " \
-           "The HD cinematics v1.1.0 update could not be downloaded. Your HD cinematics v1.0.0 " \
+           "The update to HD cinematics v1.1.0 could not be downloaded. HD cinematics v1.0.0 " \
            "are still installed and work as before." in out, out
     assert "only the pack update is missing" in out and "partway through" not in out, out
     assert "run the update again to get HD cinematics v1.1.0" in out, out
@@ -1508,7 +1532,7 @@ def test_an_unknown_module_name_is_refused_before_anything_happens(game_installe
                      "--no-prompt", game=game, env_extra=_ENV, expect_ok=False)
     assert code == 3, out
     assert '"bogus" is not an extra this installer knows.' in out, out
-    assert "movies-hd" in out and "Longevity HD Portrait Pack" in out, \
+    assert "movies-hd" in out and "Turovetsky's HD Portrait Pack" in out, \
         "the refusal must list the extras it does know, by id and by label"
     assert "--update --modules movies-hd" in out, "the remedy must show the exact form"
     assert _tree(game) == before, "refused before the manifest was even fetched"
@@ -1670,26 +1694,36 @@ def test_uninstall_leaves_a_movie_key_the_player_changed(game_installed):
 
 # ---------------------------------------------------------------- audit 2026-10-28: overlay by exe name, target flips
 
-def test_a_pracx_exe_under_another_name_never_gets_the_thinker_build(tmp_path, bak_path):
-    """The stock GOG layout plus Thinker: a vanilla terranx.exe (here: not a supported base at all),
-    the PRACX exe as terranx_PRACX.exe, thinker.dll and thinker.exe beside them. Thinker's launcher
-    starts terranx.exe only, so terranx_PRACX.exe can never run through Thinker: it gets the plain
-    PRACX build and receipt, the play note never sends the player to thinker.exe, and the run says
-    why (audit 2026-10-28: it got the Thinker build and instructions that started an unpatched exe)."""
+def test_an_unrecognised_terranx_beside_thinker_is_swapped_out_and_kept(tmp_path, bak_path):
+    """A Thinker folder whose terranx.exe is something the installer does not know (not GOG's, not
+    PRACX), the PRACX exe as terranx_PRACX.exe. Thinker's launcher starts terranx.exe only, so the
+    set-up swaps it for the PRACX build without asking (user 2026-11-06), keeps the unknown file
+    under a hashed _original name, says so in one line, and --uninstall puts it back. (Until
+    2026-11-06 this case was left alone and the player got the plain PRACX build, which Thinker
+    never loads.)"""
     g = tmp_path / "game"
     g.mkdir()
-    (g / "terranx.exe").write_bytes(b"NOT THE PRACX BASE: a stock exe the installer does not touch")
+    own = b"NOT THE PRACX BASE: a stock exe the installer does not know"
+    (g / "terranx.exe").write_bytes(own)
     shutil.copy2(bak_path, g / "terranx_PRACX.exe")
     (g / "thinker.dll").write_bytes(b"not a real dll")
     (g / "thinker.exe").write_bytes(b"not a real exe")
     (g / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
+    own_md5 = hashlib.md5(own).hexdigest()
     rcode, out = _run("--ai", "off", game=g)
     assert "INSTALLATION SUCCESSFUL" in out, out
     table = ap.load_targets(PATCHES)
-    assert hashlib.md5((g / "terranx_PRACX.exe").read_bytes()).hexdigest() == table["pracx"].patched_md5
-    assert rc.ini_get(g, rc.KEY_TARGET) == "pracx"
-    assert "Thinker starts only a file named terranx.exe" in out, out
-    assert "start thinker.exe" not in out, out
+    assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
+    assert _md5(g / "terranx_PRACX.exe") == table["pracx"].base_md5, "left as it is"
+    assert _md5(g / "terranx_original.exe") == own_md5
+    assert rc.ini_get(g, rc.KEY_TARGET) == "pracx_thinker"
+    assert ("Swapped the terranx.exe that was here for the PRACX .exe. This is required to load both Longevity and "
+            "Thinker. Your original is kept as terranx_original.exe. Uninstalling Longevity Vaccine puts it back.") in out, out
+    assert "Thinker starts only" not in out and "Set this folder up" not in out, out
+    assert "start thinker.exe" in out, out
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out and _md5(g / "terranx.exe") == own_md5, out
+    assert not (g / "terranx_original.exe").exists()
 
 
 def _md5(p: Path) -> str:
@@ -1819,14 +1853,16 @@ def test_a_stock_thinker_folder_is_set_up_and_uninstall_puts_the_original_back(t
     vanilla, base = _md5(g / "terranx.exe"), table["pracx"].base_md5
     rcode, out = _run("--ai", "off", game=g)
     assert "INSTALLATION SUCCESSFUL" in out, out
-    assert "kept the original terranx.exe as terranx_original.exe" in out, out
+    # no question, one line (user 2026-11-06)
+    assert ("Swapped the vanilla Alien Crossfire .exe for the PRACX .exe. This is required to load both Longevity and "
+            "Thinker. Your original is kept as terranx_original.exe. Uninstalling Longevity Vaccine puts it back.") in out, out
     assert _md5(g / "terranx_original.exe") == vanilla
     assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
     assert _md5(g / "terranx.exe.bak") == base
     assert _md5(g / "terranx_PRACX.exe") == base and not (g / "terranx_PRACX.exe.bak").exists()
     assert rc.ini_get(g, rc.KEY_TARGET) == "pracx_thinker"
-    # the set-up says why once; the patch pass adds no "rename it" note on top
-    assert "start thinker.exe" in out and out.count("Thinker starts only") == 1, out
+    # the set-up explains nothing; the patch pass adds no "rename it" note either
+    assert "start thinker.exe" in out and "Thinker starts only" not in out and "Set this folder up" not in out, out
     assert not list(g.glob("*.longevity-tmp"))
 
     rcode, out = _run("--ai", "off", game=g)
@@ -1841,11 +1877,142 @@ def test_a_stock_thinker_folder_is_set_up_and_uninstall_puts_the_original_back(t
     assert not (g / "longevity-thinker-setup.json").exists()
 
 
+def test_a_foreign_terranx_backup_fails_the_install_before_anything_is_patched(tmp_path, bak_path, pristine_bytes):
+    """User 2026-11-05: a terranx.exe.bak nobody can vouch for stops the WHOLE install, in red, with
+    the user's wording, and the folder is byte-for-byte untouched -- terranx_PRACX.exe included,
+    which a plain install would otherwise have patched."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    (g / "terranx.exe.bak").write_bytes(b"MZ another tool's backup")
+    before = _tree(g)
+    rcode, out = _run("--ai", "off", game=g, expect_ok=False)
+    assert rcode == ix.EXIT_ABORTED, out
+    assert "INSTALLATION FAILED" in out, out
+    assert ("Your game installation folder has an unrecognized terranx.exe.bak file. This should only happen if "
+            "you edited that file by hand. Longevity Vaccine cannot install over it. To install, verify that you "
+            "do not need terranx.exe.bak and delete it, then re-run this installer. Your game was not modified.") in out, out
+    assert "Nothing on disk was changed" not in out and "What to do" not in out, out
+    assert "--- terranx" not in out and "patching" not in out, out
+    assert _tree(g) == before, "nothing may be written before the check"
+
+
+def test_a_foreign_backup_in_a_plain_folder_fails_the_install_the_same_way(game, pristine_bytes):
+    """The backup rule for every exe the pass patches (user 2026-11-06): the same refusal for
+    terranx_PRACX.exe.bak in a folder without Thinker, before anything is written."""
+    g = game
+    (g / "terranx_PRACX.exe.bak").write_bytes(b"MZ another tool's backup")
+    before = _tree(g)
+    rcode, out = _run("--ai", "off", game=g, expect_ok=False)
+    assert rcode == ix.EXIT_ABORTED and "INSTALLATION FAILED" in out, out
+    assert ("Your game installation folder has an unrecognized terranx_PRACX.exe.bak file. This should only happen if "
+            "you edited that file by hand. Longevity Vaccine cannot install over it. To install, verify that you "
+            "do not need terranx_PRACX.exe.bak and delete it, then re-run this installer. Your game was not modified.") in out, out
+    assert "Nothing on disk was changed" not in out and "patching" not in out, out
+    assert _tree(g) == before
+
+
+def test_gogs_original_under_the_plain_exes_backup_name_is_set_aside_and_the_install_goes_on(game, pristine_bytes):
+    """GOG's stock terranx.exe sitting as terranx_PRACX.exe.bak (an old tool's backup): kept as
+    terranx_original.exe, the pass writes its own clean-base .bak, re-run and --uninstall work."""
+    g = game
+    (g / "terranx_PRACX.exe.bak").write_bytes(pristine_bytes)
+    gog = hashlib.md5(pristine_bytes).hexdigest()
+    table = ap.load_targets(PATCHES)
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert "terranx_PRACX.exe.bak (GOG's original) is kept as terranx_original.exe" in out, out
+    assert _md5(g / "terranx_original.exe") == gog
+    assert _md5(g / "terranx_PRACX.exe") == table["pracx"].patched_md5
+    assert _md5(g / "terranx_PRACX.exe.bak") == table["pracx"].base_md5, "the pass's own backup, not the GOG copy"
+    rcode, out = _run("--ai", "off", game=g)
+    assert "already patched" in out and "GOG's original" not in out, out
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out and _md5(g / "terranx_PRACX.exe") == table["pracx"].base_md5, out
+    assert _md5(g / "terranx_original.exe") == gog, "a kept file is never the uninstall's to remove"
+
+
+def test_thinker_removed_with_the_kept_original_gone_still_gets_a_clean_backup(tmp_path, bak_path, pristine_bytes):
+    """Audit HIGH-2: Thinker removed after a set-up AND the kept original gone: the revert leaves
+    terranx.exe the clean PRACX copy, which the pass then patches -- its GOG-original .bak (the
+    dev harness's layout) is set aside first, so the pass writes a clean-base .bak and the next
+    run recognises the build."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    (g / "thinker.dll").unlink()
+    (g / "thinker.exe").unlink()
+    (g / "terranx_original.exe").unlink()
+    (g / "terranx.exe.bak").write_bytes(pristine_bytes)                # GOG's copy under the pass's name
+    gog = hashlib.md5(pristine_bytes).hexdigest()
+    table = ap.load_targets(PATCHES)
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out and "Thinker is no longer in this folder" in out, out
+    assert _md5(g / "terranx.exe") == table["pracx"].patched_md5, "the plain build now"
+    assert _md5(g / "terranx.exe.bak") == table["pracx"].base_md5, "the pass's own backup, not the GOG copy"
+    assert gog in {_md5(p) for p in g.glob("terranx_original*")}, "GOG's copy kept"
+    rcode, out = _run("--ai", "off", game=g)
+    assert "already patched" in out, out
+
+
+def test_a_terranx_replaced_after_the_set_up_fails_the_install_before_anything_is_patched(tmp_path, bak_path,
+                                                                                         pristine_bytes):
+    """User 2026-11-06: a Thinker player asked for Thinker. With terranx.exe neither the file the
+    set-up put there nor the original it kept, the install stops in red with nothing written --
+    it used to install the plain build beside it with a note."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    (g / "terranx.exe.bak").unlink()
+    (g / "terranx.exe").write_bytes(b"MZ the player's own build")
+    before = _tree(g)
+    rcode, out = _run("--ai", "off", game=g, expect_ok=False)
+    assert rcode == ix.EXIT_ABORTED and "INSTALLATION FAILED" in out, out
+    assert ("Your game installation folder was set up for Thinker by an earlier Longevity Vaccine install, but its "
+            "terranx.exe is no longer the file that install put there, and it is not the original that install kept "
+            "as terranx_original.exe. This should only happen if you replaced that file by hand. Longevity Vaccine "
+            "cannot install over it. To install, verify that you do not need the current terranx.exe and delete it, "
+            "then re-run this installer. Your game was not modified.") in out, out
+    assert "Thinker will not load" not in out and "patching" not in out and "Nothing on disk was changed" not in out, out
+    assert _tree(g) == before, "nothing may be written before the check"
+    assert "INSTALLATION FAILED" in _run("--ai", "off", game=g, expect_ok=False)[1], "a re-run is refused the same way"
+    # the remedy works end to end: the file gone, the set-up puts PRACX in place and patches it
+    (g / "terranx.exe").unlink()
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out and "Your original is kept as terranx_original.exe" in out, out
+    table = ap.load_targets(PATCHES)
+    assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out and _md5(g / "terranx.exe") == hashlib.md5(pristine_bytes).hexdigest(), out
+
+
+def test_a_gog_original_terranx_backup_is_accepted_by_the_set_up(tmp_path, bak_path, pristine_bytes):
+    """A spare copy of GOG's original under terranx.exe.bak (an old tool's backup, or the dev
+    harness) is accepted without a word: the set-up keeps the original as terranx_original.exe,
+    the duplicate goes, and the patch pass writes its own clean-base .bak under that name."""
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    (g / "terranx.exe.bak").write_bytes(pristine_bytes)
+    table = ap.load_targets(PATCHES)
+    vanilla, base = _md5(g / "terranx.exe"), table["pracx"].base_md5
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out and "Your original is kept as terranx_original.exe." in out, out
+    # accepted without a word: no refusal, and no "kept as" line for the spare it dropped
+    assert "unrecognized" not in out and "did not make" not in out and "GOG's original" not in out, out
+    assert _md5(g / "terranx_original.exe") == vanilla
+    assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
+    assert _md5(g / "terranx.exe.bak") == base, "the set-up's own backup, not the GOG copy"
+    rcode, out = _run("--ai", "off", game=g)
+    assert "already patched" in out and "--- Thinker ---" not in out, out
+    rcode, out = _run("--uninstall", game=g)
+    assert "UNINSTALL COMPLETE" in out and _md5(g / "terranx.exe") == vanilla, out
+    assert not (g / "terranx_original.exe").exists() and not (g / "terranx.exe.bak").exists()
+
+
 def test_a_thinker_folder_with_no_terranx_gets_one_and_uninstall_removes_it(tmp_path, bak_path):
     g = _thinker_folder(tmp_path, bak_path, None)
     table = ap.load_targets(PATCHES)
     rcode, out = _run("--ai", "off", game=g)
     assert "INSTALLATION SUCCESSFUL" in out, out
+    assert ("Put the PRACX .exe in place as terranx.exe. This is required to load both Longevity and Thinker. "
+            "Uninstalling Longevity Vaccine removes it again.") in out, out
     assert _md5(g / "terranx.exe") == table["pracx_thinker"].patched_md5
     assert not list(g.glob("terranx_original*"))
     rcode, out = _run("--uninstall", game=g)

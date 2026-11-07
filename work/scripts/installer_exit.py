@@ -85,7 +85,8 @@ class InstallerError(Exception):
 
     def __init__(self, message: str, code: int = EXIT_ERROR,
                  detail: str = None, changed: Optional[bool] = False,
-                 remedy: str = None, title: str = None, disk_note: str = None):
+                 remedy: str = None, title: str = None, disk_note=None,
+                 red: bool = False, any_key: bool = False):
         # changed: True = we wrote something, False = provably nothing, None = we do not know.
         # None is a legitimate answer and renders as such; guessing is what costs the user time.
         super().__init__(message)
@@ -97,8 +98,13 @@ class InstallerError(Exception):
         #: Optional banner title. The default is chosen from `code`; a caller whose outcome is
         #: neither a refusal nor a failure (e.g. "the core updated, the pack did not") names it.
         self.title = title
-        #: Optional replacement for the generic disk statement, for the same reason.
+        #: Optional replacement for the generic disk statement, for the same reason; False = the
+        #: message already states it, print nothing more.
         self.disk_note = disk_note
+        #: The message in red (a refusal the player must read before anything else), and the
+        #: window held on ANY key rather than Enter (user 2026-11-05, the foreign-backup refusal).
+        self.red = red
+        self.any_key = any_key
 
 
 def say(*parts: object) -> None:
@@ -168,13 +174,14 @@ def _keys_blue(prompt: str) -> str:
     return prompt
 
 
-def ask(prompt: str, title: str = None) -> str:
+def ask(prompt: str, title: str = None, notes=()) -> str:
     """input() for every question the installer puts. With `title` (every real question) it is a
-    ruled block: question_head, the prompt (its [Y/n] in blue), a rule under the answer. Without,
-    just the one empty line above. Raises what input() raises (EOFError, KeyboardInterrupt)."""
+    ruled block: question_head (with `notes`, the explanation above the closing rule), the prompt
+    (its [Y/n] in blue), a rule under the answer. Without, just the one empty line above. Raises
+    what input() raises (EOFError, KeyboardInterrupt)."""
     global _last_blank
     if title:
-        question_head(title)
+        question_head(title, notes)
     else:
         blank()
     try:
@@ -268,13 +275,25 @@ def interactive() -> bool:
         return False
 
 
-def wait_for_key(prompt: str = "Press Enter to close this window... ") -> None:
-    """Hold the window. Never raises -- it runs inside the guarantee's `finally`."""
+def wait_for_key(prompt: str = "Press Enter to close this window... ", any_key: bool = False) -> None:
+    """Hold the window. Never raises -- it runs inside the guarantee's `finally`. `any_key`: one
+    keypress of any kind ends the wait (the console's own reader; Enter where there is none)."""
     if not interactive():
         _vsay("\n(non-interactive session: not waiting for input)")
         return
     try:
-        ask(prompt)
+        if any_key:
+            blank()
+            say(prompt)
+            try:
+                import msvcrt
+                msvcrt.getwch()
+                return
+            except (ImportError, OSError):
+                pass                    # no console reader: fall back to a line
+            input()
+        else:
+            ask(prompt)
     except (EOFError, KeyboardInterrupt, OSError, ValueError):
         pass
 
@@ -339,7 +358,7 @@ def bad(text: str) -> None:
     say((_RED + text + _RESET) if _colour_ok() else text)
 
 
-def status_line(label: str, status: str, width: int = 22) -> None:
+def status_line(label: str, status: str, width: int = 30) -> None:     # 30: the longest pack name fits
     """One summary row: `label` padded, then a coloured Success / Error / Skipped."""
     word = {"ok": "Success", "error": "Error"}.get(status, "Skipped")
     colour = {"ok": _GREEN, "error": _RED}.get(status, "")
@@ -428,9 +447,20 @@ def write_guard_marker() -> None:
         pass
 
 
-def write_crash_log(exc: BaseException, log_dir: Path = None) -> Optional[Path]:
-    """Persist a traceback so the user has something to send. Never raises."""
+def write_crash_log(exc: BaseException, log_dir=None) -> Optional[Path]:
+    """Persist a traceback so the user has something to send. Never raises.
+
+    `log_dir`: a Path, or a zero-argument callable resolved NOW (the game folder is known only once the run
+    is underway), or None / a callable returning None = beside this script. A callable that raises counts
+    as None: the crash being reported must never be lost to the choice of folder (audit 2026-11-07: the
+    default folder is the extracted download or an updater generation the next update deletes).
+    """
     try:
+        if callable(log_dir):
+            try:
+                log_dir = log_dir()
+            except Exception:  # noqa: BLE001 - see the docstring
+                log_dir = None
         d = Path(log_dir) if log_dir else Path(__file__).resolve().parent
         d.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -478,7 +508,7 @@ def run_guarded(main_fn: Callable[[], int], *,
                 success_title=None,
                 success_body=None,
                 success_after: Callable[[], None] = None,
-                log_dir: Path = None) -> int:
+                log_dir=None) -> int:
     """Run `main_fn` so that EVERY outcome prints a verdict, states disk status, and waits.
 
     `main_fn` returns an exit code, or raises InstallerError for an expected failure. Anything
@@ -491,6 +521,7 @@ def run_guarded(main_fn: Callable[[], int], *,
     # Set when the player said yes to starting the game: the window then closes on its own
     # instead of asking for a keypress behind the game (user, 2026-09-27).
     launched = False
+    wait_any = False            # an InstallerError that holds the window on ANY key
     try:
         try:
             # Normalise BEFORE anything is printed: the old order reported the raw value ("stopped
@@ -539,13 +570,15 @@ def run_guarded(main_fn: Callable[[], int], *,
                               else "INSTALLATION FAILED"))
             # `say`, not `_vsay`: in a worker the parent owns the BANNER, but the reason, the
             # disk statement and the remedy exist only here.
-            say(e.message)
+            (bad if e.red else say)(e.message)
             if e.detail:
                 say("")
                 say(e.detail)
-            _disk_statement(e.changed, e.disk_note, out=say)
+            if e.disk_note is not False:
+                _disk_statement(e.changed, e.disk_note, out=say)
             if e.remedy:
                 say(f"\nWhat to do: {e.remedy}")
+            wait_any = e.any_key
 
         except KeyboardInterrupt:
             code = EXIT_INTERRUPTED
@@ -591,7 +624,10 @@ def run_guarded(main_fn: Callable[[], int], *,
         write_guard_marker()
         try:
             if not launched:
-                wait_for_key()
+                if wait_any:
+                    wait_for_key("Press any key to close this window...", any_key=True)
+                else:
+                    wait_for_key()
             if not console_available():
                 # pythonw.exe / no console: everything above went nowhere. Show it.
                 _show_message_box("Longevity Vaccine Installer", "\n".join(_transcript))

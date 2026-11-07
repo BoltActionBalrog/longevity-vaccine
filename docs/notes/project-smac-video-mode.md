@@ -60,7 +60,7 @@ and our patched 0f189a32.
 - Drag/size black flash = WM_ERASEBKGND before the (slow) repaint -> swallowed in the subclass while stretched.
 - Live follow: subclass calls a prefs callback when the DETECTED mode changes (WM_USER+3 / WM_WINDOWPOSCHANGED /
   WM_STYLECHANGED); prefs redraws the cells only if PrefWin Win_is_visible (0x5F7E90) and our tab is active.
-- Page order (user 2026-09-19): display-mode row FIRST, one blank row, then the option rows (kModeRow 0 / kOptRow0 2).
+- Page order (user 2026-09-19): display-mode row FIRST, "Constrain Mouse to Window" nested under it, then the option rows (kModeRow 0 / kOptRow0 1; no blank row since the clip row took it).
 - Backbuffer (ScreenWidth/Height) never changes → g_popup_scale_num and all scaling untouched; resolution change stays
   restart-only ([PRACX] ScreenWidth/Height, PRACX's own dialog rewrites them).
 - Our own code had to become stretch-aware: wheel.cpp hit-test (client→backbuffer); movie.cpp COMPOSES AT THE CLIENT SIZE when

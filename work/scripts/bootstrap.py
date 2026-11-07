@@ -484,7 +484,7 @@ def run(argv: list = None) -> int:
     apr.add_argument("--update", action="store_true", help=argparse.SUPPRESS)
     apr.add_argument("--modules", default=None,
                      help="Forwarded to the installer: extras to add or re-install "
-                          "(movies-hd = HD cinematics, portraits-hd = Longevity HD Portrait Pack).")
+                          "(movies-hd = HD cinematics, portraits-hd = Turovetsky's HD Portrait Pack).")
     apr.add_argument("--no-prompt", action="store_true",
                      help="Forwarded to the installer: never ask anything.")
     # The GAME's hand-off flag (FROZEN: the DLL passes it, and every later generation must accept
@@ -525,6 +525,7 @@ def run(argv: list = None) -> int:
     # The same folder rules as install.py: --game-dir, else the resident updater's own folder,
     # else the installed folders found on this PC (asked about when someone is at the console).
     game_dir = inst.resolve_game_dir(args, installed=True)
+    inst._CRASH_LOG_GAME_DIR = game_dir      # a crash log from here goes to LongevityMods\logs (install.crash_log_dir)
     if not game_dir.is_dir():
         raise ix.InstallerError(
             "The game folder could not be found.",
@@ -994,9 +995,16 @@ def _relaunch_exe():
     return inst.mod_exe(*_NOTE_ARGS)
 
 
+def _crash_log_dir():
+    """install.crash_log_dir once install is imported and knows the game folder; else None (beside the script)."""
+    inst = sys.modules.get("install")
+    return inst.crash_log_dir() if inst is not None else None
+
+
 if __name__ == "__main__":
     sys.exit(ix.run_guarded(
         main,
+        log_dir=_crash_log_dir,
         relaunch_exe=_relaunch_exe,
         success_title=lambda: _VERDICT[0] if _VERDICT else "UPDATE COMPLETE",
         success_body=lambda: _VERDICT[1] if _VERDICT else

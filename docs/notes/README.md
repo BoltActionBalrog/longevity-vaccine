@@ -18,7 +18,7 @@ own setup stay private.
 Addresses are for the PRACX-patched GOG binary the mod targets. `g` is the runtime
 scale (16 = the native 1024x768 layout); `s(v)` is `floor(v*g/16)`.
 
-## Lessons (89)
+## Lessons (90)
 
 A rule learned the hard way, with the failure that taught it.
 
@@ -84,6 +84,7 @@ A rule learned the hard way, with the failure that taught it.
 - [feedback-remainder-distribution](feedback-remainder-distribution.md): n×floor(scale·v) ≠ floor(n·scale·v) — any repeated stride or multi-cell span at scale must distribute the fractional remainder via cum(i)=halfDown(i·total,n), not floor each cell
 - [feedback-resize-sync-repaint-scratch](feedback-resize-sync-repaint-scratch.md): GraphicWin_resize(a4=1) repaints synchronously -- a cave cell carried across it must not be scratch for any painter-reachable thunk
 - [feedback-restore-at-owners-hide](feedback-restore-at-owners-hide.md): A save-under restore keyed on the interface-mode stack breaks on every new nesting; restore at the OWNER's own hide, whatever mode is on top
+- [feedback-restore-defaults-not-a-consent](feedback-restore-defaults-not-a-consent.md): Preferences "Restore Defaults" resets tunings only — never a consent the player gave elsewhere (update checks) and never a setting whose row is not built (HD pack without the pack); the maintainer's decision 2026-11-07
 - [feedback-scaled-text-centering](feedback-scaled-text-centering.md): Why enlarged (popup_scale) vertically-centred UI text sits too low in SMACX, and the standard upward-nudge fix — apply when scaling any centred dialog/button/title text
 - [feedback-scaling-inline-rebuild-paths](feedback-scaling-inline-rebuild-paths.md): When a select/refresh action regresses a scaled UI element, suspect a separate inline REBUILD path the build-time scaling hooks don't cover
 - [feedback-screen-state-is-not-an-object-key](feedback-screen-state-is-not-an-object-key.md): A screen/global state flag ("talk open", "editor active", iface mode) is never a proxy for a per-object property (anchored, modal, owner) — read the object's own field through whatever register reaches it
@@ -112,7 +113,7 @@ A rule learned the hard way, with the failure that taught it.
 - [feedback-yaml-thunk-content-desync](feedback-yaml-thunk-content-desync.md): A cave thunk's CONTENT bytes are a separate patches.yaml entry from its symbol/group/site — committing only the latter makes a clean apply CALL into a zero-filled cave
 - [feedback-yaml-utf8-encoding](feedback-yaml-utf8-encoding.md): Don't edit patches.yaml (or any UTF-8 file) with a Python open()/write() round-trip on Windows — it corrupts non-ASCII and crashes apply
 
-## Screens and features (103)
+## Screens and features (104)
 
 What was done to one screen or feature, what was tried, and what state it was left in.
 
@@ -186,11 +187,12 @@ What was done to one screen or feature, what was tried, and what state it was le
 - [project-smac-popup-xs-baseline](project-smac-popup-xs-baseline.md): Popup script `#xs` widths: the engine itself multiplies them by 1.5 above 1023 px, so that is the baseline a scaled popup is measured against
 - [project-smac-portrait-prewarm](project-smac-portrait-prewarm.md): Background pre-bake of the HD leader portraits (uimod prewarm.cpp): DONE, all fixes landed and user-confirmed 2026-10-15 (branch feat/portrait-prewarm 36319c5, merged into master as commit diffs). Measured facts about the picker, the palette timing and the sheet model live here.
 - [project-smac-pracx-load-mechanism](project-smac-pracx-load-mechanism.md): How prax.dll actually gets loaded into terranx_PRACX.exe — the bootstrap vector for chain-loading our own DLL
+- [project-smac-prefs-row-pitch-decision](project-smac-prefs-row-pitch-decision.md): Longevity Preferences option rows stay on kChkRowPitch 20 native (user accepted 2026-11-07); vanilla's own option rows are 22 native and the stock pages measure 56/37/33 px at 4K/1600/1920 -- 22 fits only 14 of our 15 rows, do not re-propose
 - [project-smac-prefwin-scaling](project-smac-prefwin-scaling.md): Preferences window (PrefWin) scaling — CLOSED 2e8c14f5 all-res; reusable patterns = vtable-slot gated flag-arm stub, GraphicWin_init entry-gate consumer-boundary scaling, show-time font+redraw fix
 - [project-smac-prodpicker](project-smac-prodpicker.md): Base production picker (ProdPicker) scaling arc — CLOSED 2026-08-06 user-verified all-res at e828237a (passes 1-5c); deferred: scrollbar >20 items, map-parent gwinit variant
 - [project-smac-punishment-sphere](project-smac-punishment-sphere.md): Punishment Sphere display feature (uimod pssphere.cpp) — would-be drones shown + badge on base row and F4; PENDING in-game verify; design decisions and engine facts
 - [project-smac-quit-type8-optionlist](project-smac-quit-type8-optionlist.md): Quit-modal 4K fix — type-16 Dialog (rowpitch + fillwidth + OK-gap law v2 CLOSED, final build 95b68156, user-confirmed + CHANGELOG'd); type-8 design kept for genuine type-8 popups (q8 overrun spot-check open); #48 box width resolved (M(g) box correct)
-- [project-smac-replaceable-portraits](project-smac-replaceable-portraits.md): Replaceable leader/native-life portraits + portraits-hd pack. Prefs tree under "Enable User Portraits"; the SETTING decides the order (pack first when on, then the player's portraits\, then vanilla). Built, audited 2026-10-03; Phase 5 in-game matrix next
+- [project-smac-replaceable-portraits](project-smac-replaceable-portraits.md): Replaceable leader/native-life portraits + portraits-hd pack (licence confirmed 2026-11-06, ships from 1.0.0). Prefs tree under "Enable Custom Portraits" (renamed from "Enable User Portraits" 2026-11-07); the SETTING decides the order (pack first when on, then the player's portraits\, then vanilla). Built, audited 2026-10-03; Phase 5 in-game matrix next
 - [project-smac-reply-row-indent](project-smac-reply-row-indent.md): Type-16 reply rows (diplomacy replies, Quit menu): button-edge -> text channel stayed native 3px; scaled in-register at the painter read 0x60DB8B by uimod rowindent.cpp (DLL 7e4d3dac) -- BUILT 2026-09-19, awaiting in-game verify
 - [project-smac-report-screens](project-smac-report-screens.md): HQ report screens arc (ReportWin/ReportIf/FameWin) — F2 Technology page DONE user-confirmed 2026-09-07 (bake v7 MD5 06cb2739); grand probe RUN DONE; KINDS PROTO v4 armed (console buttons, sat orbit, citizens/garrison, Hall of Fame window lever) awaiting user verify
 - [project-smac-riot-defection-fix](project-smac-riot-defection-fix.md): VANILLA crash in drone_riot's base-defection block (uninitialised REVOLT weights -> idiv 0) + inverted REVOLT roll; uimod riotfix.cpp, DLL e0bde654, USER-VERIFIED 2026-09-20, not committed

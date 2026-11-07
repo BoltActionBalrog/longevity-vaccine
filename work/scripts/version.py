@@ -27,7 +27,7 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
-VERSION = "0.2.2"
+VERSION = "1.0.0"
 
 #: The oldest installed version that may update itself automatically; anything older is told to
 #: reinstall by hand (manifest `min_upgradable_from`, decide() step "too_old"). release.py used to
@@ -50,7 +50,7 @@ THINKER_SUPPORTED_IMAGE_SIZE = 0x19F000
 #: `base` is the product itself and is never listed here.
 MODULE_VERSIONS = {
     "movies-hd": "1.0.0",       # user 2026-11-04: 0.1.0 -> 1.0.0, clips unchanged (installs on 0.1.0 re-download)
-    "portraits-hd": "0.1.0",
+    "portraits-hd": "1.0.0",    # user 2026-11-06: first release, with the artist's licence confirmed
 }
 
 

@@ -10,8 +10,8 @@ void InstallSmoothPortraits();
 // brightness-keeping kind: the former "Brighten Scanlines" row and its PortraitScanlinesBright key are gone (user
 // 2026-10-30), and the darkening overlay mode 1 is no longer selectable.
 //
-// The whole group hangs under "Enable User Portraits" ([UIMod] CustomPortraits): off = the game's own portraits
-// everywhere.  Its children: "Use Longevity HD Portrait Pack" ([UIMod] HdPortraits; the row exists only while the
+// The whole group hangs under "Enable Custom Portraits" ([UIMod] CustomPortraits): off = the game's own portraits
+// everywhere.  Its children: "Use Turovetsky's HD Portrait Pack" ([UIMod] HdPortraits; the row exists only while the
 // portraits-hd pack is installed) and "Add Scanlines".  A parent turned off forces its children off; turned on,
 // they follow it on (the cloak rows' pattern).
 constexpr int kPortraitCustomDefault = 1;

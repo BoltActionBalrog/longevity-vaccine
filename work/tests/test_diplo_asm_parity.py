@@ -955,8 +955,11 @@ def test_tile_exit_gates():
 
 def test_snapshot_clones_call_t_cr_mark():
     # the DL + combat snapshot clones arm through the same helper (same-length swap of the 10-byte mov)
+    import config
+    if not pathlib.Path(config.terranx_bak()).exists():      # a contributor without the game: skip, not error
+        pytest.skip("pristine .bak not present")
     import assemble_dl as ADL
-    import assemble_combat as ACB
+    import assemble_combat as ACB      # reads the pristine .bak at import
     layout, _end, _names = ADL.assemble_all()
     blobs = {"t_cr_snap": (AD.PCAVE2_VA + LAYOUT["t_cr_snap"][0], LAYOUT["t_cr_snap"][1]),
              "t_cr_snap_dl": (ADL.PCAVE2 + layout["t_cr_snap_dl"][0], layout["t_cr_snap_dl"][1]),

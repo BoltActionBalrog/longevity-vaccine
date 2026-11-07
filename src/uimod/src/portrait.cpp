@@ -139,8 +139,8 @@ bool g_smooth = true;                             // [UIMod] SmoothPortraits (va
 // must be armed, or the patcher's NN / parity re-blit would enlarge the dithered bake (dither is never resampled).
 // (g_hasCave / g_b2Armed are defined above, beside MakeSnapshot.)
 
-int g_custom = kPortraitCustomDefault;            // "Enable User Portraits" (the group's parent)
-int g_hd = kPortraitHdDefault;                    // "Use Longevity HD Portrait Pack" (the portraits\hd\ pack)
+int g_custom = kPortraitCustomDefault;            // "Enable Custom Portraits" (the group's parent)
+int g_hd = kPortraitHdDefault;                    // "Use Turovetsky's HD Portrait Pack" (the portraits\hd\ pack)
 int g_scan = kPortraitScanDefault;                // "Add Scanlines"
 
 uint64_t Fnv(uint64_t h, const BYTE* p, size_t n)

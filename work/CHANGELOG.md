@@ -2,84 +2,103 @@
 
 UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
-## 0.2.2 -- 2026-11-05
-
-## 0.2.1 -- 2026-11-01
-
-### Windows 7
-- Runs on Windows 7 SP1 (with update KB2533623): replacement leader portraits load without the Platform Update, and without a shader compiler the interface is scaled on the CPU and the log names the missing component.
-
-### Fixes
-- A game installed at the root of a drive (the folder is the drive letter itself) now updates and checks for updates; the folder's path was misread before.
-
-## 0.2.0 -- 2026-10-31
+## 1.0.0 -- 2026-11-06
 
 ### High-resolution UI scaling
-- The entire interface now scales to your resolution (4K and beyond) instead of staying at its original size: every menu, screen, dialog, popup, tooltip, list, map label and map cursor (go-to, patrol, airdrop, artillery and the rest), with artwork enlarged smoothly, the interface's striped fills redrawn evenly at your resolution, and full-screen pictures kept at their original proportions.
-- Faction leader portraits, native-life portraits and the event pictures in popups are enlarged smoothly instead of as blocks, with crisp even scanlines, wherever they appear (diplomacy, the Planetary Council, the combat console, faction selection, the Datalinks, the faction PROFILE report, event popups); every other scanlined picture (the diplomacy BIOSCAN, logos) keeps the same even scanline thickness. `SmoothPortraits=0` under `[UIMod]` in `Alpha Centauri.ini` turns it off.
-- Leader and native-life portraits can be replaced with your own images: put them in the game's `portraits` folder (see the guide there). Longevity Mod Preferences has a switch for them, plus optional scanlines.
+- The entire interface now scales to your resolution instead of staying at its original size.
+- The F4 report's base-locator blink is drawn at twice its scaled size, so it is easy to spot.
+
+### Leader portraits
+- Leader portraits and other pictures are enlarged smoothly instead of as blocks, with even scanlines.
+- You can replace leader and native-life portraits with your own images in the game's `portraits` folder.
+- New optional pack: Turovetsky's HD Portrait Pack replaces all 14 leader portraits with AI-remastered art (https://www.youtube.com/@Turovetsky, https://x.com/turovetsky).
 
 ### Display modes
-- New Fullscreen, Borderless and Windowed display modes, chosen with three checkboxes at the top of the Longevity Mod Preferences tab. The switch is instant and is remembered for the next launch; Alt+Enter still toggles, and the checkboxes follow it. None of the three changes your monitor's resolution, at startup or while you play: the monitor stays in its own mode and the game is scaled by the graphics card, so there is no display switch when the game starts, after a cinematic or when you Alt+Tab (the original game and PRACX switched the monitor to the game's resolution, which some monitors show with black-outs or flicker when they have no mode of that shape). Fullscreen keeps the game on top and minimises it when you switch to another program; Borderless and Windowed stay visible when you Alt+Tab away, so the game can share a desktop with other windows and recording tools. The picture always keeps its proportions: Borderless adds black bars when the game's resolution is not your monitor's shape, and the Windowed frame resizes in proportion. Cinematics play inside the window in every mode. `FullscreenModeSwitch=1` under `[UIMod]` in `Alpha Centauri.ini` brings back the real resolution switch in Fullscreen.
-- Fullscreen keeps the mouse pointer on the game's screen on a multi-monitor desktop (PRACX let it slip onto the other monitor, where the map stopped scrolling at that edge); "Constrain Mouse to Window" under the display-mode checkboxes turns that off.
-- The game fills the monitor correctly at a Windows display scaling other than 100% without any compatibility setting (PRACX's window came out larger than the desktop there, unless the exe was marked "High DPI aware" by hand). `DpiAware=0` under `[UIMod]` in `Alpha Centauri.ini` leaves it to Windows.
-- Windowed play is now smooth at any resolution, with sharp text: the window's picture is scaled by the graphics card. PRACX's own windowed mode re-filtered the whole screen for every small update and ran at a crawl at high resolutions (a PRACX limitation).
-- Dragging and edge-scrolling the map is now smooth at high resolutions: the map slides under the pointer instead of trailing it. PRACX redrew the whole map for every scroll step, which at 4K meant a jerky 10 steps a second (a PRACX limitation). `SmoothScroll=0` under `[UIMod]` in `Alpha Centauri.ini` restores PRACX's behaviour.
+- New Fullscreen, Borderless and Windowed modes, switchable in Longevity Mod Preferences or with Alt+Enter.
+- The game no longer switches your monitor's resolution, so the screen doesn't black out or flicker when the game starts, after a cinematic or when you Alt+Tab.
+- Windowed play is now smooth at any resolution, with sharp text.
+- Dragging and edge-scrolling the map is now smooth at high resolutions.
 
 ### Mod settings
-- New "Longevity Mod Preferences" tab in the Preferences window, with a Base Font Size slider that controls how large the map's base-name labels grow — from the original size (left) to fully scaled for your resolution (right) — updating the map live as you drag. OK saves it; Restore Defaults returns it to fully scaled. The BASES report's base-locator blink is drawn at twice its scaled size (turn that off with `BigF4Indicators=0` under `[UIMod]` in Alpha Centauri.ini). It also holds the cloaking options described under Fixes: "AI Cannot See Cloaked Units Until Actually Discovered" and, nested under it, "Cloaked Transport Hides Its Cargo" and "Show Alert Icon on Detected Cloaked Units" (all on by default; the nested two follow the first one off and on), and "Air Drops Divert Around Unseen Defenders" (on by default; see Fixes).
-- New optional "Modern Control Set" on the Longevity Mod Preferences tab for players used to later strategy games: a right click moves the selected unit straight to that square (in view mode too), a move-to line follows the pointer whenever a unit is selected, Shift+right click opens the square's orders menu, Shift+left click moves the map cursor, Ctrl+right click adds a waypoint to the route (up to three, the game's limit) before the final right click, and orders that ask for a target square (patrol, bombing run, airdrop, artillery, road or tube to) are given with a right click and cancelled with a left click. Nested under it, "Right-Click Drags to Move" keeps the original hold-and-drag move on the right button instead (a quick right click still opens the menu). "Middle-Click Drags Map" / "Right-Click Drags Map" choose which button pans the map (click the selected one to turn panning off). Everything is off by default, so the original controls are unchanged. The Datalinks' Waypoints article (Basic Concepts) explains the new way to set waypoints.
-- Two optional camera settings on the same tab: "Left Click Doesn't Recenter the Map" keeps the view where it is when you click a square or open a base, and "Closing a Base Never Recenters Map" stops the view jumping to the selected unit when the base screen closes.
-- Settings that only apply when their parent setting is on (the cloaking, portrait and control sub-options) are shown in grey while the parent is off.
-- New accessibility setting on the Longevity Mod Preferences tab: a "Drag Hold Time" slider sets how long you hold the mouse button on the map before a unit's move line starts (100 ms to 2 seconds; the default is the unmodded game's 1/3 second). A longer time stops slow clicks from turning into accidental move orders; a shorter one starts the drag sooner. While you hold a slider, a tooltip shows its exact value (also on Base Font Size).
+- New Longevity Mod Preferences tab in the Preferences window for the mod's settings.
+- A Base Font Size slider sets how large the map's base names and their current production names grow.
+- New optional Modern Control Set: right-click to move, left-click to select, with a move line that follows the pointer and Ctrl+right-click waypoints. It is off by default.
+- Two optional camera settings stop the map from recentering when you click a square, open a base or close one.
+- A Drag Hold Time slider sets how long you hold the mouse on the map before a move starts, so slow clicks no longer turn into accidental moves.
+- The cloaking and air-drop changes each have a switch in Longevity Mod Preferences.
+- You can choose whether the right or middle mouse button pans the map, or turn panning off. With the Modern Control Set, Right-Click Drags to Move keeps the original hold-and-drag move.
+- Constrain Mouse to Window in Longevity Mod Preferences turns off Fullscreen's pointer hold.
+- Longevity Mod Preferences has switches for your own portraits and for portrait scanlines.
 
 ### Updates
-- The mod checks for updates when the game starts and offers to install them, at the main menu or at the start of a turn; in a game you can save first. The optional HD cinematics pack is offered separately with its download size. "Don't ask me again" skips an offer until the next release for something you already have installed; Longevity Mod Preferences has a "Check for Updates at Startup" switch and a "Reset Skipped Updates" button that brings every reminder back.
-- If the mod's files are missing or damaged (after an antivirus quarantine or an interrupted update, say), the game now stops at startup with a message that names the problem and asks you to reinstall the mod, instead of silently starting without the mod's changes.
+- The mod checks for updates at startup and offers to install them, with the optional packs offered separately. You can turn the check off in Longevity Mod Preferences.
 
 ### Thinker Mod
-- If the game folder holds a Thinker Mod build other than the one this release supports, the game says so once at start (with a "Don't Show Again" option).
-- Works alongside Thinker Mod 5.5: install into the Thinker folder and keep starting thinker.exe as before (starting terranx.exe directly plays with the mod but without Thinker). Everything above applies on top of Thinker, including its own base-screen lines (satellite bonuses, stockpile energy, population and nerve-staple notes), which are placed at your resolution; on a base under a Punishment Sphere or nerve staple its population line shows the citizens the base would have, like the badged citizens row.
+- Works with Thinker Mod 5.5, and Thinker's own interface scales with the rest of the game. Install into the Thinker folder and keep starting thinker.exe as before.
+- The game warns once at startup if the folder holds a Thinker Mod version this release does not support.
+- Under Thinker Mod, the base screen's SUPPORT tab shows the standard support map, scaled to your resolution. Thinker's zoomable support view is not scaled, so at high resolutions it showed a tiny unit in an empty panel.
 
 ### Cinematics
-- The intro and in-game movies now play in-window, without switching your desktop resolution and without an external player. The video is scaled to your resolution with the correct aspect ratio (black bars, never stretched), and can be skipped with Esc or a click.
-- Secret project movies once again end with the project's name and a typed-out description of its benefits over the final frame, scaled to your resolution. The unmodded game showed this; PRACX's external movie player dropped it.
-- Added an optional AI-upscaled HD cinematics pack: all 61 movies remastered at 4x resolution (UpscaledVideos=0 in Alpha Centauri.ini keeps the classic versions).
+- Movies now play inside the game window at your resolution, with no resolution switch and no external player. Esc or a click skips them.
+- New optional pack: all 61 movies AI-upscaled to 4x resolution.
 
-### Fixes
-- Holding Shift or Ctrl no longer makes the game swallow your next map click (base-game bug: the key's auto-repeat cancelled the click you were making, so Shift+click only worked once per key press). Shift+click on the map is now an ordinary click; in the unmodded game it flashed a unit's move line for a moment and then did nothing.
-- The technology breakthrough window's long description now opens at its first line. In the unmodded game it opened scrolled to its last page, so you had to scroll up to read it from the start.
-- Cloaking Device and Deep Pressure Hull now actually hide units from the computer players (a base-game bug: the AI always knew where they were, steered around them, and hunted them down). The AI now only learns of a hidden unit by spotting it or by walking into it — it stops, discovers the unit, and reacts from there. Can be turned off in the Longevity Mod Preferences tab. Also closed two ways the base game leaked hidden enemy units to the player: go-to routes no longer bend around units you cannot see, and demanding that a faction withdraw from your territory (and the AI's same demand of you) no longer counts or removes units that were never spotted. When a leader makes that demand while you have undetected cloaked units in their territory, two extra replies let you withdraw those as well. A cloaked or submarine transport and the units it carries now count as one unit for detection, instead of the cargo giving the transport away (optional). The Datalinks entries for Cloaking Device and Deep Pressure Hull now describe how hidden units are really detected (Deep Radar, a faction's own sensors, and stacking). A red exclamation mark now appears on the flag of any of your cloaked or submarine units that another faction has spotted, and on enemy cloaked units you have detected — on the map and in every unit list (optional). A Geosynchronous Survey Pod now lets units detect cloaked enemies from anywhere in its base's radius; the base game only counted nine scattered squares around the base. All of this holds with Thinker Mod 5.5 installed as well: Thinker's own AI planner is made to respect undetected units the same way (on its own it attacked them blind and steered its units straight to them).
-- Your cloaked and submarine units no longer exert a zone of control over a faction that has not yet detected them, so an enemy unit beside your undetected unit moves as if it were not there instead of being silently blocked (the base game let every unit exert it, seen or not, which also let a boxed-in AI unit waste its turn re-trying the same step). Once detected, the unit exerts its zone of control as before. Applies to the AI and to other players alike, and works with Thinker Mod as well.
-- Air-dropping a combat unit onto a square held by enemy units you cannot see (cloaked and undetected, or out of your sight) now lands it on a free neighbouring square and reveals the defenders, instead of the base game's refusal that gave their position away. The diverted landing is never refused for range, and if no neighbouring square is free the drop is refused as before. Non-combat units (colony pods, formers, probe teams, supply crawlers) are unchanged, since the game's zone-of-control rule already stops them next to enemy units. Works with Thinker Mod as well. Can be turned off in the Longevity Mod Preferences tab.
-- A base with a Punishment Sphere, or one under a nerve staple, now shows the drones that are being held down instead of hiding them: the base screen's citizens row and the F4 Base Operations citizens list draw them as drones with a small badge (gold for the sphere, steel for the staple), and the PSYCH tab no longer credits their removal to "Secret Projects" (a base-game mislabel). You can see what the base would look like without the sphere.
-- Fixed a base-game crash at end of turn when a rioting base defects to another faction. The game read leftover memory while deciding who takes the base, and with no faction holding the "revolting bases join us" bonus (only the Free Drones have it) it could divide by zero. That bonus now also works as documented: the Free Drones' 75% chance to win over a revolting base was really about 25%, and the roll came straight off the system clock, which broke it entirely after 25 days of uptime.
-- Fixed the Windows 11 24H2 freeze at the start of a new game, when a save is written, and on the hotseat/load prompt (a file-lock crash in the game's bundled C runtime). Saving is also hardened at the root: the original game wrote an uninitialised save header and could misread it as an old save format, corrupting the running game (a bug in the original game).
-- Leaving a story interlude with a key no longer flashes the game menu over it and asks for a second press (a base-game bug: the keystroke that closed the interlude was delivered to the map a second time).
-- View Credits no longer starts a second copy of the main-menu music on top of the one already playing — the menu track now continues uninterrupted into and through the credits.
-- The in-game music no longer keeps playing over the main menu after you leave a game (a base-game bug).
-- A selected unit wider than its map square (large ships, long rovers) now blinks as a whole; the base game left a strip of it drawn solid while the rest blinked.
-- When a unit is sent somewhere it cannot reach and the game gives the order up, the unit panel's "Moves" now shows the moves actually left; the base game kept showing the old number until the unit was re-selected.
-- Loading a game now resumes with the current unit properly selected and blinking. The base game could load into a half-selected state (whenever the save had been written outside move mode, such as a turn-start autosave): the unit drew a move line when dragged, but releasing only selected it and the move had to be given again.
-- In view mode (after pressing V) dragging from a unit no longer draws a move line that nothing honoured: the base game drew the line but the release only selected the unit. A click still selects it; the Modern Control Set's move line and right-click move likewise apply only while a unit is selected to move.
-- The unit panel now always shows the unit the game is waiting on. In the base game the panel could stay on another square while that unit was already selected to move.
-- Fixed the white viewport rectangle on the minimap vanishing or freezing when scrolling, zooming, or edge-panning the map (a pre-existing PRACX bug) — it now tracks the view continuously, and is cleanly hidden at PRACX's extreme zoom-out instead of drawing as a broken partial line.
-- Fixed the map breaking up (black areas, leftover close-up terrain) when the camera jumped during another faction's turn while zoomed out far enough to see the whole map (a base-game redraw shortcut that PRACX's extended zoom-out exposed).
-- Unit flags, base icons, terrain overlays and the Planet Buster mushroom cloud now stay on the map at PRACX's deepest zoom levels (reachable at 4K and ultrawide resolutions); the game's own sprite enlarger refused anything enlarged more than four times, so they simply vanished (a base-game limit that PRACX's extra zoom exposed).
-- Fixed clicks near the edges of the screen — the world/detail minimap buttons, and the MENU and COMMLINK buttons at 4:3 and 5:4 resolutions — not registering until the mouse moved away (a pre-existing PRACX edge-scrolling bug). Map edge-scrolling still works.
-- Fixed a base-game crash in the sprite scaler: after the engine refused an oversized zoom, it was left with corrupted scale state, and a later scaled draw could read past its image and crash the game (seen as an instant exit when pressing Esc after viewing a base at high resolution).
-- Scroll bar dragging is fixed and improved (both base-game annoyances): dragging a thumb no longer loses the mouse each time the list scrolls a step, and the thumb now keeps tracking even when the mouse drifts off the bar while dragging.
-- Fixed a base-game bug in the production picker where clicks near a cell's right or bottom edge selected the neighboring item — the click areas now match the drawn cells exactly, at every resolution.
-- The mouse wheel now scrolls a list by a step (unit part pickers, the production picker, popup lists, the Load/Save list, the Datalinks category list, or an article's own text box while the cursor is over the article, the technology breakthrough window's text boxes, the base screen's BASE FACILITIES and FORCES SUPPORTED lists, and text scrollers) instead of moving the selection — PRACX had mapped wheel notches to arrow-key presses. This also works for a list popup open over the world map (e.g. the scenario editor's unit picker) while the cursor is on it, where PRACX zoomed the map instead.
-- Fixed a PRACX bug in the HQ report screens' technology and base lists: after a mouse-wheel scroll the old hover highlight stayed cached and the next mouse move could paint one entry over the top row.
-- Fixed a base-game bug in every scrolling list: moving the mouse into the band just below the last visible row painted a clipped extra entry there (seen in the HQ report screens' technology and base lists).
-- Fixed a base-game bug in the unit picker (e.g. the scenario editor's "Select unit to edit"): with only one unit on the tile it drew a stray blue button bar, a floating unit icon, and a box running off the window's right edge. A lone unit now appears as a normal one-row list, matching the multi-unit picker.
-- Fixed a base-game bug in the unit part pickers where a highlighted part stayed highlighted after the mouse left the grid until something else redrew the screen.
-- Fixed a base-game bug in the unit part pickers (chassis, weapon, armor, reactor, abilities) where the mouse hit areas sat one frame-width to the left of the drawn cells, so the right fifth of every cell picked its neighbour.
-- Fixed a base-game bug in the Datalinks where scrolling an article shifted its line breaks around and could leave raw hyperlink markup (e.g. "Collectors=90003>") as the top line of the page — articles now keep one stable layout and scroll line by line.
-- Fixed a base-game bug where every dialog opened after the scenario editor's EDIT DIPLOMACY window drew with the wrong margins and proportions (a leaked internal dialog state), until the game was restarted.
-- Fixed a base-game bug in the scenario editor where, after painting terrain (a Scroll Lock click or a Ctrl+Shift stroke), the map kept hold of the mouse: the HUD and the palette stopped responding to clicks until a popup opened or a unit was dragged.
-- Fixed a base-game bug in the scenario editor's palette where the last four tools in the right column never showed as selected after being clicked.
-- Fixed a base-game bug where the lowest line of the notification ticker above the console had the tails of its letters (g, p, y) hidden behind the console's raised posts.
-- The base-screen tutorial tours (the drone-riots DETAILS tour and the base tour) now point their pointer lines at the right element at any resolution. The drone-riots citizens-row step was also a bug in the unmodded game: at any width above 1024 it pointed to the left of the row.
-- The diplomacy faction PROFILE page's politics block no longer overlaps the leader portrait (a layout bug in the unmodded game).
+### Windows 7 Compatibility
+- Runs on Windows 7 SP1 with update KB2533623.
+- Windows 7 is a lightly tested platform. Please submit any issues to GitHub via the website.
+
+### Power-user settings
+These go under `[UIMod]` in `Alpha Centauri.ini`.
+- `SmoothPortraits=0` turns off the smooth portrait and picture enlarging.
+- `FullscreenModeSwitch=1` brings back the real monitor resolution switch in Fullscreen.
+- `DpiAware=0` leaves display scaling to Windows.
+- `SmoothScroll=0` brings back PRACX's map scrolling.
+- `BigF4Indicators=0` draws the F4 base-locator blink at its normal scaled size.
+- `UpscaledVideos=0` plays the classic movies even with the HD cinematics pack installed.
+- `EscapeHotkey=` sets the key that frees the mouse pointer and minimises the game if it stops responding. The default is Ctrl+Alt+Shift+End.
+- `MovieAudio=waveout` or `MovieAudio=off` changes how movie sound plays.
+
+### Base-game fixes
+- Cloaking Device and Deep Pressure Hull now hide units from computer players. Hidden units no longer show through go-to routes or withdrawal demands, a transport's cargo no longer gives it away, and a red mark shows which of your cloaked units have been spotted. This also works with Thinker Mod.
+- Undetected cloaked and submarine units no longer exert a zone of control that gives them away.
+- A Geosynchronous Survey Pod now lets units detect cloaked enemies anywhere in its base's radius, not just on nine specific squares around the base.
+- Air-dropping onto unseen enemy units now lands on a free square next to them and reveals them, instead of a refusal that gave their position away.
+- Bases under a Punishment Sphere or nerve staple now show the drones being suppressed.
+- Bases under a Punishment Sphere or nerve staple no longer show leftover superdrone faces.
+- The PSYCH tab no longer credits a Punishment Sphere or nerve staple to Secret Projects.
+- Fixed a crash at end of turn when a rioting base defected in a game without the Free Drones. The Free Drones' chance to win over a revolting base was inverted, about 25% instead of the documented 75%. It is now 75%.
+- Fixed the Windows 11 24H2 freeze when starting a new game, saving or loading.
+- Fixed a bug that could corrupt a running game when it was saved.
+- Holding Shift or Ctrl no longer makes the game ignore your next map click.
+- The technology breakthrough window now opens its description at the top.
+- Closing a story interlude with a key no longer flashes the game menu or needs a second press.
+- View Credits no longer plays a second copy of the menu music.
+- The in-game music no longer keeps playing over the main menu after you leave a game.
+- Large selected units now blink as a whole.
+- The unit panel no longer shows a stale "moves remaining" count after a go-to order is given up for being unreachable.
+- A loaded game no longer starts with the current unit half-selected, which ignored its first move.
+- In view mode, holding the mouse on a unit no longer draws a move line that the release ignores.
+- The unit panel now always shows the unit the game is waiting on.
+- The map no longer breaks up when the camera jumps while fully zoomed out.
+- Unit flags, base icons, terrain overlays, combat explosions and the Planet Buster cloud no longer vanish at the deepest zoom levels.
+- Scroll bar thumbs now stay with the mouse while you drag them, even if the mouse leaves the scroll field.
+- Scrolling lists no longer paint a stray row when you hover just below the last one.
+- Clicking near a cell's edge in the production picker no longer picks its neighbour.
+- In the Design Workshop's part pickers, clicking near a part's right edge no longer picks the next part, and the hover highlight clears when the mouse leaves.
+- The unit picker now draws correctly with only one unit on the square.
+- Scrolling a Datalinks article no longer shifts its line breaks or shows raw link markup.
+- The bottom line of the notification ticker is no longer cut off by the console when the notification text is long.
+- The drone-riots tutorial now points at the citizens row at every width.
+- In the scenario editor, the HUD keeps responding after you paint terrain, and every palette tool shows when it is selected.
+- Dialogs no longer draw with the wrong proportions after the scenario editor's EDIT DIPLOMACY window.
+- The Datalinks entries for Cloaking Device, Deep Pressure Hull and Deep Radar now describe how hidden units are really detected, and the Waypoints entry explains the Modern Control Set's waypoints.
+- In checkbox list popups, the right frame line no longer runs under the rows.
+
+### PRACX fixes
+- Fullscreen now keeps the mouse pointer on the game's monitor.
+- The game now fills the screen correctly at any Windows display scaling, with no compatibility setting.
+- Secret project movies once again end with the project's name and description.
+- The minimap's viewport rectangle no longer vanishes or freezes while you scroll or zoom.
+- Buttons near the screen edges now take clicks right away.
+- The mouse wheel now scrolls lists instead of moving the selection.
+- The mouse wheel over a list on top of the map now scrolls the list instead of zooming the map.
+- The HQ report screens' technology and base lists no longer paint a stray row after a mouse-wheel scroll.

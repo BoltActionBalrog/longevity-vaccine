@@ -95,6 +95,8 @@ def test_pack_on_disk_ignores_the_players_folder_and_the_readme(tmp_path):
     assert not inst.pack_on_disk(tmp_path, "portraits-hd")
     (tmp_path / "portraits" / "hd").mkdir()
     (tmp_path / "portraits" / "hd" / "gaians.png").write_bytes(b"pack")
+    assert not inst.pack_on_disk(tmp_path, "portraits-hd")          # no manifest: not the pack (as the game sees it)
+    (tmp_path / "portraits" / "hd" / "pack-manifest.json").write_text("{}", encoding="utf-8")
     assert inst.pack_on_disk(tmp_path, "portraits-hd")
 
 
@@ -136,6 +138,9 @@ def test_the_release_spec_ships_the_pack_to_portraits_hd_and_the_readme_with_bas
     assert ("work/art/portraits-README.txt", "portraits/" + inst.PORTRAITS_README) in rel.MODULE_SPEC["base"]["files"]
 
 
+_PROV = (_REPO / "work" / "art" / "portraits-hd-PROVENANCE.txt").read_bytes()
+
+
 def _built_pack(tmp_path: Path) -> Path:
     d = tmp_path / "portraits-hd"
     d.mkdir()
@@ -145,8 +150,7 @@ def _built_pack(tmp_path: Path) -> Path:
         p.write_bytes(fac.encode() * 10)
         files.append({"name": p.name, "size": p.stat().st_size, "sha256": bph.sha256_file(p)})
     (d / bph.MANIFEST).write_text(json.dumps({"files": files}), encoding="utf-8")
-    (d / bph.PROVENANCE).write_text("Art by Turovetsky\nhttps://www.youtube.com/@Turovetsky\nhttps://x.com/turovetsky\n",
-                                    encoding="utf-8")
+    (d / bph.PROVENANCE).write_bytes(_PROV)                     # the tracked text, word for word
     return d
 
 
@@ -154,7 +158,8 @@ def test_release_accepts_exactly_the_built_pack(tmp_path):
     rel._check_portrait_pack(_built_pack(tmp_path))
 
 
-@pytest.mark.parametrize("damage", ["stray", "missing", "edited", "no_credit", "credit_without_links"])
+@pytest.mark.parametrize("damage", ["stray", "missing", "edited", "no_credit", "credit_without_links",
+                                    "provisional_licence"])
 def test_release_refuses_anything_else(tmp_path, damage):
     d = _built_pack(tmp_path)
     if damage == "stray":
@@ -167,22 +172,27 @@ def test_release_refuses_anything_else(tmp_path, damage):
         (d / bph.PROVENANCE).write_text("  ", encoding="utf-8")
     elif damage == "credit_without_links":
         (d / bph.PROVENANCE).write_text("Art by Turovetsky", encoding="utf-8")
+    elif damage == "provisional_licence":
+        # a pack built before the artist confirmed the licence (2026-11-06) never ships: the shipped PROVENANCE
+        # must be the tracked text word for word
+        (d / bph.PROVENANCE).write_bytes(_PROV.replace(b"Confirmed by the artist", b"Assumed, not yet confirmed"))
     with pytest.raises(ValueError):
         rel._check_portrait_pack(d)
 
 
 def test_the_installer_credits_the_artist():
-    """The pack's credit stays wherever the pack goes (the installer's line, shown only with the pack installed;
-    the pack's provenance). The player-portrait guide shipped to EVERY install says nothing of the pack while it is
-    withheld (user 2026-11-04: the artist's licence has not arrived); restoring the pack restores the guide's pack
-    sections and their credit (ACTION_ITEMS: the pack is off the website and the guide)."""
+    """The pack is released (the artist confirmed licence, credit and distribution 2026-11-06): the guide every
+    install gets names it and credits the artist again, and the provenance it ships with is no longer provisional."""
     assert "Turovetsky" in inst.PORTRAIT_ART_CREDIT
     assert "youtube.com/@Turovetsky" in inst.PORTRAIT_ART_CREDIT and "x.com/turovetsky" in inst.PORTRAIT_ART_CREDIT
-    prov = (_REPO / "work" / "art" / "portraits-hd-PROVENANCE.txt").read_text(encoding="utf-8")
-    assert "Turovetsky" in prov and "youtube.com/@Turovetsky" in prov and "x.com/turovetsky" in prov
     readme = (_REPO / "work" / "art" / "portraits-README.txt").read_text(encoding="utf-8")
-    for gone in ("Turovetsky", "HD Portrait Pack", "portraits\\hd"):
-        assert gone not in readme, gone
+    prov = (_REPO / "work" / "art" / "portraits-hd-PROVENANCE.txt").read_text(encoding="utf-8")
+    for text in (readme, prov):
+        assert "Turovetsky" in text and "youtube.com/@Turovetsky" in text and "x.com/turovetsky" in text
+    assert "Turovetsky's HD Portrait Pack" in readme and "portraits\\hd" in readme
+    for text in (readme, prov):
+        assert "Longevity HD Portrait Pack" not in text            # renamed 2026-11-06 (user)
+    assert "provisional" not in prov.lower() and "GPL-3.0-or-later" in prov and "Confirmed by the artist" in prov
 
 
 def _junction(link: Path, target: Path) -> bool:
@@ -234,12 +244,40 @@ def test_release_refuses_to_reuse_a_stale_portrait_archive(tmp_path, monkeypatch
     d.mkdir(parents=True)
     (d / "gaians.png").write_bytes(b"new crop")
     archive = _zip(tmp_path / "LV-portraits-hd-0.1.0.zip", {"portraits/hd/gaians.png": b"old crop",
-                                                         "portraits/hd/pack-manifest.json": b"{}"})
+                                                         "portraits/hd/pack-manifest.json": b"{}",
+                                                         "portraits/hd/PROVENANCE.txt": _PROV})
     monkeypatch.setattr(rel, "_REPO", tmp_path)
     with pytest.raises(SystemExit, match="Bump MODULE_VERSIONS"):
         rel._check_reused_portrait_pack(archive, "0.1.0")
     (d / "gaians.png").write_bytes(b"old crop")
     (d / "pack-manifest.json").write_bytes(b"{}")
+    (d / "PROVENANCE.txt").write_bytes(_PROV)
     rel._check_reused_portrait_pack(archive, "0.1.0")          # identical: reused silently
-    bare = _zip(tmp_path / "LV-portraits-hd-0.2.0.zip", {"x.bin": b"x"})
+    bare = _zip(tmp_path / "LV-portraits-hd-0.2.0.zip", {"x.bin": b"x", "PROVENANCE.txt": _PROV})
     rel._check_reused_portrait_pack(bare, "0.2.0")             # no manifest: not built from a pack folder
+
+
+@pytest.mark.parametrize("folder", [True, False])
+def test_a_reused_archive_with_an_old_provenance_never_ships(tmp_path, monkeypatch, folder):
+    """Audit 2026-11-06: the reuse path checked only that the archive matched dist\\portraits-hd, and nothing at
+    all without that folder -- so an archive built from the PROVISIONAL provenance could be reused into a signed
+    manifest. Its own PROVENANCE.txt must be the tracked one, folder or not; none at all is refused too."""
+    monkeypatch.setattr(rel, "_REPO", tmp_path)
+    old = _PROV.replace(b"Confirmed by the artist", b"PROVISIONAL, not yet confirmed by the artist")
+    assert old != _PROV
+    members = {"portraits/hd/gaians.png": b"g", "portraits/hd/pack-manifest.json": b"{}",
+               "portraits/hd/PROVENANCE.txt": old}
+    if folder:
+        d = tmp_path / "dist" / "portraits-hd"
+        d.mkdir(parents=True)
+        for k, v in members.items():
+            (d / k.rsplit("/", 1)[1]).write_bytes(v)                # the folder matches the archive exactly
+    with pytest.raises(SystemExit, match="REFUSING to reuse"):
+        rel._check_reused_portrait_pack(_zip(tmp_path / "a.zip", members), "1.0.0")
+    del members["portraits/hd/PROVENANCE.txt"]
+    with pytest.raises(SystemExit, match="no PROVENANCE"):
+        rel._check_reused_portrait_pack(_zip(tmp_path / "b.zip", members), "1.0.0")
+
+
+# The artist-credit check for the pack's GitHub release page lives in test_publish.py: publish.py is
+# operator tooling that the public source tree does not carry, and this module is exported.

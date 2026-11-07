@@ -76,7 +76,7 @@ def test_a_pack_the_player_does_not_have():
     doc = _doc(base="1.0.0", **{"portraits-hd": "1.0.0"})
     code, lines = _report(doc, _state())
     assert code == ix.CHECK_UPDATES
-    assert lines == ["latest=1.0.0", f"new=portraits-hd|Longevity HD Portrait Pack|1.0.0|{1300 << 20}"]
+    assert lines == ["latest=1.0.0", f"new=portraits-hd|Turovetsky's HD Portrait Pack|1.0.0|{1300 << 20}"]
 
 
 def test_everything_at_once_in_a_fixed_order():

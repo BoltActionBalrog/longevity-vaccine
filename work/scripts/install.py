@@ -24,8 +24,10 @@ import hashlib
 import os
 import re
 import shutil
+import contextlib
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -199,30 +201,6 @@ def _overlay_of(spec):
                  if t.launch and t.requires_files and t.base_md5 == spec.base_md5 and t.id != spec.id), None)
 
 
-def _thinker_needs_renaming(target: Path, spec) -> bool:
-    """True when thinker.dll sits beside a PRACX exe that Thinker's launcher will never start AND no
-    file of the launcher's name in the folder is PRACX already (clean, ours, or ours with its .bak).
-    With such a file present the folder is already set up for Thinker; a second PRACX exe under
-    another name is just a plain install beside it (audit 2026-10-29: the note contradicted the
-    line printed for terranx.exe two lines earlier)."""
-    ov = _overlay_of(spec)
-    if ov is None or not ov.exe or target.name.lower() == ov.exe.lower():
-        return False
-    other = target.parent / ov.exe
-    if not other.is_file():
-        return True
-    known = {ov.base_md5} | ov.builds | spec.builds
-    try:
-        if _md5_safe(other, changed=False) in known:
-            return False
-        obak = other.with_suffix(other.suffix + ".bak")
-        if obak.is_file() and _md5_safe(obak, changed=False) == ov.base_md5:
-            return False
-    except Exception:  # noqa: BLE001 - a note must never fail the install
-        return True
-    return True
-
-
 # ---- setting a folder up for Thinker ----------------------------------------------------------
 # Thinker's launcher starts a file named terranx.exe and nothing else, and on a stock GOG
 # Planetary Pack that name is the ORIGINAL game (no PRACX) while the PRACX build is
@@ -230,8 +208,8 @@ def _thinker_needs_renaming(target: Path, spec) -> bool:
 # and the mod never loads. The installer sets the folder up itself: the original terranx.exe is
 # kept under a clear name (never deleted), a copy of the clean PRACX build takes its place, and
 # the normal pass then patches it as the PRACX + Thinker configuration. A record file says what
-# was done, so --uninstall puts the original back and a later run neither asks again nor backs
-# the original up a second time. Every later step first reads the folder as it IS (GOG's "verify
+# was done, so --uninstall puts the original back and a later run neither redoes it nor backs
+# the original up a second time. Nothing is asked (user 2026-11-06): the swap is reversible. Every later step first reads the folder as it IS (GOG's "verify
 # files" may have put the original back, Thinker may be gone, the player may have renamed
 # things): it acts on the record only while the set-up is still in effect.
 #
@@ -348,11 +326,6 @@ def _setup_in_effect(game_dir: Path) -> bool:
             and _ours_in_setup(game_dir, ov))
 
 
-#: Set once the Thinker section has explained the folder, so patch_target does not add a
-#: contradicting "rename it" note under it.
-_THINKER_EXPLAINED = False
-
-
 def _backup_name(game_dir: Path, ov, md5: str) -> Path:
     stem, suf = os.path.splitext(ov.exe)
     plain = game_dir / f"{stem}{THINKER_ORIGINAL_STEM}{suf}"
@@ -364,109 +337,345 @@ def _backup_name(game_dir: Path, ov, md5: str) -> Path:
     return game_dir / f"{stem}{THINKER_ORIGINAL_STEM}-{md5[:8]}{suf}"
 
 
-def _ask_yes(question: str, default_yes: bool, title: str) -> bool:
-    try:
-        ans = ix.ask(question + (" [Y/n] " if default_yes else " [y/N] "), title=title).strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return ans in (("", "y", "yes") if default_yes else ("y", "yes"))
-
-
 def _plain_name(src: Path) -> str:
     return src.name[:-4] if src.name.lower().endswith(".bak") else src.name
 
 
 def plan_thinker_setup(game_dir: Path, args):
-    """Decide -- asking at a console -- what the install does about Thinker. Writes nothing (the
-    install applies the plan just before it patches, after every question). The plan, or None:
+    """Decide what the install does about Thinker. Asks nothing (user 2026-11-06) and writes
+    nothing (the install applies the plan just before it patches, after every question). The plan,
+    or None:
 
     * {"action": "setup", ...}: thinker.dll beside a PRACX build that Thinker's launcher would never
-      start. Default yes; default NO for an original it does not recognise; unattended it sets up
-      a folder whose terranx.exe is missing or the stock original and leaves an unrecognised one
-      alone. Never over a terranx.exe.bak another tool made.
+      start: the stock original, one GOG put back, none at all, or one the installer does not
+      recognise (kept under a hashed name) -- all set up, console or not. terranx.exe.bak follows
+      the backup rule (`_backup_kind`): GOG's original is accepted (`gog_bak`), a build of ours is
+      dropped (`drop_bak`); any other stops the whole install.
+    * {"action": "aside", ...}: already PRACX, only a spare terranx.exe.bak to move or drop.
     * {"action": "release"}: a folder the installer set up whose set-up is no longer in effect and
-      will not be redone -- Thinker removed, or the original back and the player said no: the
+      will not be redone -- Thinker removed from the folder: the
       original goes back and the record goes, so the plain install that follows never swaps it out.
+
+    Raises the red refusal (nothing written) for a foreign terranx.exe.bak, and for a set-up folder
+    whose terranx.exe is neither the file the set-up put there nor the original it kept: a Thinker
+    player asked for Thinker, and the plain build is not that (user 2026-11-06).
     """
-    global _THINKER_EXPLAINED
     game_dir = Path(game_dir)
     ov = _thinker_overlay()
     if ov is None:
         return None
     record = _read_setup(game_dir)
-    ask = ix.can_ask() and not ix.is_worker() and not getattr(args, "no_prompt", False)
-    _THINKER_EXPLAINED = _thinker_here(game_dir, ov)
-    release = {"action": "release", "game_dir": game_dir}
-    if not _thinker_here(game_dir, ov):
-        if not record:
-            return None
-        ix.say("\n--- Thinker ---")
-        ix.say("  Thinker is no longer in this folder, which the installer had set up for it: the installer undoes that set-up (see below), and the mod is installed for PRACX without Thinker.")
-        return release
+    thinker_here = _thinker_here(game_dir, ov)
+    if not thinker_here and not record:
+        return None
     live = game_dir / ov.exe
-    src = _pracx_source(game_dir, ov)
-    if src is None:
-        return None                       # no PRACX build here to set up from
-    md5 = _md5_or_none(live)
-    if md5 in _pracx_family(ov) or _ours_in_setup(game_dir, ov):
-        _THINKER_EXPLAINED = False
-        return None                       # already PRACX: clean, or one of ours (any release)
+    # terranx.exe.bak FIRST, whatever terranx.exe is: the patch pass writes its own backup under
+    # that name only when the name is free, and otherwise keeps what is there -- so a foreign .bak
+    # beside a clean PRACX terranx.exe would be patched over and leave a build with no backup the
+    # installer can trust (the next run calls it unknown; --uninstall cannot restore it). A .bak that
+    # is GOG's original byte for byte is a spare copy of a file the set-up keeps anyway: accepted
+    # without a word (apply removes the duplicate, or sets a non-duplicate aside, named in the
+    # record). Anything else is a file nobody can vouch for: the whole install stops, before
+    # anything is written (user 2026-11-05). Checked before the Thinker-removed shape too: the
+    # revert can leave terranx.exe a clean PRACX copy that the pass then patches.
+    # This is the backup rule (`_backup_kind`) applied to the exe Thinker starts, with the set-up's
+    # record: a build of ours under that name is dropped (reproducible; the pass writes a fresh one).
     bak = live.with_suffix(live.suffix + ".bak")
     bak_md5 = _md5_or_none(bak)
-    if bak_md5 is not None and bak_md5 != ov.base_md5:
+    gog_bak = drop_bak = None
+    if bak_md5 is not None:
+        kind = _backup_kind(bak_md5, ov.base_md5)
+        if kind == "gog":
+            gog_bak = bak
+        elif kind == "ours":
+            drop_bak = bak
+        elif kind == "foreign":
+            raise _foreign_backup(bak)
+    if not thinker_here:
         ix.say("\n--- Thinker ---")
-        ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and this folder also has a {bak.name} that this installer did not make, so it does not set the folder up for Thinker. Move {bak.name} out of the folder and run the installer again to set it up.")
-        return release if record else None
+        ix.say("  Thinker is no longer in this folder, which the installer had set up for it: the installer undoes that set-up (see below), and the mod is installed for PRACX without Thinker.")
+        return {"action": "release", "game_dir": game_dir}   # a GOG/ours .bak: plan_backups, after the revert
+    md5 = _md5_or_none(live)
+    if md5 in _pracx_family(ov) or _ours_in_setup(game_dir, ov):
+        if md5 != ov.base_md5:
+            # A build of ours whose backup is GOG's copy or another build of ours: nothing the pass
+            # can patch (no clean base anywhere under this name), so the spare is left where it is
+            # -- moving or dropping it would be a write before the "nothing to patch" error.
+            gog_bak = drop_bak = None
+        if gog_bak is not None or drop_bak is not None:
+            # Already PRACX, with a spare under the name the patch pass needs: GOG's copy set
+            # aside, a build of ours dropped (apply), nothing else to set up.
+            return {"action": "aside", "game_dir": game_dir, "ov": ov, "gog_bak": gog_bak,
+                    "drop_bak": drop_bak, "record": record}
+        return None                       # already PRACX: clean, or one of ours (any release)
     restored_by_gog = bool(record) and md5 is not None and (
         md5 == record.get("original_md5") or md5 in _stock_original_hashes())
     if record and md5 is not None and not restored_by_gog:
         # The folder was set up, and its terranx.exe is now neither ours nor the recorded original
         # (with no clean-base .bak beside it, or _ours_in_setup would have said so). Setting up
-        # over it would replace the record's pointer to the real original: never.
-        kept = record.get("backup")
-        ix.say("\n--- Thinker ---")
-        ix.say(f"  {ov.exe} has been replaced since the installer set this folder up for Thinker, so it is left as it is" + (f" (the original is still {kept})" if kept and (game_dir / kept).is_file() else "") + ": the mod is installed for PRACX without Thinker, so Thinker will not load it.")
-        return None
+        # over it would replace the record's pointer to the real original, and installing the
+        # plain build beside it would not be what a Thinker player asked for: the whole install
+        # stops, before anything is written (user 2026-11-06), whether or not there is a PRACX
+        # copy to set up from. --uninstall leaves this terranx.exe too, so the remedy is the file.
+        raise _replaced_exe(game_dir, ov.exe, record)
+    src = _pracx_source(game_dir, ov)
+    if src is None:
+        return None                       # no PRACX build here to set up from
     backup = None
+    # For the one line only: GOG's own exe (or none). A recorded original GOG did NOT write (the
+    # player's own build, copied back by hand) is restored_by_gog for the flow, not "vanilla".
+    vanilla = md5 is None or md5 in _stock_original_hashes()
     if md5 is not None:
-        known = md5 in _stock_original_hashes() or restored_by_gog
-        if not known and bak_md5 == ov.base_md5:
-            _THINKER_EXPLAINED = False
+        if not vanilla and not restored_by_gog and bak_md5 == ov.base_md5:
             return None                   # ours under another build: patch_target re-patches it
         backup = _backup_name(game_dir, ov, md5)
-    elif record.get("backup") and (game_dir / record["backup"]).is_file():
-        # A set-up that stopped between its two steps: the original is already kept.
-        known = True
-    else:
-        known = True
-
-    ix.say("\n--- Thinker ---")
-    if md5 is None:
-        ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and there is none in this folder.")
-        ix.say(f"  The installer can put a copy of {_plain_name(src)} there as {ov.exe}.")
-    elif known:
-        why = ("the original game is back in its place (GOG may have restored it)" if restored_by_gog
-               else f"the {ov.exe} here is the original game without PRACX, so the mod would never load")
-        ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and {why}.")
-        if _keeps_record(game_dir, record, md5):
-            ix.say(f"  The installer can keep this {ov.exe} (GOG's copy) as {backup.name} and put a copy of {_plain_name(src)} in its place; --uninstall puts your earlier {ov.exe} ({record['backup']}) back.")
-        else:
-            ix.say(f"  The installer can keep the original as {backup.name} and put a copy of {_plain_name(src)} in its place as {ov.exe}; --uninstall puts the original back.")
-    else:
-        ix.say(f"  thinker.dll is here, but Thinker starts only a file named {ov.exe}, and the {ov.exe} here is a version the installer does not recognise (MD5 {md5}).")
-        ix.say(f"  The installer can keep it as {backup.name} and put a copy of {_plain_name(src)} in its place as {ov.exe}; --uninstall puts it back.")
-    if ask:
-        if not _ask_yes("Set this folder up to play with Thinker?", default_yes=known, title="Thinker"):
-            ix.say("  Left as it is: the mod is installed for PRACX without Thinker. Run the installer again to set up Thinker later.")
-            return release if record else None
-    elif not known:
-        ix.say(f"  Left as it is, because that {ov.exe} is not one the installer recognises. Run the installer by double-clicking INSTALL.bat to choose.")
-        return release if record else None
-    else:
-        ix.say("  Setting it up (this run asks nothing).")
+    # No question (user 2026-11-06): Thinker starts terranx.exe and nothing else, the swap is the
+    # one way to play Thinker with the mod, and it is reversible (the original is kept; --uninstall
+    # puts it back) -- so it simply happens, a terranx.exe the installer does not recognise
+    # included (kept under a hashed _original name). apply says what it did, in one line.
     return {"action": "setup", "game_dir": game_dir, "ov": ov, "live": live, "src": src,
-            "backup": backup, "md5": md5, "record": record,
-            "keep_record": _keeps_record(game_dir, record, md5)}
+            "backup": backup, "md5": md5, "record": record, "gog_bak": gog_bak, "drop_bak": drop_bak,
+            "vanilla": vanilla, "keep_record": _keeps_record(game_dir, record, md5)}
+
+
+#: The refusal for a <exe>.bak that is none of: the clean base, GOG's original, a build of ours.
+#: The user's wording (2026-11-05), shown in red; the install stops before any write.
+FOREIGN_BACKUP_TEXT = (
+    "Your game installation folder has an unrecognized {name} file. This should only happen if you "
+    "edited that file by hand. Longevity Vaccine cannot install over it. To install, verify that you "
+    "do not need {name} and delete it, then re-run this installer. Your game was not modified.")
+
+#: The refusal for a Thinker folder the installer set up whose terranx.exe is now neither the file
+#: the set-up put there nor the original it kept (user 2026-11-06: a Thinker player asked for
+#: Thinker; installing the plain build instead is not an install). Same shape as the .bak refusal.
+#: {was} is the original clause: ", and it is not the original that install kept" + " as <name>"
+#: while that file is still there and unchanged (""), or " (there was no <name> before it)" for a
+#: set-up that found none.
+REPLACED_EXE_TEXT = (
+    "Your game installation folder was set up for Thinker by an earlier Longevity Vaccine install, but "
+    "its {name} is no longer the file that install put there{was}. This should only happen if you "
+    "replaced that file by hand. Longevity Vaccine cannot install over it. To install, verify that you "
+    "do not need the current {name} and delete it, then re-run this installer. Your game was not modified.")
+
+
+def _refusal(text: str) -> "ix.InstallerError":
+    """A refusal in the user's shape: red, the install stops before any write, the window waits
+    for any key; no second disk line (the text itself says the game was not modified)."""
+    return ix.InstallerError(text, code=ix.EXIT_ABORTED, changed=False, title="INSTALLATION FAILED",
+                             red=True, disk_note=False, any_key=True)
+
+
+def _foreign_backup(bak: Path) -> "ix.InstallerError":
+    return _refusal(FOREIGN_BACKUP_TEXT.format(name=bak.name))
+
+
+def _replaced_exe(game_dir: Path, exe: str, record: dict) -> "ix.InstallerError":
+    kept = record.get("backup")
+    if not kept:
+        was = f" (there was no {exe} before it)"
+    else:
+        still = record.get("original_md5") and _md5_or_none(Path(game_dir) / kept) == record["original_md5"]
+        was = ", and it is not the original that install kept" + (f" as {kept}" if still else "")
+    return _refusal(REPLACED_EXE_TEXT.format(name=exe, was=was))
+
+
+# ---------------------------------------------------------------- the backup rule
+#
+# ONE rule for every exe the patch pass writes (its bytes are a clean shipping base, so the pass
+# backs it up under <exe>.bak -- and keeps whatever already sits under that name). What may sit
+# there: nothing, or that clean base -- fine. GOG's original game exe (an old tool's backup) is
+# set aside under an _original name, or dropped when the folder keeps that copy already; a build
+# of ours is dropped (it is remade from the clean base at will, as patch_target does). Anything
+# else is a file nobody can vouch for: the install stops before any write, in the user's words.
+# Without this the pass patched over such a .bak and left a build no later run could recognise
+# and no --uninstall could restore. plan_thinker_setup applies the rule to the exe Thinker starts
+# (with the set-up's record); plan_backups applies it to every other exe the pass will patch.
+
+def _backup_kind(bak_md5: str, base_md5: str) -> str:
+    """What a <exe>.bak beside an exe of base `base_md5` is: "clean" (that base), "gog" (the stock
+    original game exe), "ours" (a build this project made from that base: any release, any
+    configuration), or "foreign"."""
+    if bak_md5 == base_md5:
+        return "clean"
+    if bak_md5 in _stock_original_hashes():
+        return "gog"
+    if bak_md5 in ap.builds_on_base(_targets(), base_md5):
+        return "ours"
+    return "foreign"
+
+
+def plan_backups(game_dir: Path, candidates: list, thinker_plan) -> list:
+    """Decide what the install does about the <exe>.bak of every exe the pass will patch. Writes
+    nothing; raises the refusal now, before any write. Returns the items apply_backup_plan carries
+    out just before the pass: {"bak", "md5", "base_md5", "kind", "aside_to"} per spare .bak (GOG's
+    copy moved to `aside_to`, or dropped when None; a build of ours dropped).
+
+    The exe Thinker starts is the Thinker plan's business whenever there is one (it already applied
+    this rule to it); after a set-up the pass patches only that exe, so nothing else is checked."""
+    if thinker_plan and thinker_plan["action"] == "setup":
+        return []
+    game_dir = Path(game_dir)
+    ov = _thinker_overlay()
+    beside = ap.folder_files(game_dir)
+    out = []
+    for p in candidates:
+        if thinker_plan and ov is not None and p.name.lower() == ov.exe.lower():
+            continue
+        md5 = _md5_or_none(p)
+        if md5 is None:
+            continue
+        try:
+            spec = ap.resolve_target(md5, targets=_targets(), launch_only=True, present_files=beside,
+                                     exe_name=p.name)
+        except ap.UnsupportedBase:
+            continue                      # not a clean base: the pass does not back this exe up
+        bak = p.with_suffix(p.suffix + ".bak")
+        bak_md5 = _md5_or_none(bak)
+        if bak_md5 is None:
+            continue
+        kind = _backup_kind(bak_md5, spec.base_md5)
+        if kind == "clean":
+            continue
+        if kind == "foreign":
+            raise _foreign_backup(bak)
+        aside_to = None
+        if kind == "gog":
+            # ov is not None: the stock hashes come from it. A copy the folder keeps already --
+            # the stock exe under its own name, or at the _original name -- makes this a duplicate.
+            aside_to = _backup_name(game_dir, ov, bak_md5)
+            if _md5_or_none(game_dir / ov.exe) == bak_md5 or _md5_or_none(aside_to) == bak_md5:
+                aside_to = None
+            elif aside_to.exists():
+                # Both _original names taken by other files: said now, with nothing written, not
+                # at apply after the questions.
+                raise ix.InstallerError(
+                    f"{bak.name} could not be moved out of the way.",
+                    detail=f"  {aside_to.name} is already there and is a different file", code=ix.EXIT_ABORTED,
+                    changed=False, remedy=f"move {bak.name} out of the game folder yourself, then run the installer again.")
+        out.append({"bak": bak, "md5": bak_md5, "base_md5": spec.base_md5, "kind": kind,
+                    "aside_to": aside_to})
+    return out
+
+
+def _backup_still_as_planned(bak: Path, md5: str, base_md5: str) -> bool:
+    """At apply: is this planned .bak still what the plan saw? False when it is gone or the clean
+    base is back under its name (nothing to do); raises the refusal for anything else -- a file
+    swapped in since the plan is nobody's to vouch for."""
+    now = _md5_or_none(bak)
+    if now is None or now == base_md5:
+        return False
+    if now != md5:
+        raise _foreign_backup(bak)
+    return True
+
+
+def recheck_planned_backups(plan: list, thinker_plan) -> None:
+    """Before the first write of the install: every .bak the two plans will move or drop is hashed
+    again, so a refusal for one swapped since the plan comes before ANY drop (a dropped duplicate
+    cannot be undone, and the refusal's text says the game was not modified)."""
+    for item in plan:
+        _backup_still_as_planned(item["bak"], item["md5"], item["base_md5"])
+    if thinker_plan and thinker_plan["action"] in ("aside", "setup"):
+        ov = thinker_plan["ov"]
+        for key, kind in (("gog_bak", "gog"), ("drop_bak", "ours")):
+            bak = thinker_plan.get(key)
+            if bak is not None:
+                now = _md5_or_none(bak)
+                if now is not None and now != ov.base_md5 and _backup_kind(now, ov.base_md5) != kind:
+                    raise _foreign_backup(bak)
+
+
+def apply_backup_plan(plan: list) -> list:
+    """Carry plan_backups' plan out, just before the patch pass (recheck_planned_backups first, so
+    a swapped .bak is refused before anything is dropped; the check here is the belt to that brace).
+    Returns the moves made as [(aside_to, bak)], for undo_backup_moves should a later step fail
+    before the pass. Fails with the moves undone when a file cannot be moved."""
+    moves = []
+    for item in plan:
+        bak, aside_to = item["bak"], item["aside_to"]
+        try:
+            if not _backup_still_as_planned(bak, item["md5"], item["base_md5"]):
+                continue
+        except ix.InstallerError:
+            undo_backup_moves(moves)
+            raise
+        now = item["md5"]
+        try:
+            if item["kind"] == "ours":
+                bak.unlink()
+                line = f"  {bak.name} (a Longevity Vaccine build) was removed; the installer writes a fresh backup"
+            elif aside_to is None:
+                bak.unlink()              # a spare copy of a file the folder keeps: without a word
+                line = None
+            elif _md5_or_none(aside_to) == now:
+                bak.unlink()              # kept there since the plan (a second spare, say): a duplicate
+                line = None
+            else:
+                if aside_to.exists():
+                    raise OSError(f"{aside_to.name} is already there and is a different file")
+                os.replace(bak, aside_to)
+                moves.append((aside_to, bak))
+                line = f"  {bak.name} (GOG's original) is kept as {aside_to.name} (delete it if you do not need it)"
+        except OSError as e:
+            undo_backup_moves(moves)
+            raise ix.InstallerError(
+                f"{bak.name} could not be moved out of the way.",
+                detail=f"  {type(e).__name__}: {e}", code=ix.EXIT_ABORTED, changed=False,
+                remedy=f"move {bak.name} out of the game folder yourself, then run the installer again.")
+        if line:
+            ix.say(f"\n--- {bak.name} ---")
+            ix.say(line)
+    return moves
+
+
+def undo_backup_moves(moves: list) -> None:
+    """Put set-aside backups back where they were (a later step failed before the pass)."""
+    for aside_to, bak in reversed(moves):
+        try:
+            if not bak.exists():
+                os.replace(aside_to, bak)
+        except OSError:
+            pass
+
+
+def _aside_name_for(game_dir: Path, ov, gog_md5: str, taken: Path = None) -> Path:
+    """Where GOG's spare copy goes: the _original name when free (or already that file), else a
+    hashed one; never the name the set-up is giving the live file (`taken`)."""
+    stem, suf = os.path.splitext(ov.exe)
+    aside = _backup_name(game_dir, ov, gog_md5)
+    if taken is not None and aside == taken:
+        aside = game_dir / f"{stem}{THINKER_ORIGINAL_STEM}-{gog_md5[:8]}{suf}"
+    return aside
+
+
+def _set_gog_backup_aside(game_dir: Path, ov, gog_bak: Path, aside_to: Path, gog_md5: str) -> str:
+    """Move GOG's spare terranx.exe.bak to `aside_to`, or drop it when `aside_to` already IS that
+    file. Returns "moved" / "dropped". Re-checks the bytes first: a file swapped in since the plan
+    is refused like any other foreign .bak (nothing written yet). Raises OSError on a clash."""
+    now = _md5_or_none(gog_bak)
+    if now != gog_md5 or now not in _stock_original_hashes():
+        raise _foreign_backup(gog_bak)
+    if aside_to.exists():
+        if _md5_or_none(aside_to) == gog_md5:
+            gog_bak.unlink()
+            return "dropped"
+        raise OSError(f"{aside_to.name} is already there and is a different file")
+    os.replace(gog_bak, aside_to)
+    return "moved"
+
+
+def _drop_our_backup(bak: Path, ov) -> bool:
+    """Drop a terranx.exe.bak that is a build of ours (planned so). Hashed again first: gone, or
+    the clean base back under the name -> nothing to do; anything else -> refused like any other
+    foreign .bak (swapped since the plan; nothing of ours written yet). True when dropped."""
+    now = _md5_or_none(bak)
+    if now is None or now == ov.base_md5:
+        return False
+    if _backup_kind(now, ov.base_md5) != "ours":
+        raise _foreign_backup(bak)
+    bak.unlink()
+    ix.say(f"  {bak.name} (a Longevity Vaccine build) was removed; the installer writes a fresh backup")
+    return True
 
 
 def _keeps_record(game_dir: Path, record: dict, md5) -> bool:
@@ -489,6 +698,31 @@ def apply_thinker_setup(plan) -> bool:
     if plan["action"] == "release":
         revert_thinker_setup(game_dir, remedy="close Alpha Centauri and Thinker if they are running, then run the installer again.")
         return False
+    if plan["action"] == "aside":
+        # terranx.exe is already PRACX; only a spare terranx.exe.bak is in the way of the patch
+        # pass's own backup: a build of ours is dropped; GOG's copy is set aside (or a duplicate
+        # dropped) and named; a record, when there is one, names it too for --uninstall.
+        ov, gog_bak, record = plan["ov"], plan["gog_bak"], plan["record"]
+        if plan.get("drop_bak") is not None:
+            _drop_our_backup(plan["drop_bak"], ov)
+        if gog_bak is None:
+            return False
+        gog_md5 = _md5_or_none(gog_bak)
+        if gog_md5 is None:
+            return False                              # gone since the plan: nothing to do
+        aside_to = _aside_name_for(game_dir, ov, gog_md5)
+        try:
+            how = _set_gog_backup_aside(game_dir, ov, gog_bak, aside_to, gog_md5)
+            if how == "moved" and record:
+                _write_setup(game_dir, {**record, "set_aside": (record.get("set_aside") or []) + [aside_to.name]})
+        except OSError as e:
+            raise ix.InstallerError(
+                f"{gog_bak.name} (GOG's original) could not be moved out of the way.",
+                detail=f"  {type(e).__name__}: {e}", code=ix.EXIT_ABORTED, changed=False,
+                remedy=f"move {gog_bak.name} out of the game folder yourself, then run the installer again.")
+        ix.say(f"  the {gog_bak.name} that was here (GOG's original) is "
+               + (f"kept as {aside_to.name}" if how == "moved" else f"a duplicate of {aside_to.name}: removed"))
+        return False
     ov, live, src = plan["ov"], plan["live"], plan["src"]
     backup, md5, record = plan["backup"], plan["md5"], plan["record"]
     # The copy, then the patch pass: its .bak and its temporary build.
@@ -509,27 +743,91 @@ def apply_thinker_setup(plan) -> bool:
     # set-up): the live file is a duplicate, so it is simply replaced -- never renamed over the
     # kept one, which a failure could then not undo.
     kept_already = backup is not None and _md5_or_none(backup) == md5
+    # A terranx.exe.bak that is GOG's original (plan_thinker_setup accepted it): the set-up's own
+    # backup needs that name (the patch pass writes it, and only when it is free). A duplicate of
+    # the original being kept goes; anything else is set aside under an _original name and
+    # recorded, so --uninstall names it. Done AFTER the live file is kept and BEFORE the copy
+    # lands, so a failure undoes it along with the rest.
+    gog_bak = plan.get("gog_bak")
+    gog_md5 = _md5_or_none(gog_bak) if gog_bak is not None else None
+    if gog_md5 is not None and gog_md5 not in _stock_original_hashes():
+        raise _foreign_backup(gog_bak)                # swapped since the plan: nothing written yet
+    # Where the spare goes, decided before the record is written: a duplicate of the live file
+    # (kept as `backup` in a moment) or of a copy already at the _original name is dropped;
+    # anything else is set aside and the record names it.
+    aside_to = None
+    if gog_md5 is not None and gog_md5 != md5:
+        aside_to = _aside_name_for(game_dir, ov, gog_md5, taken=backup)
+        if aside_to.exists() and _md5_or_none(aside_to) == gog_md5:
+            aside_to = None                           # already kept there: the .bak is a duplicate
+    extra_aside = [aside_to.name] if aside_to is not None else []
     moved = False
+    dropped = False
+    moved_aside = False
+    dropped_ours = False
     try:
+        # A build of ours under the name the pass needs for its backup: dropped first (the rule;
+        # remade from the clean base by the pass that follows).
+        if plan.get("drop_bak") is not None:
+            dropped_ours = _drop_our_backup(plan["drop_bak"], ov)
         shutil.copy2(src, tmp)
         if _md5(tmp) != ov.base_md5:
             raise OSError(f"the copy of {src.name} does not match the original")
         if backup is not None:
             if plan.get("keep_record"):
                 aside = [n for n in record.get("set_aside") or [] if n != backup.name]
-                _write_setup(game_dir, {**record, "set_aside": aside + [backup.name]})
+                _write_setup(game_dir, {**record, "set_aside": aside + [backup.name] + extra_aside})
             else:
                 _write_setup(game_dir, {"exe": ov.exe, "backup": backup.name, "original_md5": md5,
-                                        "source": _plain_name(src)})
+                                        "source": _plain_name(src),
+                                        **({"set_aside": extra_aside} if extra_aside else {})})
             if not kept_already:
                 os.replace(live, backup)
                 moved = True
         elif not record.get("backup"):
             _write_setup(game_dir, {"exe": ov.exe, "backup": None, "original_md5": None,
-                                    "source": _plain_name(src)})
+                                    "source": _plain_name(src),
+                                    **({"set_aside": extra_aside} if extra_aside else {})})
+        elif extra_aside:
+            # A set-up that stopped between its two steps keeps its record; the spare it sets
+            # aside now is named in it too, or --uninstall could never name it.
+            _write_setup(game_dir, {**record, "set_aside": (record.get("set_aside") or []) + extra_aside})
+        if gog_md5 is not None and gog_bak.is_file():
+            if aside_to is None:
+                if _md5_or_none(gog_bak) != gog_md5:
+                    raise _foreign_backup(gog_bak)    # swapped since the plan
+                gog_bak.unlink()                      # a duplicate of a copy that is kept
+                dropped = True
+            else:
+                moved_aside = _set_gog_backup_aside(game_dir, ov, gog_bak, aside_to, gog_md5) == "moved"
         os.replace(tmp, live)
+    except ix.InstallerError:
+        # The foreign-backup refusal, raised with nothing of ours left behind: the copy, and a
+        # record that only this run wrote, go first.
+        for p in (tmp,) + ((game_dir / THINKER_SETUP_NAME,) if not record else ()):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        if record:
+            try:
+                _write_setup(game_dir, record)
+            except OSError:
+                pass
+        try:
+            if moved and not live.exists():
+                os.replace(backup, live)
+        except OSError:
+            pass
+        raise
     except OSError as e:
         # Undo in reverse: nothing half-done is left behind.
+        try:
+            if moved_aside and not gog_bak.exists():
+                os.replace(aside_to, gog_bak)
+                moved_aside = False
+        except OSError:
+            pass
         try:
             if moved and not live.exists():
                 os.replace(backup, live)
@@ -546,14 +844,40 @@ def apply_thinker_setup(plan) -> bool:
                 _write_setup(game_dir, record)          # the record as it was before this run
             except OSError:
                 pass
+        detail = f"  {type(e).__name__}: {e}"
+        if dropped:
+            detail += (f"\n  {gog_bak.name} (a spare copy of GOG's original) was removed; the original is still "
+                       f"{backup.name if backup is not None and backup.exists() else ov.exe}.")
+        if dropped_ours:
+            detail += f"\n  {plan['drop_bak'].name} (a Longevity Vaccine build) was removed."
         raise ix.InstallerError(
             "The folder could not be set up for Thinker.",
-            detail=f"  {type(e).__name__}: {e}",
-            code=ix.EXIT_ABORTED, changed=None if moved else False,
+            detail=detail,
+            code=ix.EXIT_ABORTED,
+            changed=None if (moved or moved_aside) else (True if (dropped or dropped_ours) else False),
             remedy="close Alpha Centauri and Thinker if they are running, then run the installer again.")
-    if backup is not None and not kept_already:
-        ix.say(f"  kept the original {ov.exe} as {backup.name}")
-    ix.say(f"  {ov.exe} is now a copy of {_plain_name(src)}: the folder is set up for Thinker")
+    # One line, the user's wording (2026-11-06); the shapes that differ from it say so.
+    ix.say("\n--- Thinker ---")
+    if md5 is None:
+        kept = record.get("backup")
+        kept_intact = bool(kept) and record.get("original_md5") \
+            and _md5_or_none(game_dir / kept) == record["original_md5"]
+        ix.say(f"  Put the PRACX .exe in place as {ov.exe}. This is required to load both Longevity and Thinker. "
+               + (f"Your original is kept as {kept}. Uninstalling Longevity Vaccine puts it back." if kept_intact
+                  else "Uninstalling Longevity Vaccine removes it again." if not kept
+                  # the kept original gone or changed since: undo leaves the PRACX copy and says so (state 5)
+                  else f"Uninstalling Longevity Vaccine undoes this where it can ({kept}, the original it kept, "
+                       f"{'is no longer in the folder' if not (game_dir / kept).is_file() else 'has changed since it was kept'})."))
+    elif plan.get("keep_record"):
+        ix.say(f"  Swapped the vanilla Alien Crossfire .exe for the PRACX .exe. This is required to load both Longevity "
+               f"and Thinker. Your earlier {ov.exe} is still kept as {record['backup']}, and GOG's copy as "
+               f"{backup.name}. Uninstalling Longevity Vaccine puts your earlier {ov.exe} back.")
+    else:
+        what = "the vanilla Alien Crossfire .exe" if plan.get("vanilla") else f"the {ov.exe} that was here"
+        ix.say(f"  Swapped {what} for the PRACX .exe. This is required to load both Longevity and Thinker. "
+               f"Your original is kept as {backup.name}. Uninstalling Longevity Vaccine puts it back.")
+    if moved_aside:
+        ix.say(f"  The {ov.exe}.bak that was here (GOG's original) is kept as {aside_to.name}.")
     # An earlier plain install's patched terranx_PRACX.exe: back to clean, so no second patched
     # copy is left to go stale (see the section comment). Ours by its hash; nothing else touched.
     if src.name.lower().endswith(".bak"):
@@ -807,6 +1131,8 @@ def patch_target(target: Path, force: bool) -> str:
                 if not force and current:
                     ix.say("  already patched (backup is a supported clean base) -- skipping."
                            " Use --force to re-patch.")
+                    _patch_log_line(f"{target.name}: already patched (MD5 {md5}; .bak is the clean base "
+                                    f"{bak_spec.base_md5}, target {bak_spec.id!r})")
                     return "already-patched"
                 if not current:
                     ix.say(f"  not the build this installer produces for this folder (a different configuration, or an "
@@ -837,11 +1163,12 @@ def patch_target(target: Path, force: bool) -> str:
     ix.say(f"\n--- {target.name} ---")
     if spec.requires_files:
         ix.say(f"  {', '.join(spec.requires_files)} found beside it -> {spec.label} configuration")
-    elif "thinker.dll" in beside and not _THINKER_EXPLAINED and _thinker_needs_renaming(target, spec):
-        ov = _overlay_of(spec)
-        ix.say(f"  thinker.dll found beside it, but Thinker starts only a file named {ov.exe} -> patched as "
-               f"plain {spec.label}. To play with Thinker and the mod, run the installer again and let it set the folder up for Thinker.")
+    # (No "run the installer again and let it set the folder up" note here any more: the set-up
+    # happens before this pass, unasked, whenever a clean PRACX source exists, so the only Thinker
+    # folder that reaches a plain build has no clean PRACX copy to set up from.)
     ix.say(f"  patching (clean {spec.label})")
+    _patch_log_line(f"{target.name}: target {spec.id!r} ({spec.label}), clean base {md5}, "
+                    f"expected result {spec.patched_md5 or '(unrecorded)'}")
     # Pass the spec, not loose hashes: the baseline, size and group selection all come from the
     # one table entry, and the installer inherits its dry-run-only rule -- a base with no
     # recorded patched_md5 can never be written to, even if someone adds it to the launch set.
@@ -867,14 +1194,30 @@ def patch_target(target: Path, force: bool) -> str:
     return "patched"
 
 
+_PATCH_LOG = None   # the open fresh-install patch log while fresh_patch_log() is active; _patch_summary tees into it
+
+
+def _patch_log_line(text: str) -> None:
+    """One line into the fresh-install patch log, if one is open. Never raises."""
+    if _PATCH_LOG is None:
+        return
+    try:
+        _PATCH_LOG.write(text + "\n")
+        _PATCH_LOG.flush()
+    except (OSError, ValueError):
+        pass
+
+
 def _patch_summary(status: str, text: str) -> None:
-    """apply_patches' per-phase report line, coloured: green SUCCESS, red ERROR, plain otherwise."""
+    """apply_patches' per-phase report line, coloured: green SUCCESS, red ERROR, plain otherwise -- and
+    recorded in the fresh-install patch log (fresh_patch_log) as `[status] text`."""
     if status == "ok":
         ix.good("  " + text)
     elif status == "error":
         ix.bad("  " + text)
     else:
         ix.say("  " + text)
+    _patch_log_line(f"[{status}] {text}")
 
 
 def check_companion_declarations() -> None:
@@ -1024,6 +1367,8 @@ def patch_companions(game_dir: Path, spec, force: bool) -> dict:
                 ix.warn("  WARNING: the restored file is not the clean base; leaving it alone.")
                 continue
 
+        _patch_log_line(f"{live.name}: target {cspec.id!r} ({cspec.label}), clean base {cspec.base_md5}, "
+                        f"expected result {cspec.patched_md5 or '(unrecorded)'}")
         if ap.apply_patches(live, cpatch, do_apply=True, spec=cspec, summary=_patch_summary) != 0:
             ix.warn(f"  WARNING: patching {live.name} failed; the mod still works without it.")
             out[live.name] = "error"
@@ -1531,6 +1876,72 @@ def check_display_resolution(game_dir: Path, target_id, no_prompt: bool = False,
         ix.say("WARNING: could not write Alpha Centauri.ini; set [PRACX] ScreenWidth and ScreenHeight to <DEFAULT> by hand.")
 
 
+#: The game's own setting (update.cpp reads [UIMod] CheckForUpdates; absent = on). The installer writes it
+#: ONLY from the player's answer to the question below, never a default.
+UPDATE_CHECK_KEY = "CheckForUpdates"
+UPDATE_CHECK_TITLE = "Automatic updates"
+#: The user's wording (2026-11-06), as the block's note lines.
+UPDATE_CHECK_NOTES = (
+    "When the game starts, it can check our server for a newer version of Longevity Vaccine and its",
+    "optional modules, and offer to install them. You can change this any time in Longevity Mod",
+    "Preferences (\"Check for Updates at Startup\").",
+)
+UPDATE_CHECK_PROMPT = "Check for updates when the game starts? [Y/n] "
+UPDATE_CHECK_PREFS = "Longevity Mod Preferences (\"Check for Updates at Startup\")"
+
+
+def update_check_state(game_dir: Path):
+    """[UIMod] CheckForUpdates as the GAME reads it (update.cpp: GetPrivateProfileIntW with default
+    1): None when absent; else the leading integer != 0, an empty value the default (on), a word
+    ("yes") 0. ini_flag_state's rules are UpscaledVideos', which our own Python reads; for this key
+    the installer must report what the game will do (audit 2026-11-06)."""
+    raw = read_ini_str(game_dir, "UIMod", UPDATE_CHECK_KEY, _INI_ABSENT)
+    if raw == _INI_ABSENT:
+        return None
+    s = raw.strip()
+    if not s:
+        return True
+    import re
+    m = re.match(r"[+-]?\d+", s)
+    return bool(int(m.group(0))) if m else False
+
+
+def ask_update_checks(game_dir: Path, args):
+    """The opt-in for the game's update check (user 2026-11-06), asked once: on a FIRST install, at a
+    console, without --no-prompt. Returns True / False for the answer (written the moment the exe is
+    patched: before that every refusal says the game was not modified; after it the folder counts
+    as installed and a re-run would not ask again), or None to leave the setting as it is -- a
+    re-run keeps what the player has (the game's default, on, when the key was never written),
+    --no-prompt and an unattended run keep the default; each says so in one line. Enter is yes.
+    Ctrl+C cancels the install like the picker; a closed stdin keeps the default."""
+    state = update_check_state(game_dir)
+    first = state is None and not _has_install(game_dir)
+    if first and ix.can_ask() and not getattr(args, "no_prompt", False):
+        try:
+            ans = ix.ask(UPDATE_CHECK_PROMPT, title=UPDATE_CHECK_TITLE, notes=UPDATE_CHECK_NOTES).strip().lower()
+        except EOFError:
+            ans = None
+        if ans is not None:
+            on = ans in ("", "y", "yes")
+            ix.say("  The game will check for updates when it starts." if on else
+                   f"  The game will not check for updates. Turn it on any time in {UPDATE_CHECK_PREFS}.")
+            return on
+    on = state is None or state
+    ix.say("\n--- automatic updates ---")
+    ix.say(f"  The game {'checks' if on else 'does not check'} for updates when it starts"
+           f" ({'the default' if state is None else 'as before'}); change it in {UPDATE_CHECK_PREFS}.")
+    return None
+
+
+def write_update_check(game_dir: Path, on) -> None:
+    """Record the answer as the game's setting; None (not asked) writes nothing."""
+    if on is None:
+        return
+    if not write_ini_str(game_dir, "UIMod", UPDATE_CHECK_KEY, "1" if on else "0"):
+        ix.warn(f"  WARNING: could not write [UIMod] {UPDATE_CHECK_KEY}={1 if on else 0} to Alpha Centauri.ini; "
+                f"set it in {UPDATE_CHECK_PREFS}.")
+
+
 def ini_flag_state(game_dir: Path, key: str):
     """True / False / None, where None means the key is ABSENT.
 
@@ -1555,11 +1966,18 @@ def ini_flag_state(game_dir: Path, key: str):
 
 
 def pack_on_disk(game_dir: Path, name: str) -> bool:
-    """Is the pack's content already in the game folder (left by an uninstall, say)?"""
+    """Is the pack's content already in the game folder (left by an uninstall, say)? The picker
+    calls it "already installed", so it uses the game's own test where the game has one: the
+    portrait pack counts only with its pack-manifest.json (portrait_files.cpp PackInstalled; a
+    stray image or an interrupted copy in portraits\\hd is not the pack, and the game would not
+    use it -- audit 2026-11-06)."""
     for rel in MODULE_ROOTS.get(name, ()):
         d = Path(game_dir) / rel
         try:
-            if d.is_dir() and any(p.is_file() for p in d.rglob("*")):
+            if name == "portraits-hd":
+                if (d / "pack-manifest.json").is_file():
+                    return True
+            elif d.is_dir() and any(p.is_file() for p in d.rglob("*")):
                 return True
         except OSError:
             pass
@@ -1813,11 +2231,12 @@ def _picker_rows(names: list, catalogue: dict, ticked: dict, at: int) -> list:
     the pick: "Install selected modules", or "Skip optional modules" with nothing ticked (user
     wording 2026-11-04)."""
     rows = []
+    width = max([28] + [len(_pack_label(n)) + 1 for n in names])    # the size column lines up under every label
     for i, n in enumerate(names):
         c = catalogue[n]
-        note = "   already on disk" if c.get("on_disk") else ""
+        note = "   already installed" if c.get("on_disk") else ""   # user wording 2026-11-06
         box = "[X]" if ticked[n] else "[ ]"
-        row = ix.painted(f"{box} {_pack_label(n):<28}{human_size(c['size']):>8}{note}",
+        row = ix.painted(f"{box} {_pack_label(n):<{width}}{human_size(c['size']):>8}{note}",
                          "good" if ticked[n] else "bad")
         rows.append((" > " if i == at else "   ") + row)
     last = INSTALL_SELECTED if any(ticked[n] for n in names) else SKIP_MODULES
@@ -1914,7 +2333,7 @@ GAME_CONTENT_MODULES = tuple(MODULE_ROOTS)
 #: (see manifest.py's trust boundary). These are what the game shows when it asks about a pack.
 MODULE_LABELS = {
     "movies-hd": "HD cinematics",
-    "portraits-hd": "Longevity HD Portrait Pack",
+    "portraits-hd": "Turovetsky's HD Portrait Pack",
 }
 
 
@@ -2426,11 +2845,47 @@ def find_shortcut_to(exe: Path):
     return None
 
 
-def create_shortcut(lnk: Path, exe: Path) -> str:
-    """Write `lnk` starting `exe` from its own folder with its icon. "" on success, else why."""
+def shortcut_icon(game_dir: Path, target_id, exe: Path) -> Path:
+    """The file whose icon the desktop shortcut shows: the GAME's exe, never a launcher's. A Thinker
+    folder's shortcut starts thinker.exe, whose icon is a plain "Mod" square (user 2026-11-06: use
+    the game's own art); the exe it launches (the target's `exe`, terranx.exe) carries the game's
+    icon, as every PRACX build does. The target itself when it is the game exe or that file is gone."""
+    spec = _targets().get(target_id) if target_id else None
+    if spec is not None and getattr(spec, "launcher", None) and getattr(spec, "exe", None):
+        game_exe = Path(game_dir) / spec.exe
+        if game_exe.is_file():
+            return game_exe
+    return Path(exe)
+
+
+def refresh_shortcut_icon(name: str, exe: Path, icon: Path) -> bool:
+    """An existing shortcut of OURS (MOD_SHORTCUT_NAME) keeps the icon it was made with; when the
+    icon rule changes (2026-11-06: the game's, not the launcher's) it is brought up to date, quietly,
+    provided it still starts `exe`. Never a shortcut the player made (another name). True when
+    changed. Never raises."""
+    want = str(icon) + ",0"
+    try:
+        for d in _desktop_dirs():
+            lnk = d / (name + ".lnk")
+            if not lnk.is_file():
+                continue
+            out = _ps("$sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut(" + _ps_quote(lnk) + "); "
+                      "if ($s.TargetPath -eq " + _ps_quote(exe) + " -and $s.IconLocation -ne " + _ps_quote(want) + ") "
+                      "{ $s.IconLocation = " + _ps_quote(want) + "; $s.Save(); Write-Output 'refreshed' } "
+                      "else { Write-Output 'kept' }")
+            return "refreshed" in out
+    except Exception:  # noqa: BLE001 - cosmetic; never fails an install
+        pass
+    return False
+
+
+def create_shortcut(lnk: Path, exe: Path, icon: Path = None) -> str:
+    """Write `lnk` starting `exe` from its own folder, with `icon`'s icon (default: `exe`'s own).
+    "" on success, else why."""
+    icon = Path(icon) if icon is not None else Path(exe)
     script = ("$sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut(" + _ps_quote(lnk) + "); "
               "$s.TargetPath = " + _ps_quote(exe) + "; $s.WorkingDirectory = " + _ps_quote(Path(exe).parent) + "; "
-              "$s.IconLocation = " + _ps_quote(str(exe) + ",0") + "; $s.Save(); Write-Output 'saved'")
+              "$s.IconLocation = " + _ps_quote(str(icon) + ",0") + "; $s.Save(); Write-Output 'saved'")
     out = _ps(script)
     if "saved" in out and Path(lnk).is_file():
         return ""
@@ -2447,6 +2902,8 @@ def check_desktop_shortcut(game_dir: Path, target_id, ask: bool = True) -> None:
         found = find_shortcut_to(exe)
         if found:
             _SHORTCUT_NAME = found
+            if found == MOD_SHORTCUT_NAME:
+                refresh_shortcut_icon(found, exe, shortcut_icon(game_dir, target_id, exe))
             return
         ix.say("")
         ix.say("You do not have a desktop shortcut that starts the game with the mod.")
@@ -2475,7 +2932,7 @@ def check_desktop_shortcut(game_dir: Path, target_id, ask: bool = True) -> None:
             if ans not in ("", "y", "yes"):
                 ix.say(f"Left as it is. Start {exe.name} from the game folder to play with the mod.")
                 return
-        why = create_shortcut(lnk, exe)
+        why = create_shortcut(lnk, exe, shortcut_icon(game_dir, target_id, exe))
         if why:
             ix.warn(f"Could not create the shortcut ({why}). Start {exe.name} from the game folder to play with the mod.")
             return
@@ -2984,11 +3441,12 @@ def do_update(game_dir: Path, args) -> int:
         return ver.normalise(v) if isinstance(v, str) and ver.is_valid(v) else None
 
     def _pack_failure(n) -> tuple:
-        """("<label> v1.1.0 update could not be downloaded. Your <label> v1.0.0 ...", detail)"""
+        """("The update to <label> v1.1.0 could not be downloaded. <label> v1.0.0 ...", detail). No article
+        or "Your" before the label: "Turovetsky's HD Portrait Pack" takes neither (audit 2026-11-06)."""
         label, offered, have = _pack_label(n), _offered(n), installed_modules.get(n)
         what = f"{label} v{offered}" if offered else label
         if have and have != ver.UNKNOWN:
-            msg = (f"The {what} update could not be downloaded. Your {label} v{have} "
+            msg = (f"The update to {what} could not be downloaded. {label} v{have} "
                    f"{'are' if label.endswith('s') else 'is'} still installed and "
                    f"{'work' if label.endswith('s') else 'works'} as before.")
         else:
@@ -3013,7 +3471,7 @@ def do_update(game_dir: Path, args) -> int:
     # binary could not be installed ... close the game and try again": the wrong file, a remedy
     # that cannot work, and an update that could never succeed again. The fresh-install path has
     # always tolerated exactly this state; the two now agree.
-    companions = []
+    companions, left_alone = [], []
     for live, cpatch, cspec in companion_specs(game_dir, spec):
         # NOT `state`: that is the receipt dict this function reads again further down, and
         # shadowing it crashed the run AFTER the commit had already swapped the new binaries in.
@@ -3024,19 +3482,20 @@ def do_update(game_dir: Path, args) -> int:
             ix.say(f"  {live.name} (MD5 {md5}) is not a build this patch set knows and has no "
                    f"clean backup -- leaving it alone.")
             ix.say("  (the mod updates without it; only the PRACX edge-scroll fix is missed)")
+            left_alone.append(f"{live.name}: left alone (MD5 {md5}: not a build this patch set knows, "
+                              f"no clean .bak)")
 
     work = fetchmod_staging(game_dir) / "commit"
-    # The patcher narrates thousands of lines; on a pack-only run it also re-verifies an exe
-    # that is not changing, which read as "installed terranx_PRACX.exe" right above "Nothing
-    # else needed changing". Everything goes to a log; the console gets one line per outcome.
+    # On a pack-only run the patcher also re-verifies an exe that is not changing, which read as
+    # "installed terranx_PRACX.exe" right above "Nothing else needed changing". Everything goes
+    # to a log (the patcher's phase summary, never its per-site transcript); the console gets one
+    # line per outcome.
     patch_log = _log_path(game_dir, "patch")
     try:
-        with _captured(patch_log):
-            tx.apply_transactional(target, Path(ap.DEFAULT_PATCHES), spec, work,
-                                   companions=companions, say=print)
+        run_patch_logged(patch_log, game_dir, target, spec, work, companions, notes=left_alone)
     except tx.CommitError as e:
         raise ix.InstallerError(
-            "The patched binary could not be installed.", detail=f"  {e}",
+            "The patched binary could not be installed.", detail=f"  {e}\n  (log: {patch_log})",
             # The commit is transactional, so no live file was swapped. Staging a candidate can
             # still have created a .bak that was previously missing -- a correct backup of the
             # player's own bytes, which is why this is still "nothing was changed" for the game
@@ -3189,6 +3648,10 @@ def install_packs_from_manifest(game_dir: Path, args, names: list, manifest, tar
     return got, statuses
 
 
+PATCH_LOGS_KEPT = 3   # LongevityMods\logs\patch-<stamp>.log: the newest this many survive a run (audit 2026-11-07:
+                      # one per update, never pruned, was the mod's only file that grew without bound)
+
+
 def _log_path(game_dir: Path, kind: str) -> Path:
     import time as _t
     d = Path(game_dir) / "LongevityMods" / "logs"
@@ -3197,6 +3660,104 @@ def _log_path(game_dir: Path, kind: str) -> Path:
     except OSError:
         d = Path(tempfile.gettempdir())
     return d / f"{kind}-{_t.strftime('%Y%m%d-%H%M%S')}.log"
+
+
+def prune_logs(log_dir: Path, kind: str, keep: int = PATCH_LOGS_KEPT) -> int:
+    """Delete all but the newest `keep` `<kind>-YYYYMMDD-HHMMSS.log` in `log_dir`; returns how many went.
+
+    Newest by NAME: the stamp sorts in time order, so a player's clock or a copied folder cannot reorder them.
+    ONLY names of exactly that shape count (audit 2026-11-07: a `patch-notes.log` matched the glob, sorted
+    after every stamp, and would have displaced -- or deleted -- the run's own fresh log); check.log and
+    anything else stays. `log_dir` is where the run's log went (_log_path may fall back to %TEMP%).
+    Never raises: a log that cannot be deleted is left for the next run."""
+    d = Path(log_dir)
+    shape = re.compile(re.escape(kind) + r"-\d{8}-\d{6}\.log\Z")
+    try:
+        names = sorted(p for p in d.glob(f"{kind}-*.log") if shape.fullmatch(p.name) and p.is_file())
+    except OSError:
+        return 0
+    gone = 0
+    for p in names[:-keep] if keep > 0 else names:
+        try:
+            p.unlink()
+            gone += 1
+        except OSError:
+            pass
+    return gone
+
+
+def _log_summary(status: str, text: str) -> None:
+    """apply_patches' per-phase line, as the patch log records it (stdout is redirected into the log)."""
+    print(f"[{status}] {text}")
+
+
+@contextlib.contextmanager
+def fresh_patch_log(game_dir: Path):
+    """The fresh-install counterpart of run_patch_logged: LongevityMods\\logs\\patch-<stamp>.log around the
+    patch_target / patch_companions pass -- a header, then whatever _patch_summary and _patch_log_line record
+    (per-exe target / measured base / expected result, the phase lines, a companion's outcome), `done` or
+    `[error] <text>` on the way out, then the prune. Until 2026-11-07 a first install -- the common 1.0.0
+    case -- left no record at all; the console closed with the window and the receipt carries no hashes.
+    A log that cannot be opened disables the tee for this run and nothing else."""
+    global _PATCH_LOG
+    import time as _t
+    path = _log_path(game_dir, "patch")
+    try:
+        f = open(path, "w", encoding="utf-8", errors="replace")
+    except OSError:
+        f = None
+    _PATCH_LOG = f
+    try:
+        _patch_log_line(f"Longevity Vaccine {ver.VERSION} -- install patch run {_t.strftime('%Y-%m-%d %H:%M:%S')}")
+        _patch_log_line(f"game folder: {game_dir}")
+        yield path
+        _patch_log_line("done")
+    except BaseException as e:   # noqa: BLE001 - recorded, then propagated unchanged
+        _patch_log_line(f"[error] {str(e) or type(e).__name__}")
+        raise
+    finally:
+        _PATCH_LOG = None
+        if f is not None:
+            try:
+                f.close()
+            except OSError:
+                pass
+        prune_logs(path.parent, "patch")
+
+
+def run_patch_logged(patch_log: Path, game_dir: Path, target: Path, spec, work: Path, companions: list,
+                     notes: list = ()) -> None:
+    """The transactional patch of the exe (+ companions), narrated into `patch_log`.
+
+    The log is a RECORD, not a transcript: a header (installer version, run time, each binary's target id,
+    clean-base and expected hashes, `notes` = decisions taken before the run, e.g. a companion left alone),
+    then the patcher's one-line-per-phase summary -- skipped sites by name, a FAILING site with its bytes --
+    the stage / commit lines, and `done`; a failure is recorded as `[error] <text>` before it propagates
+    (a CommitError's text -- the clean-base refusal, the lock mismatch, a swap rolled back -- lived only in
+    the exception until the audit of 2026-11-07, so the one log support needs most said nothing). Before
+    2026-11-07 the full per-site transcript (4,200 lines, 850 KB) went here on every update. Older patch logs
+    beyond PATCH_LOGS_KEPT are pruned whether the run succeeds or raises."""
+    import time as _t
+    import transact as tx   # lazy, as do_update imports it: install.py has no module-level transact
+    binaries = [(Path(target), spec)] + [(Path(c[0]), c[2]) for c in (companions or [])]
+    try:
+        with _captured(patch_log):
+            print(f"Longevity Vaccine {ver.VERSION} -- update patch run {_t.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"game folder: {game_dir}")
+            for live, cspec in binaries:
+                print(f"{live.name}: target {cspec.id!r} ({cspec.label}), clean base {cspec.base_md5}, "
+                      f"expected result {cspec.patched_md5 or '(unrecorded)'}")
+            for n in notes:
+                print(n)
+            try:
+                tx.apply_transactional(target, Path(ap.DEFAULT_PATCHES), spec, work,
+                                       companions=companions, say=print, summary=_log_summary)
+            except BaseException as e:   # noqa: BLE001 - recorded, then propagated unchanged
+                print(f"[error] {str(e) or type(e).__name__}")
+                raise
+            print("done")
+    finally:
+        prune_logs(Path(patch_log).parent, "patch")
 
 
 class _captured:
@@ -3851,7 +4412,7 @@ def do_uninstall(game_dir: Path, args) -> int:
     ix.say("\n  Left in place, deliberately:")
     ix.say("    movies\\hd            - the HD cinematics (a large download; delete it yourself")
     ix.say("                           if you want the space back)")
-    ix.say("    portraits\\           - your own portraits, and the Longevity HD Portrait Pack in")
+    ix.say("    portraits\\           - your own portraits, and Turovetsky's HD Portrait Pack in")
     ix.say("                           portraits\\hd (unused once the mod is gone)")
     ix.say("    LongevityMods\\       - the resident updater and its staging folder; safe to")
     ix.say("                           delete once this window is closed")
@@ -4244,7 +4805,7 @@ def main() -> int:
     apr.add_argument("--pack", default=None,
                      help="HD cinematic pack dir (default: dist\\movies-hd).")
     apr.add_argument("--portrait-pack", default=None,
-                     help="Longevity HD Portrait Pack dir (default: dist\\portraits-hd).")
+                     help="Turovetsky's HD Portrait Pack dir (default: dist\\portraits-hd).")
     apr.add_argument("--force", action="store_true",
                      help="Restore from .bak and re-patch even if already patched.")
     apr.add_argument("--game-dir", default=None, help="Override the game install dir.")
@@ -4327,6 +4888,8 @@ def main() -> int:
     # After the flag checks (a refused combination never asks for a folder), before the lock
     # (which is named after the folder).
     game_dir = resolve_game_dir(args, installed=bool(args.uninstall or args.repair or args.update))
+    global _CRASH_LOG_GAME_DIR
+    _CRASH_LOG_GAME_DIR = game_dir      # from here a crash log goes to LongevityMods\logs, with the rest
     ix.say(f"Game dir: {game_dir}")
     if not game_dir.is_dir():
         raise ix.InstallerError(
@@ -4373,8 +4936,8 @@ def _install(game_dir: Path, args) -> int:
     # companions are patched AFTER the exe -- discovering it then would mean aborting with the exe
     # already modified.
     check_companion_declarations()
-    # A Thinker folder whose terranx.exe is not PRACX: asked about now, set up just before the
-    # patch pass (after every question), so the pass patches the exe Thinker actually starts.
+    # A Thinker folder whose terranx.exe is not PRACX: decided now (no question), set up just before
+    # the patch pass (after every question), so the pass patches the exe Thinker actually starts.
     thinker_plan = plan_thinker_setup(game_dir, args)
     candidates = _install_candidates(game_dir)
     if not candidates:
@@ -4383,6 +4946,9 @@ def _install(game_dir: Path, args) -> int:
             code=ix.EXIT_NO_GAME,
             detail=f"Searched: {game_dir}",
             remedy="check that this is the folder containing terranx.exe.")
+    # The backup rule for every other exe the pass will patch: refuses now (nothing written),
+    # moves just before the pass.
+    backup_plan = plan_backups(game_dir, candidates, thinker_plan)
 
     # The optional modules are chosen BEFORE anything is written: the player sees what is on
     # offer, with sizes, and the installer waits for the answer (user, 2026-09-27). The downloads
@@ -4394,60 +4960,83 @@ def _install(game_dir: Path, args) -> int:
         ix.say("  none requested")
     elif manifest is not None and not catalogue:
         ix.say("No optional modules are available for download right now.")
+    # The update-check opt-in, with the other "what do you want" question, before any write.
+    update_checks = ask_update_checks(game_dir, args)
 
-    if apply_thinker_setup(thinker_plan):
-        candidates = _install_candidates(game_dir)
-    results = {p.name: patch_target(p, args.force) for p in candidates}
-    if any(v == "error" for v in results.values()):
-        raise ix.InstallerError(
-            "A patch step failed, so the installer stopped before deploying anything.",
-            detail="\n".join(f"  {n}: {s}" for n, s in results.items()),
-            # NOT changed=True. An "error" can come from apply_patches long before any write
-            # (a missing patches.yaml, a missing target), and telling the user their exe may be
-            # half-patched -- and to restore a .bak that does not exist -- is worse than saying
-            # we do not know. None renders the honest "not certain how far it got" wording.
-            changed=None,
-            remedy="re-run the installer; if it keeps failing, report the output above.")
-    if not any(v in ("patched", "already-patched") for v in results.values()):
-        # Only MEASURED launch targets may be advertised. Listing a declared-but-unmeasured one
-        # tells a Thinker user "Supported: ... Thinker ..." and then refuses their exe, which is
-        # self-contradictory and unactionable.
-        try:
-            labels = [t.label for t in _targets().values() if t.launch and t.measured]
-        except Exception:  # noqa: BLE001 - explaining a failure must not become a second failure
-            labels = []
-        raise ix.InstallerError(
-            "No game executable this mod can patch was found in the game folder.",
-            code=ix.EXIT_UNSUPPORTED,
-            detail="The mod is built for: " + ", ".join(labels) + ".\n"
-                   + "Found: " + ", ".join(f"{n} (MD5 {_md5_safe(game_dir / n)})"
-                                           for n in results) + ".",
-            remedy="install the GOG Planetary Pack with the PRACX patch, or report your "
-                   "executable's MD5 so it can be added.")
+    # The first writes: the spare backups out of the way, then the Thinker set-up; a set-up that
+    # fails leaves the folder as it found it, moved backups included. Every planned .bak is hashed
+    # again before the first of them, so a refusal never follows a drop.
+    recheck_planned_backups(backup_plan, thinker_plan)
+    moves = apply_backup_plan(backup_plan)
+    try:
+        if apply_thinker_setup(thinker_plan):
+            candidates = _install_candidates(game_dir)
+        elif thinker_plan and thinker_plan["action"] == "release":
+            # The revert changed what terranx.exe is (the kept original back, or the clean PRACX
+            # copy left): the rule for it runs on the folder as it is now. Its foreign shape was
+            # refused at plan time, so this only moves or drops.
+            candidates = _install_candidates(game_dir)
+            moves += apply_backup_plan(plan_backups(game_dir, candidates, None))
+    except BaseException:
+        undo_backup_moves(moves)
+        raise
+    with fresh_patch_log(game_dir):
+        results = {p.name: patch_target(p, args.force) for p in candidates}
+        if any(v == "error" for v in results.values()):
+            raise ix.InstallerError(
+                "A patch step failed, so the installer stopped before deploying anything.",
+                detail="\n".join(f"  {n}: {s}" for n, s in results.items()),
+                # NOT changed=True. An "error" can come from apply_patches long before any write
+                # (a missing patches.yaml, a missing target), and telling the user their exe may be
+                # half-patched -- and to restore a .bak that does not exist -- is worse than saying
+                # we do not know. None renders the honest "not certain how far it got" wording.
+                changed=None,
+                remedy="re-run the installer; if it keeps failing, report the output above.")
+        if not any(v in ("patched", "already-patched") for v in results.values()):
+            # Only MEASURED launch targets may be advertised. Listing a declared-but-unmeasured one
+            # tells a Thinker user "Supported: ... Thinker ..." and then refuses their exe, which is
+            # self-contradictory and unactionable.
+            try:
+                labels = [t.label for t in _targets().values() if t.launch and t.measured]
+            except Exception:  # noqa: BLE001 - explaining a failure must not become a second failure
+                labels = []
+            raise ix.InstallerError(
+                "No game executable this mod can patch was found in the game folder.",
+                code=ix.EXIT_UNSUPPORTED,
+                detail="The mod is built for: " + ", ".join(labels) + ".\n"
+                       + "Found: " + ", ".join(f"{n} (MD5 {_md5_safe(game_dir / n)})"
+                                               for n in results) + ".",
+                remedy="install the GOG Planetary Pack with the PRACX patch, or report your "
+                       "executable's MD5 so it can be added.")
 
-    # Which target was actually applied. Resolved ONCE here, then used for the companions and the
-    # receipt alike, so the two can never disagree about what is installed.
-    # With two patched candidates (a Thinker folder that also keeps terranx_PRACX.exe) the one the
-    # player's launcher runs -- the configuration with a `launcher` -- is the installation; the
-    # candidate ORDER (config.exe_name()) used to decide, and on a machine whose game-exe.txt names
-    # terranx_PRACX.exe the receipt, play note and shortcut all bypassed Thinker (audit 2026-10-29).
-    patched, spec = None, None
-    for n, s in results.items():
-        if s not in ("patched", "already-patched"):
-            continue
-        try:
-            bak = game_dir / (n + ".bak")
-            probe = bak if bak.is_file() else game_dir / n
-            cand = ap.resolve_target(_md5_safe(probe, changed=True), _targets(),
-                                     launch_only=True, present_files=ap.folder_files(game_dir),
-                                     exe_name=n)
-        except (ap.UnsupportedBase, ix.InstallerError):
-            cand = None
-        if patched is None or (cand is not None and getattr(cand, "launcher", None)
-                               and not (spec is not None and getattr(spec, "launcher", None))):
-            patched, spec = n, cand
-    target_id = spec.id if spec else None
-    companion_results = patch_companions(game_dir, spec, args.force) if spec is not None else {}
+        # Which target was actually applied. Resolved ONCE here, then used for the companions and the
+        # receipt alike, so the two can never disagree about what is installed.
+        # With two patched candidates (a Thinker folder that also keeps terranx_PRACX.exe) the one the
+        # player's launcher runs -- the configuration with a `launcher` -- is the installation; the
+        # candidate ORDER (config.exe_name()) used to decide, and on a machine whose game-exe.txt names
+        # terranx_PRACX.exe the receipt, play note and shortcut all bypassed Thinker (audit 2026-10-29).
+        patched, spec = None, None
+        for n, s in results.items():
+            if s not in ("patched", "already-patched"):
+                continue
+            try:
+                bak = game_dir / (n + ".bak")
+                probe = bak if bak.is_file() else game_dir / n
+                cand = ap.resolve_target(_md5_safe(probe, changed=True), _targets(),
+                                         launch_only=True, present_files=ap.folder_files(game_dir),
+                                         exe_name=n)
+            except (ap.UnsupportedBase, ix.InstallerError):
+                cand = None
+            if patched is None or (cand is not None and getattr(cand, "launcher", None)
+                                   and not (spec is not None and getattr(spec, "launcher", None))):
+                patched, spec = n, cand
+        target_id = spec.id if spec else None
+        # The update-check answer, the moment the exe is patched: from here the folder counts as installed
+        # (_has_install), so a re-run would not ask again -- an answer lost to a later failure (a copy, a
+        # download, Ctrl+C) would leave the game checking against a stated "no" (audit 2026-11-06). Every
+        # refusal that says the game was not modified comes before this line.
+        write_update_check(game_dir, update_checks)
+        companion_results = patch_companions(game_dir, spec, args.force) if spec is not None else {}
     thinker_warned = warn_thinker_build(game_dir)
 
     if not deploy_runtime(game_dir):
@@ -4584,6 +5173,14 @@ def _install(game_dir: Path, args) -> int:
 
 #: Set by main() once the game dir is known, so run_guarded can offer a relaunch on success.
 _LAUNCH_EXE: Path = None
+_CRASH_LOG_GAME_DIR: Path = None   # set by main() once the game folder is resolved (crash_log_dir)
+
+
+def crash_log_dir():
+    """Where run_guarded writes install-crash-<stamp>.log: the game's LongevityMods\\logs once the folder is
+    known (the folder a bug report is asked to attach), else None = beside the script (audit 2026-11-07: the
+    default landed in the extracted download or in an updater generation the next update deletes)."""
+    return _CRASH_LOG_GAME_DIR / "LongevityMods" / "logs" if _CRASH_LOG_GAME_DIR else None
 
 #: (title, body) for the success verdict, when this run was not an install. Defaults to the
 #: install wording.
@@ -4603,4 +5200,5 @@ if __name__ == "__main__":
         relaunch_exe=lambda: _LAUNCH_EXE,
         success_title=lambda: _VERDICT[0] if _VERDICT else None,
         success_body=lambda: _VERDICT[1] if _VERDICT else None,
-        success_after=lambda: print_play_note(*_NOTE_ARGS) if _NOTE_ARGS else None))
+        success_after=lambda: print_play_note(*_NOTE_ARGS) if _NOTE_ARGS else None,
+        log_dir=crash_log_dir))

@@ -46,17 +46,27 @@ def _md5(p: Path) -> str:
 def _clean_base(target: Path, spec) -> Path:
     """The bytes to patch FROM: the .bak when one exists, else the target itself."""
     bak = Path(target).with_suffix(Path(target).suffix + ".bak")
-    if bak.is_file() and _md5(bak) == spec.base_md5:
+    bak_md5 = _md5(bak) if bak.is_file() else None
+    if bak_md5 == spec.base_md5:
         return bak
-    if _md5(Path(target)) == spec.base_md5:
+    live_md5 = _md5(Path(target))
+    if live_md5 == spec.base_md5:
         return Path(target)
+    # The measured hashes ARE the diagnosis (a PRACX the player updated, GOG re-verified files, another
+    # mod): without them the refusal names only what was expected (audit 2026-11-07).
     raise CommitError(
-        f"neither {Path(target).name} nor its .bak is the clean base {spec.base_md5} that target "
+        f"neither {Path(target).name} (MD5 {live_md5}) nor its .bak "
+        f"({'MD5 ' + bak_md5 if bak_md5 else 'absent'}) is the clean base {spec.base_md5} that target "
         f"{spec.id!r} expects")
 
 
-def stage_one(target: Path, patches: Path, spec, work_dir: Path, say=print) -> Path:
-    """Produce a fully patched candidate in `work_dir`. Does not touch the live file."""
+def stage_one(target: Path, patches: Path, spec, work_dir: Path, say=print, summary=None) -> Path:
+    """Produce a fully patched candidate in `work_dir`. Does not touch the live file.
+
+    `summary`, when given, is apply_patches' one-line-per-phase sink (status, text): the patcher then
+    prints NO per-site transcript (the installer's patch log was 850 KB of it per run), while a
+    failing site still arrives through the sink with its bytes. None = the developer transcript.
+    """
     target, work_dir = Path(target), Path(work_dir)
     # The commit is an atomic rename, and a rename cannot cross volumes. With work_dir on %TEMP%
     # (C:) and the game on D: -- the most natural caller configuration -- every commit failed at
@@ -85,12 +95,24 @@ def stage_one(target: Path, patches: Path, spec, work_dir: Path, say=print) -> P
         shutil.copy2(target, bak)
         say(f"  backed up the original {target.name} -> {bak.name}")
 
+    # Which file the candidate is patched FROM is the one fact about the player's .bak a reader of the
+    # record needs (is it trustworthy?); the header above it names only the TABLE's expected base.
+    say(f"  patching {target.name}: target {spec.id!r}, from {src.name} (MD5 {spec.base_md5})")
     cand = work_dir / target.name
     shutil.copy2(src, cand)
 
     # The candidate has no .bak beside it, so the patcher's own backup step writes one in the temp
     # dir and the real .bak is untouched.
-    rc = ap.apply_patches(cand, Path(patches), do_apply=True, spec=spec)
+    sink = None
+    if summary is not None:
+        def sink(status, text, _summary=summary):
+            # The patcher backs up the CANDIDATE in the work dir; left as is, "Backup: X.bak" reads as if
+            # the game folder's .bak were written on every update, which this module promises never happens.
+            if status == "info" and text.startswith("Backup: "):
+                text += " (the patcher's copy of the staged candidate in the work folder; the game folder's " \
+                        ".bak is not touched)"
+            _summary(status, text)
+    rc = ap.apply_patches(cand, Path(patches), do_apply=True, spec=spec, summary=sink)
     if rc != 0:
         raise CommitError(f"patching the staged copy of {target.name} failed (code {rc})")
 
@@ -160,20 +182,20 @@ def commit(pairs: list, say=print) -> None:
 
 
 def apply_transactional(target: Path, patches: Path, spec, work_dir: Path,
-                        companions: list = None, say=print) -> dict:
+                        companions: list = None, say=print, summary=None) -> dict:
     """Stage the exe (and any companions), then commit them together.
 
-    `companions` is [(live_path, patches_path, spec), ...].
+    `companions` is [(live_path, patches_path, spec), ...]. `summary` as in stage_one.
     Returns {name: md5} for what was installed.
     """
     staged = []
     results = {}
-    cand = stage_one(target, patches, spec, work_dir, say=say)
+    cand = stage_one(target, patches, spec, work_dir, say=say, summary=summary)
     staged.append((Path(target), cand))
     results[Path(target).name] = _md5(cand)
 
     for live, cpatches, cspec in (companions or []):
-        c = stage_one(live, cpatches, cspec, work_dir, say=say)
+        c = stage_one(live, cpatches, cspec, work_dir, say=say, summary=summary)
         staged.append((Path(live), c))
         results[Path(live).name] = _md5(c)
 

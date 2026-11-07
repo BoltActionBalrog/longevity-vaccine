@@ -97,14 +97,17 @@ def _progress(done: int, total: int, started: float, label: str) -> None:
         return
     elapsed = max(time.monotonic() - started, 1e-6)
     rate = done / elapsed / (1 << 20)
+    # The label column fits the longest pack name ("Turovetsky's HD Portrait Pack", 29) whole; the bar gave
+    # up the room, so the line stays under 80 columns (audit 2026-11-06: the name was cut mid-word).
+    name = label if len(label) <= 30 else label[:29] + "~"
     if total:
         pct = 100.0 * done / total
-        bar_w = 28
+        bar_w = 20
         filled = int(bar_w * done / total)
         bar = "#" * filled + "-" * (bar_w - filled)
-        line = f"\r  {label[:22]:<22} [{bar}] {pct:5.1f}%  {rate:5.1f} MB/s"
+        line = f"\r  {name:<30} [{bar}] {pct:5.1f}%  {rate:5.1f} MB/s"
     else:
-        line = f"\r  {label[:22]:<22} {done / (1 << 20):8.1f} MB  {rate:5.1f} MB/s"
+        line = f"\r  {name:<30} {done / (1 << 20):8.1f} MB  {rate:5.1f} MB/s"
     try:
         sys.stdout.write(line)
         sys.stdout.flush()

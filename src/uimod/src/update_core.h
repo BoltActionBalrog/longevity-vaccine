@@ -41,7 +41,7 @@ constexpr char kDownloadUrlShown[] = "longevitymods.com/vaccine/download";
 struct KnownModule { const char* id; const char* label; };
 constexpr KnownModule kKnownModules[] = {
     { "movies-hd",    "HD cinematics" },
-    { "portraits-hd", "Longevity HD Portrait Pack" },
+    { "portraits-hd", "Turovetsky's HD Portrait Pack" },
 };
 inline const char* KnownLabel(const char* id, size_t n)
 {
@@ -844,17 +844,18 @@ constexpr char kCaption[]    = "Longevity Mod";
 constexpr char kCoreLabel[]  = "Longevity Mod";
 constexpr int  kPromptXs     = 460;      // REALLYQUIT is 320 with two short replies; the game's menus use 420. UNMEASURED in-game.
 
-// The last paragraph of every offer: what "Don't ask me again" does -- the reply's label, two
-// spaces, its meaning (user wording 2026-11-04; "Not now" is not explained). (Popup text is
+// The last paragraph of every offer: what "Don't ask me again" does -- the reply's label, one
+// space, its meaning (user wording 2026-11-04, single space 2026-11-06; "Not now" is not
+// explained). (Popup text is
 // PARAGRAPHS: a '\n' only between paragraphs or list items, never inside a sentence -- the engine
 // wraps to the box width, and a break we chose reads as a ragged line at any other width.)
 // User rule 2026-10-31, still in force though the text no longer says it (user 2026-11-04):
 // "a decline of any pack is reset when any new update releases for a module that is already
 // installed." The DLL writes an UPDATE offer's decline at the offered version (`<item>:<ver>`)
 // and a NEW pack's at `*` (`new:<id>:*`); install.py check_report applies the rule.
-constexpr char kNeverUpdate[]  = "\"Don't ask me again\"  Skips this update (undo in Preferences).";
-constexpr char kNeverUpdates[] = "\"Don't ask me again\"  Skips these updates (undo in Preferences).";
-constexpr char kNeverPack[]    = "\"Don't ask me again\"  Skips this pack (undo in Preferences).";
+constexpr char kNeverUpdate[]  = "\"Don't ask me again\" Skips this update (undo in Preferences).";
+constexpr char kNeverUpdates[] = "\"Don't ask me again\" Skips these updates (undo in Preferences).";
+constexpr char kNeverPack[]    = "\"Don't ask me again\" Skips this pack (undo in Preferences).";
 
 // The DeclinedUpdates version an item is declined at: the offered version for an update of
 // something installed, kDeclineAny for a pack the player does not have. An update offer with

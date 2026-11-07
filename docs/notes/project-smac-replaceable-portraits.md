@@ -1,6 +1,6 @@
 ---
 name: project-smac-replaceable-portraits
-description: Replaceable leader/native-life portraits + portraits-hd pack. Prefs tree under "Enable User Portraits"; the SETTING decides the order (pack first when on, then the player's portraits\, then vanilla). Built, audited 2026-10-03; Phase 5 in-game matrix next
+description: Replaceable leader/native-life portraits + portraits-hd pack (licence confirmed 2026-11-06, ships from 1.0.0). Prefs tree under "Enable Custom Portraits" (renamed from "Enable User Portraits" 2026-11-07); the SETTING decides the order (pack first when on, then the player's portraits\, then vanilla). Built, audited 2026-10-03; Phase 5 in-game matrix next
 type: project
 ---
 
@@ -11,7 +11,7 @@ Source art: `dist\portraits-hd-src\alpha centauri (N).png` (gitignored). N→fac
 **Why:** user wants any player to drop in their own portraits without the module; the module is just curated images.
 
 **How to apply:**
-- Layout: the pack lives only in `portraits\hd\` (the installer never writes or prunes elsewhere, nor through junctions). Lookup order is decided by the "Use Longevity HD Portrait Pack" setting: pack first when on (and the manifest is present), then the player's `portraits\` png/jpg, then vanilla. This is user decision 2026-10-03; it superseded "player always wins".
+- Layout: the pack lives only in `portraits\hd\` (the installer never writes or prunes elsewhere, nor through junctions). Lookup order is decided by the "Use Turovetsky's HD Portrait Pack" setting: pack first when on (and the manifest is present), then the player's `portraits\` png/jpg, then vanilla. This is user decision 2026-10-03; it superseded "player always wins".
 - Both substitution points are required: a load-time bake (detour load_faction_art 0x453710) for g≤16, and the PortraitDraw branch for g>16. The g>16 path resamples from RGB, never from the dithered bake.
 - Scanlines default ON with a pref toggle (user decision).
 - The WIC decoder is pinned to PNG/JPEG CLSIDs.
@@ -30,9 +30,9 @@ On 2026-09-30 the maintainer picked BOTH scanline looks as Preferences rows. The
 - DLL: portrait.cpp (B1 load_faction_art detour + B2 + native-life art_core detour) and portrait_files.cpp (WIC, max 2048 px per side).
 - Installer: the pack goes to portraits\hd only, with a prune; the README goes to portraits\.
 - Review triage: work\briefs\portraits-phase3-review.md.
-- Prefs tree (user request 2026-09-30): "Enable User Portraits" (0x70, CustomPortraits) is the parent of "Use Longevity HD Portrait Pack" (0x71, HdPortraits; renamed 2026-10-03; the row exists only when portraits\hd\pack-manifest.json does) and "Add Scanlines" (0x6E). All default ON. 2026-10-30: "Brighten Scanlines" (0x6F) REMOVED (id retired, never reuse; the PortraitScanlinesBright key is gone) -- replacement scanlines are always the brightness-keeping kind (PortraitScanMode = off | MEAN); its row slot went to the airdrop-diversion setting (0x79).
+- Prefs tree (user request 2026-09-30): "Enable Custom Portraits" (0x70, CustomPortraits; "Enable User Portraits" until 2026-11-07: the HD pack is not the player's own art, user) is the parent of "Use Turovetsky's HD Portrait Pack" (0x71, HdPortraits; renamed 2026-10-03; the row exists only when portraits\hd\pack-manifest.json does) and "Add Scanlines" (0x6E). All default ON. 2026-10-30: "Brighten Scanlines" (0x6F) REMOVED (id retired, never reuse; the PortraitScanlinesBright key is gone) -- replacement scanlines are always the brightness-keeping kind (PortraitScanMode = off | MEAN); its row slot went to the airdrop-diversion setting (0x79).
 - DEPLOYED 2026-10-03: DLL e2b92ae0 + the pack in <game>\portraits\hd + portraits\README.txt. The full test suite passed. Phase 5 (the maintainer's in-game matrix) is next.
-- OPEN: an explicit redistribution-permission line for PROVENANCE, and the credit on the website / THIRD_PARTY / release notes.
+- LICENCE CONFIRMED 2026-11-06 (user: the artist approved "on all fronts"): GPL-3.0-or-later + credit + distribution, recorded in work\art\portraits-hd-PROVENANCE.txt and THIRD_PARTY.md; the pack was WITHHELD 2026-11-04..06 (guide, CHANGELOG, website) and is re-added for 1.0.0 (portraits-hd 1.0.0, first release). release.py refuses a built pack whose PROVENANCE still says provisional. Website restore = branch website/restore-portraits-hd-pack (website session).
 
 2026-10-03, after the full audit (work/briefs/portraits-full-audit.md):
 - DEPLOYED DLL 7366fb24, the rebuilt pack in portraits/hd, and portraits/LONGEVITY_PORTRAITS_README.txt (renamed from README.txt). The full test suite passed (2 release-test failures were fixed and rerun).
@@ -40,14 +40,14 @@ On 2026-09-30 the maintainer picked BOTH scanline looks as Preferences rows. The
 - Phase 5 (the maintainer's in-game matrix) is next.
 
 User decisions on 2026-10-03:
-- The player-facing name is "Longevity HD Portrait Pack" everywhere: installer, update prompt (update_core.h), changelog, README, PROVENANCE and THIRD_PARTY. The module id stays portraits-hd.
-- The art licence is GPL-3.0-or-later, PROVISIONAL pending the artist's confirmation, and worded that way in PROVENANCE/THIRD_PARTY; until confirmed the pack is left out of the release.
+- The player-facing name is "Turovetsky's HD Portrait Pack" everywhere (renamed by the maintainer 2026-11-06 from "Longevity HD Portrait Pack"): installer, update prompt (update_core.h), the Preferences row "Use Turovetsky's HD Portrait Pack", changelog, guide, PROVENANCE, THIRD_PARTY, website. It takes no article ("the"/"your") in sentences. The module id stays portraits-hd, the ini key HdPortraits.
+- The art licence is GPL-3.0-or-later. SUPERSEDED 2026-11-06: no longer provisional -- the artist confirmed it (see LICENCE CONFIRMED above) and the pack ships from 1.0.0.
 - portraits-hd stays 0.1.0 for a mock update test. The first public release ships as 0.2.0 (owner decision 2026-10-31); pack versions stay independent of the product's.
-- the maintainer's work log (Release prep) records: the 0.2.0 decision, confirm the licence (a release blocker; until then the pack is left out of the release with --without portraits-hd), and the website update (handled separately).
+- the maintainer's work log (Release prep) records the 0.2.0 decision and the website update. The licence blocker (and the `--without portraits-hd` releases 0.2.0..0.2.2) ended 2026-11-06.
 - DLL 264b3b35 is deployed (the rename).
 
 VERIFIED 2026-10-03 by measured screenshot audits, bit-exact to the law in every portrait instance:
-- Covered: 4K (19 instances) plus 1920x1080 and 1600x1200 (~140), every slot incl. diplomacy, all three scan modes, pack on/off, native-life fallback, Enable User Portraits off (vanilla), and the no-pack run (no HD row, no crash).
+- Covered: 4K (19 instances) plus 1920x1080 and 1600x1200 (~140), every slot incl. diplomacy, all three scan modes, pack on/off, native-life fallback, Enable Custom Portraits off (vanilla), and the no-pack run (no HD row, no crash).
 - Still unverified: the 1024x768 matrix (only the council bake), and the Preferences page at 1600/800.
 - Open colour items for the USER to decide: F1, a ~-2/255 darkening from floor-rounded diffusion; F2, a green tint on bright neutrals. Recommended fix: replacements only.
 - A CHANGELOG line was added.

@@ -11,6 +11,7 @@ and (c) return a code in our reserved range so run-install.bat's crash threshold
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -298,6 +299,29 @@ def test_no_wait_is_honoured_even_when_argparse_fails(monkeypatch, capsys):
     monkeypatch.delenv("LONGEVITY_NO_WAIT", raising=False)
     monkeypatch.setattr(ix.sys, "argv", ["install.py", "--bogus", "--no-wait"])
     assert ix.interactive() is False
+
+
+def test_an_any_key_wait_reads_one_console_key_and_falls_back_to_a_line(monkeypatch, capsys):
+    """The foreign-backup refusal (user 2026-11-05) holds the window on ANY key: one keypress
+    through the console's own reader, the prompt said through say() under one blank line; with
+    no console reader, a line (Enter) ends it instead."""
+    monkeypatch.setattr(ix, "interactive", lambda: True)
+    monkeypatch.setattr(ix, "_last_blank", False)
+    pressed = []
+    monkeypatch.setitem(ix.sys.modules, "msvcrt", types.SimpleNamespace(getwch=lambda: pressed.append("x") or "x"))
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("the console reader must be used"))
+    ix.wait_for_key("Press any key to close this window...", any_key=True)
+    assert pressed == ["x"]
+    assert capsys.readouterr().out == "\nPress any key to close this window...\n"
+
+    class _NoReader:
+        def getwch(self):
+            raise OSError("no console")
+    monkeypatch.setitem(ix.sys.modules, "msvcrt", _NoReader())
+    lines = []
+    monkeypatch.setattr("builtins.input", lambda *a: lines.append(a) or "")
+    ix.wait_for_key("Press any key to close this window...", any_key=True)
+    assert lines == [()]
 
 
 def test_non_tty_stdin_does_not_raise(monkeypatch, capsys):

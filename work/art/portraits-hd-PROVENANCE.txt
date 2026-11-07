@@ -1,4 +1,4 @@
-Longevity HD Portrait Pack (module id "portraits-hd")
+Turovetsky's HD Portrait Pack (module id "portraits-hd")
 
 Art by Turovetsky (Reddit user "Turovetsky").
   YouTube: https://www.youtube.com/@Turovetsky
@@ -7,9 +7,9 @@ Art by Turovetsky (Reddit user "Turovetsky").
 The artist must be credited by that handle and those links wherever the pack is distributed or shown.
 Recorded 2026-09-30 from the mod author's statement of where the art comes from and the credit it requires.
 
-LICENCE (provisional): GNU General Public License v3.0 or later (GPL-3.0-or-later), the licence of the
-Longevity Vaccine source.  This licence is ASSUMED by the mod author (2026-10-03) and has not yet been
-confirmed by the artist; it will be corrected to whatever terms the artist states.
+LICENCE: GNU General Public License v3.0 or later (GPL-3.0-or-later), the licence of the Longevity Vaccine
+source.  Confirmed by the artist (2026-11-06), together with the credit above and the pack's distribution with
+Longevity Vaccine.
 
 The pack's images are the artist's 14 portraits (one per SMAC/SMACX leader), cropped by
 work\scripts\art\build_portraits_hd.py to the game's own portrait framing.  No other change is made to the art.

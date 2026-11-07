@@ -315,9 +315,7 @@ for name, asm in THUNKS:
 assert off <= LIMIT_OFF, hex(off)
 
 # ---------------- sites (original bytes read from the PRISTINE exe) ----------------
-bak = pathlib.Path(config.game_exe_path()).with_suffix(".exe.bak") if hasattr(config, "game_exe_path") else None
-if bak is None or not bak.exists():
-    bak = pathlib.Path(r"D:\GOG Galaxy\Games\Sid Meier's Alpha Centauri Planetary Pack\terranx_PRACX.exe.bak")
+bak = pathlib.Path(config.terranx_bak())      # the configured install (config.py), like every other assembler
 pe = pefile.PE(str(bak), fast_load=True)
 IMG = pe.OPTIONAL_HEADER.ImageBase
 

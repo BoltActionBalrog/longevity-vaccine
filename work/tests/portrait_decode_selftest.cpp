@@ -1,7 +1,7 @@
 // End-to-end harness for uimod portrait_files.cpp (tests\test_portrait_files.py): the REAL lookup + WIC decode,
 // run from a throwaway folder laid out like a game directory (the exe's own folder is the "game dir").
 //   portrait_decode_selftest <name> [nopack|off]  -> "none" | "<w> <h> <r> <g> <b>" (after pre-reduce, pixel (0,0))
-//   nopack = "Use Longevity HD Portrait Pack" off; off = "Enable User Portraits" off
+//   nopack = "Use Turovetsky's HD Portrait Pack" off; off = "Enable Custom Portraits" off
 #include "../../src/uimod/src/portrait_files.cpp"
 #include <cstdio>
 #include <cstring>

@@ -441,7 +441,7 @@ int main(int argc, char** argv)
             prewarm::Restart(c.snap);
             prewarm::WaitIdle();
         } else {
-            portrait_files::SetOptions(true, false);          // "Use Longevity HD Portrait Pack" off: no images at all
+            portrait_files::SetOptions(true, false);          // "Use Turovetsky's HD Portrait Pack" off: no images at all
             prewarm::Restart(c.snap);
             prewarm::WaitIdle();
             std::vector<prewarm::EntryInfo> esm; prewarm::DebugEntries(&esm);

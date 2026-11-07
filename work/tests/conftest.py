@@ -317,13 +317,17 @@ def pristine_bytes() -> bytes:
     """
     import hashlib
     game = config.game_dir(required=False)
-    candidates = [game / (ap.PRISTINE_EXE + ".bak"), game / ap.PRISTINE_EXE]
+    # Third place: a game folder the installer set up for Thinker keeps the original as
+    # terranx_original.exe (terranx.exe is then our build and its .bak the clean PRACX base), and
+    # every Thinker test skipped silently the moment the live game was set up (2026-11-06).
+    stem, suf = os.path.splitext(ap.PRISTINE_EXE)
+    candidates = [game / (ap.PRISTINE_EXE + ".bak"), game / ap.PRISTINE_EXE, game / f"{stem}_original{suf}"]
     for p in candidates:
         if p.is_file() and hashlib.md5(p.read_bytes()).hexdigest() == ap.PRISTINE_MD5:
             return p.read_bytes()
     _missing(candidates[0],
              f"the pristine {ap.PRISTINE_EXE} ({ap.PRISTINE_MD5}, needed for the native "
-             f"DLL-loader site checks; looked in the .bak and the live exe)")
+             f"DLL-loader site checks; looked in the .bak, the live exe and {candidates[2].name})")
 
 
 @pytest.fixture

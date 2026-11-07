@@ -292,22 +292,45 @@ def _check_portrait_pack(d: Path) -> None:
         p = d / name
         if p.stat().st_size != f.get("size") or bph.sha256_file(p) != f.get("sha256"):
             raise ValueError(f"portraits-hd: {name} does not match {bph.MANIFEST} (edited after the build?)")
-    prov = (d / bph.PROVENANCE).read_text(encoding="utf-8")
+    _check_portrait_provenance((d / bph.PROVENANCE).read_bytes(), bph.PROVENANCE)
+
+
+#: The tracked provenance every shipped pack must carry, word for word: the artist's credit and the licence as the
+#: artist confirmed it (2026-11-06). A pack built from an older text (the provisional licence) never ships.
+_PORTRAIT_PROVENANCE = _REPO / "work" / "art" / "portraits-hd-PROVENANCE.txt"
+
+
+def _check_portrait_provenance(data: bytes, name: str) -> None:
+    text = data.decode("utf-8", errors="replace")
     for must in ("Turovetsky", "https://www.youtube.com/@Turovetsky", "https://x.com/turovetsky"):
-        if must not in prov:
-            raise ValueError(f"portraits-hd: {bph.PROVENANCE} lacks the artist's required credit ({must})")
+        if must not in text:
+            raise ValueError(f"portraits-hd: {name} lacks the artist's required credit ({must})")
+    want = _PORTRAIT_PROVENANCE.read_text(encoding="utf-8")
+    if text.replace("\r\n", "\n") != want.replace("\r\n", "\n"):
+        raise ValueError(f"portraits-hd: {name} is not work\\art\\portraits-hd-PROVENANCE.txt (built from an older "
+                         "text? rebuild the pack: work\\scripts\\art\\build_portraits_hd.py --provenance "
+                         "work\\art\\portraits-hd-PROVENANCE.txt)")
 
 
 def _check_reused_portrait_pack(archive: Path, mver: str) -> None:
     """An existing LV-portraits-hd-<v>.zip is reused unbuilt.  If dist\\portraits-hd was rebuilt since (another crop,
     another image, an edited PROVENANCE) the old zip would silently ship under the signed manifest: refuse instead,
-    member by member (CRC32 + size), unless the folder is absent (a machine without the pack source)."""
+    member by member (CRC32 + size), unless the folder is absent (a machine without the pack source).  Whatever
+    the folder holds, the archive's own PROVENANCE.txt must be the current tracked one (credit + confirmed licence)."""
     import zlib
+    with zipfile.ZipFile(archive) as z:
+        members = {Path(i.filename).name: (i.CRC, i.file_size) for i in z.infolist() if not i.is_dir()}
+        prov = next((i for i in z.infolist() if Path(i.filename).name == "PROVENANCE.txt"), None)
+        if prov is None:
+            raise SystemExit(f"REFUSING to reuse {archive.name}: it carries no PROVENANCE.txt (the artist's credit)")
+        try:
+            _check_portrait_provenance(z.read(prov), f"{archive.name}:PROVENANCE.txt")
+        except ValueError as e:
+            raise SystemExit(f"REFUSING to reuse {archive.name}: {e}. Bump MODULE_VERSIONS['portraits-hd'] in "
+                             f"version.py (a published archive name is immutable).")
     d = _REPO / "dist" / "portraits-hd"
     if not d.is_dir():
         return
-    with zipfile.ZipFile(archive) as z:
-        members = {Path(i.filename).name: (i.CRC, i.file_size) for i in z.infolist() if not i.is_dir()}
     if "pack-manifest.json" not in members:
         return      # not an archive built from a pack folder (every real one carries the manifest): nothing to compare
     current = {}

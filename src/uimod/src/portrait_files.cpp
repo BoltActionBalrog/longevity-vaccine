@@ -401,8 +401,8 @@ void ListDir(const wchar_t* dir, const wchar_t* sub, const wchar_t* ext, char (*
     FindClose(h);
 }
 
-bool g_enabled = true;                        // Preferences "Enable User Portraits"
-bool g_usePack = true;                        // Preferences "Use Longevity HD Portrait Pack" (the portraits\hd\ pack)
+bool g_enabled = true;                        // Preferences "Enable Custom Portraits"
+bool g_usePack = true;                        // Preferences "Use Turovetsky's HD Portrait Pack" (the portraits\hd\ pack)
 
 } // namespace
 
@@ -454,7 +454,7 @@ std::shared_ptr<const Image> Find(const char* name)
 
     wchar_t dir[MAX_PATH];
     if (!GameDirW(dir, MAX_PATH)) return nullptr;
-    // The SETTING decides, not where a file sits: with "Use Longevity HD Portrait Pack" on, the pack's image wins
+    // The SETTING decides, not where a file sits: with "Use Turovetsky's HD Portrait Pack" on, the pack's image wins
     // for every name it has; a name the pack lacks (native life, a custom faction, a pack file the player deleted
     // or that will not decode) falls back to the player's own portraits\, then to the game's art.  With it off,
     // only the player's own files count.

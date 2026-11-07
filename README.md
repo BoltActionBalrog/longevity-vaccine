@@ -8,6 +8,7 @@ Longevity Vaccine is a free mod for *Sid Meier's Alpha Centauri: Alien Crossfire
 - **Fixes the Windows 11 new-game freeze** and other crashes.
 - **Fullscreen, borderless or windowed.** Switch from the in-game preferences tab.
 - **Movies play inside the game.** Optional HD remastered cinematics.
+- **Optional HD leader portraits** by Turovetsky ([YouTube](https://www.youtube.com/@Turovetsky), [X](https://x.com/turovetsky)), or drop in your own portrait images.
 - **Smooth map scrolling** at high resolutions.
 - **Fixes gameplay bugs.** The AI can no longer see cloaked units, etc.
 - **Modern-style mouse controls** (optional)
@@ -70,8 +71,8 @@ Every scaled value is `vanilla × g/16`. `g` is the runtime scale from the scree
 
 ### Build and test
 
-- Some launchers and Frida probes still hardcode the maintainer's checkout folder. Edit them to point at yours, or run the Python scripts directly.
-- Install Python 3.12 as a full install at `tools/python`, not a venv. Then run `pip install capstone keystone-engine unicorn pefile pyyaml pillow numpy pytest pytest-xdist frida-tools pyghidra==3.1.0`. The pyghidra version must match Ghidra's.
+- Some launchers, Frida probes and the Ghidra-side analysis scripts (the `work/scripts/*.py` that set `PROJECT_LOCATION`, plus a few assembler output paths) still hardcode the maintainer's checkout folder `D:\SmacxUi`. Edit the constant at the top of the file to point at yours. The patcher, the installer, the DLL build and the test suite do not depend on it.
+- Install Python 3.12 as a full install at `tools/python`, not a venv. Then run `pip install capstone keystone-engine unicorn pefile pyyaml pillow numpy scipy pytest pytest-xdist frida-tools pyghidra==3.1.0`. The pyghidra version must match Ghidra's.
 - Copy `work/game-path.txt.example` to `work/game-path.txt` and point it at a PRACX GOG install. The patcher expects MD5 `2d0b1438` and keeps a `.bak`. If the PRACX executable there is not named `terranx.exe`, put its name in `work/game-exe.txt` (or set `SMACX_EXE_NAME`); without it the installer tests read the wrong `.bak` and fail instead of skipping.
 - Optional: Ghidra 12.1 at `tools/ghidra_12.1_PUBLIC` and JDK 21 at `tools/jdk-21.0.11+10` for decompiling.
 - Optional: Node.js for the JavaScript scaling tests, and PowerShell 7 for `work/run-<WxH>.bat`.
@@ -100,7 +101,7 @@ The tests never launch the game or touch a real install.
 ```
 py work\scripts\trace_imports.py
 py work\scripts\build_runtime.py --verify
-py work\scripts\fetch_python38.py           # Windows 7 and 8 interpreter
+py work\scripts\fetch_python38.py           # Windows 7 and 8 interpreter; needs the Windows SDK's UCRT redistributable folder (Windows Kits\10\Redist\10.0.*\ucrt), see THIRD_PARTY.md
 py work\scripts\release.py --out dist\release --sign-key <your key>
 ```
 
@@ -115,6 +116,8 @@ It writes to the game folder: the patched exe with a `.bak`, `uimod.dll`, the ff
 - Release publishing tools. `release.py` and `sign_manifest.py` are here. No key is.
 - Most analysis scratch and game disassembly dumps. Tests that need them skip.
 - Thinker and PRACX source under `refs/`. Clone them from their own repositories if you need them.
+- The HD portrait images (Turovetsky's pack; its terms are in `THIRD_PARTY.md`). The pipeline that packs them is here.
+- The private working notes that `docs/notes/README.md` describes as withheld; the engineering notes are all here.
 
 ### Contributing
 

@@ -614,8 +614,11 @@ def test_wheel_stc_is_the_one_cursor_path_of_every_asm_wheel_head():
     """Every asm wheel head calls t_wheel_stc where it used to call ScreenToClient; no head calls the IAT
     directly any more; the stub bytes are the ones uimod.dll's wheel.cpp byte-checks before it fills the cell."""
     import re
+    import config
+    if not pathlib.Path(config.terranx_bak()).exists():      # a contributor without the game: skip, not error
+        pytest.skip("pristine .bak not present")
     import assemble_basewin as BW
-    import assemble_ntw as NT
+    import assemble_ntw as NT          # reads the pristine .bak at import
     with contextlib.redirect_stdout(io.StringIO()):
         import assemble_dl as AD
     for mod in (BW, NT, AD):
@@ -1699,6 +1702,8 @@ def test_rw_win_h_field_writers():
     between; a pointer writer is outside this displacement scan.)"""
     import pefile
     import config
+    if not pathlib.Path(config.terranx_bak()).exists():      # a contributor without the game: skip, not error
+        pytest.skip("pristine .bak not present")
     pe = pefile.PE(str(config.terranx_bak(required=True)), fast_load=True)
     text = next(x for x in pe.sections if x.Name.rstrip(b"\0") == b".text")
     va0 = pe.OPTIONAL_HEADER.ImageBase + text.VirtualAddress

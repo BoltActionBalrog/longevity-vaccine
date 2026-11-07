@@ -57,6 +57,58 @@ def test_create_then_find(desk, game):
     assert ("pracx", str(exe)) in inst.list_shortcuts()
 
 
+def test_the_shortcut_shows_the_games_icon_not_a_launchers(desk, game):
+    """User 2026-11-06: a Thinker folder's shortcut starts thinker.exe, whose icon is a plain "Mod"
+    square; the shortcut takes the game exe's icon instead (terranx.exe, the exe the launcher
+    starts). A plain PRACX target keeps its own icon, which IS the game's."""
+    (game / "thinker.exe").write_bytes(b"MZ")
+    assert inst.shortcut_icon(game, "pracx", game / "terranx_PRACX.exe") == game / "terranx_PRACX.exe"
+    assert inst.shortcut_icon(game, None, game / "terranx_PRACX.exe") == game / "terranx_PRACX.exe"
+    assert inst.shortcut_icon(game, "pracx_thinker", game / "thinker.exe") == game / "terranx.exe"
+    (game / "terranx.exe").unlink()
+    assert inst.shortcut_icon(game, "pracx_thinker", game / "thinker.exe") == game / "thinker.exe"
+    (game / "terranx.exe").write_bytes(b"MZ")
+    # ...and the written .lnk carries it: target thinker.exe, icon terranx.exe
+    lnk = desk[0] / "Thinker test.lnk"
+    assert inst.create_shortcut(lnk, game / "thinker.exe", inst.shortcut_icon(game, "pracx_thinker", game / "thinker.exe")) == ""
+    out = inst._ps("$sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut(" + inst._ps_quote(lnk) + "); "
+                   "Write-Output ('T=' + $s.TargetPath); Write-Output ('I=' + $s.IconLocation)")
+    assert f"T={game / 'thinker.exe'}" in out and f"I={game / 'terranx.exe'},0" in out, out
+
+
+def _lnk_icon(lnk):
+    return inst._ps("$sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut(" + inst._ps_quote(lnk) + "); "
+                    "Write-Output ('I=' + $s.IconLocation)").strip()
+
+
+def test_the_installer_writes_and_refreshes_its_own_shortcuts_icon(desk, game, monkeypatch, capsys):
+    """End to end through check_desktop_shortcut for a Thinker target: a new shortcut gets the game
+    exe's icon, and one that already exists with the launcher's icon (made before 2026-11-06) is
+    brought up to date; a shortcut under the player's own name is left alone."""
+    (game / "thinker.exe").write_bytes(b"MZ")
+    monkeypatch.setattr(ix, "can_ask", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    inst.check_desktop_shortcut(game, "pracx_thinker")
+    ours = desk[0] / (inst.MOD_SHORTCUT_NAME + ".lnk")
+    assert ours.is_file() and _lnk_icon(ours) == f"I={game / 'terranx.exe'},0"
+    capsys.readouterr()
+    # the old rule's shortcut: same target, the launcher's icon
+    assert inst.create_shortcut(ours, game / "thinker.exe") == ""
+    assert _lnk_icon(ours) == f"I={game / 'thinker.exe'},0"
+    monkeypatch.setattr(inst, "_SHORTCUT_NAME", None)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("an existing shortcut asks nothing"))
+    inst.check_desktop_shortcut(game, "pracx_thinker")
+    assert _lnk_icon(ours) == f"I={game / 'terranx.exe'},0"
+    assert "You do not have a desktop shortcut" not in capsys.readouterr().out
+    # the player's own shortcut to the same exe: found, never rewritten
+    mine = desk[1] / "My Thinker.lnk"
+    ours.unlink()
+    assert inst.create_shortcut(mine, game / "thinker.exe") == ""
+    monkeypatch.setattr(inst, "_SHORTCUT_NAME", None)
+    inst.check_desktop_shortcut(game, "pracx_thinker")
+    assert _lnk_icon(mine) == f"I={game / 'thinker.exe'},0"
+
+
 def test_mod_exe_prefers_the_targets_exe(game):
     assert inst.mod_exe(game, "pracx").name == "terranx_PRACX.exe"
     assert inst.mod_exe(game, None) is not None

@@ -321,6 +321,10 @@ def _fake_pack(out: Path, name: str, mver: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(p, "w") as z:
         z.writestr(f"{name}/x.bin", b"x")
+        if name == "portraits-hd":
+            # a reused portrait archive must carry the artist's credit and confirmed licence word for word
+            z.writestr("portraits/hd/PROVENANCE.txt",
+                       (rel._REPO / "work" / "art" / "portraits-hd-PROVENANCE.txt").read_bytes())
     return p
 
 

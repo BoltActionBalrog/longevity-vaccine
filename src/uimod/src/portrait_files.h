@@ -1,4 +1,4 @@
-// Replacement portrait files.  With "Use Longevity HD Portrait Pack" on: <game>\portraits\hd\<name>.png (the
+// Replacement portrait files.  With "Use Turovetsky's HD Portrait Pack" on: <game>\portraits\hd\<name>.png (the
 // portraits-hd pack) first, then the player's own <game>\portraits\<name>.png|.jpg; with it off, only the player's
 // own.  A file that is missing or unusable falls through to the next, and past the last to the game's own art.
 // <name> is a faction's file name (MFactions[f].filename, e.g. "gaians") or a native-life picture's base name
@@ -90,7 +90,7 @@ struct Image {
 // file is decoded once however many threads ask (the pre-bake worker and the game thread).
 std::shared_ptr<const Image> Find(const char* name);
 
-// Preferences: `enabled` = "Enable User Portraits" (off: Find never returns an image); `usePack` = "Enable HD
+// Preferences: `enabled` = "Enable Custom Portraits" (off: Find never returns an image); `usePack` = "Enable HD
 // Portraits" (off: portraits\hd\ is not looked at, the player's own portraits\ still are).
 void SetOptions(bool enabled, bool usePack);
 // The names Find could serve right now (the pack's and the player's png / jpg stems, case-insensitively unique,

@@ -187,12 +187,12 @@ constexpr int  kScanChkId  = 0x6E;       // the "Add Scanlines" row (replacement
 // 0x6F RETIRED ("Brighten Scanlines", removed 2026-10-30: the brightened scanlines are simply always on; never reuse)
 constexpr int  kAirdropChkId = 0x79;     // "Air Drops Divert Around Unseen Defenders" (aivis.cpp), top-level after the cloak rows
                                          // (0x78 is kClipChkId below -- the audit of 2026-10-30 caught a collision; test_airdrop_divert pins uniqueness)
-constexpr int  kCustomChkId = 0x70;      // "Enable User Portraits": the parent of the portrait rows
-constexpr int  kHdChkId    = 0x71;       // "Use Longevity HD Portrait Pack" (only while the portraits-hd pack is installed)
+constexpr int  kCustomChkId = 0x70;      // "Enable Custom Portraits": the parent of the portrait rows
+constexpr int  kHdChkId    = 0x71;       // "Use Turovetsky's HD Portrait Pack" (only while the portraits-hd pack is installed)
 constexpr int  kModernChkId = 0x72;      // "Modern Control Set" (modernctl.cpp): the parent ...
 constexpr int  kRcMoveChkId = 0x73;      // ... and "Right-Click Drags to Move" nested under it
 constexpr int  kDragCellId0 = 0x74;      // the map-drag row: "Middle-Click Drags Map" 0x74 / "Right-Click Drags Map" 0x75, one line,
-                                         // exclusive, the selected cell clicked = both off (no drag scrolling); next free 0x76
+                                         // exclusive, the selected cell clicked = both off (no drag scrolling); 0x76..0x79 below
 constexpr int  kDragCells   = 2;
 constexpr int  kDragCellValue[kDragCells] = { kMapDragMiddle, kMapDragRight };   // [UIMod] MapDragButton per cell
 constexpr int  kAudioRowPitch = 0x16;    // PrefWin_build's audio rows: label/slider y0 + i*0x16 (0x48F344/0x48F60F); ours take rows 0 and 1
@@ -210,8 +210,9 @@ constexpr int  kSbValueOfs = 0xA2C;      // ScrollBar raw position; +0xA20/+0xA2
 constexpr int  kModeCells  = 3;
 constexpr int  kModeRow    = 0;          // the page's first row ...
 constexpr int  kOptRow0    = 1;          // ... "Constrain Mouse to Window" nested under it (neither without PRACX's window code),
-                                         // then the option rows.  15 rows
-                                         // (k = 0..14) fit above the two-row slider frame; the overlap log in BuildWidgets is the guard
+                                         // then the option rows.  15 row INDICES (0..14) fit above the two-row slider frame:
+                                         // with PRACX the mode + clip rows take 0..1 and the 13 option rows (BuildWidgets' k = 0..12)
+                                         // take 2..14 -- ZERO slack; the overlap log in BuildWidgets is the guard
 constexpr uintptr_t kVA_WinIsVisible = 0x005F7E90;   // Win_is_visible: thiscall(ecx=Win) -> int
 constexpr int  kChkSubIndent = 18;       // a sub-option row sits one box width (native) to the right of its parent
 constexpr int  kChkRowPitch = 20;         // row-to-row pitch (native): the stock CheckList rowH, logged live as 50 px at g=40 (chkrow line in uimod.log)
@@ -358,12 +359,12 @@ struct alignas(16) Widgets {
     BYTE rcmovecheck[0xC00]; // "Right-Click Drags to Move", nested under it: ditto
     BYTE dragcell[kDragCells][0xC00];   // "Middle-Click Drags Map" / "Right-Click Drags Map", side by side on one line: ditto
     BYTE clickview[0xC00];   // "Left Click Doesn't Recenter the Map" (modernctl.cpp camera options): ditto
-    BYTE baseview[0xC00];    // "Closing a Base Doesn't Recenter the Map": ditto
+    BYTE baseview[0xC00];    // "Closing a Base Never Recenters Map": ditto
     BYTE updcheck[0xC00];    // the "Check for Updates at Startup" row: ditto
     BYTE subbtn[0xC00];      // "Reset Skipped Updates": a STOCK FlatButton (engine face) right of that row's label
-    BYTE customcheck[0xC00]; // "Enable User Portraits": same widget, same private vtable as the checkbox rows
-    BYTE hdcheck[0xC00];     // "Use Longevity HD Portrait Pack", nested under it (built only with the pack installed)
-    BYTE scancheck[0xC00];   // the "Add Scanlines" row, nested under "Enable User Portraits": ditto
+    BYTE customcheck[0xC00]; // "Enable Custom Portraits": same widget, same private vtable as the checkbox rows
+    BYTE hdcheck[0xC00];     // "Use Turovetsky's HD Portrait Pack", nested under it (built only with the pack installed)
+    BYTE scancheck[0xC00];   // the "Add Scanlines" row, nested under "Enable Custom Portraits": ditto
     BYTE airdropcheck[0xC00]; // the "Air Drops Divert Around Unseen Defenders" row (top-level, after the cloak rows): ditto
     BYTE modecheck[kModeCells][0xC00];   // Fullscreen / Borderless / Windowed, side by side on one line: ditto
     BYTE slider[0x2200];
@@ -392,8 +393,8 @@ const char kBaseViewText[]  = "Closing a Base Never Recenters Map";         // [
 bool g_cameraRow = false;                                       // the two camera rows exist (modernctl's camera sites bound)
 const char kUpdChkText[] = "Check for Updates at Startup";      // [UIMod] CheckForUpdates; takes effect at the next launch
 const char kSubBtnText[] = "Reset Skipped Updates";          // clears every "Don't ask me again" (after a confirmation)
-const char kCustomChkText[] = "Enable User Portraits";          // user wording 2026-09-30 ([UIMod] CustomPortraits)
-const char kHdChkText[] = "Use Longevity HD Portrait Pack";                // user wording 2026-10-03 ([UIMod] HdPortraits)
+const char kCustomChkText[] = "Enable Custom Portraits";        // user wording 2026-11-07, was "Enable User Portraits" ([UIMod] CustomPortraits)
+const char kHdChkText[] = "Use Turovetsky's HD Portrait Pack";   // user wording 2026-10-03, pack renamed 2026-11-06 ([UIMod] HdPortraits)
 bool g_hdRow = false;                                           // the HD row exists (the pack is installed)
 const char kScanChkText[] = "Add Scanlines";                    // user wording 2026-09-30 ([UIMod] PortraitScanlines)
 const char kAirdropChkText[] = "Air Drops Divert Around Unseen Defenders";   // [UIMod] AirdropDiversion (aivis.cpp)
@@ -1096,9 +1097,12 @@ void __fastcall WrapCommand(void* self, void* edx, int id)
                 WinRedraw(g_w.baseview);
             }
             UpdateHoldSliderState();      // before the hold row's set_pos below: an enabled bar takes it
-            UpdateCheckSet(kUpdateCheckDefault);      // the "Don't ask me again" list is NOT touched: that is the button's job
-            WinRedraw(g_w.updcheck);
-            PortraitSetAll(kPortraitCustomDefault, kPortraitCustomDefault ? kPortraitHdDefault : 0,
+            // NOT "Check for Updates at Startup": the player's answer to the installer's question is a consent, not a
+            // tuning, and nothing on this button says it would turn update checks on (audit 2026-11-07; user). The
+            // only control that turns it on is the row itself and "Reset Skipped Updates", whose popup says so.
+            // without the HD row the stored HD value is kept, as the parent's toggle keeps it: a setting the page
+            // does not show is not reset (audit 2026-11-07)
+            PortraitSetAll(kPortraitCustomDefault, g_hdRow ? (kPortraitCustomDefault ? kPortraitHdDefault : 0) : PortraitHdGet(),
                            kPortraitCustomDefault ? kPortraitScanDefault : 0);
             WinRedraw(g_w.customcheck);
             if (g_hdRow) WinRedraw(g_w.hdcheck);
@@ -1287,126 +1291,103 @@ void BuildWidgets()
                   Rd<int>(kVA_FrameX) + kChkSubIndent, Rd<int>(kVA_TabY0) + kChkRowDy + kOptRow0 * kChkRowPitch,
                   RowW(Rd<int>(kVA_FrameX) + kChkSubIndent, kChkTextDx + clipTextW + 4), boxH + kChkTextDy, prefwin, 0);   // room for the label's descenders below the box
         }
-        // the AI-visibility row: same widget class, vtable and painter
-        int aiTextW = 160;
-        if (fm)
-            aiTextW = reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, kAiChkText) + 8;
-        ctor(g_w.aicheck, nullptr);
-        *reinterpret_cast<void**>(g_w.aicheck) = g_chkVtbl;
-        binit(g_w.aicheck, nullptr, "", kAiChkId,
-              Rd<int>(kVA_FrameX), Rd<int>(kVA_TabY0) + kChkRowDy + optRow0 * kChkRowPitch,
-              RowW(Rd<int>(kVA_FrameX), kChkTextDx + aiTextW + 4), boxH + kChkTextDy, prefwin, 0);
-        int cargoTextW = 200;
-        if (fm)
-            cargoTextW = reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, kCargoChkText) + 8;
-        ctor(g_w.cargocheck, nullptr);
-        *reinterpret_cast<void**>(g_w.cargocheck) = g_chkVtbl;
-        binit(g_w.cargocheck, nullptr, "", kCargoChkId,
-              Rd<int>(kVA_FrameX) + kChkSubIndent, Rd<int>(kVA_TabY0) + kChkRowDy + (optRow0 + 1) * kChkRowPitch,   // nested under the AI row
-              RowW(Rd<int>(kVA_FrameX) + kChkSubIndent, kChkTextDx + cargoTextW + 4), boxH + kChkTextDy, prefwin, 0);
-        int markTextW = 200;
-        if (fm)
-            markTextW = reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, kMarkChkText) + 8;
-        ctor(g_w.markcheck, nullptr);
-        *reinterpret_cast<void**>(g_w.markcheck) = g_chkVtbl;
-        binit(g_w.markcheck, nullptr, "", kMarkChkId,
-              Rd<int>(kVA_FrameX) + kChkSubIndent, Rd<int>(kVA_TabY0) + kChkRowDy + (optRow0 + 2) * kChkRowPitch,   // nested under the AI row
-              RowW(Rd<int>(kVA_FrameX) + kChkSubIndent, kChkTextDx + markTextW + 4), boxH + kChkTextDy, prefwin, 0);
-        // the airdrop-diversion row: top-level (it covers fog of war, not only cloaks), right after the cloak group
-        {
-            int airTextW = 200;
-            if (fm)
-                airTextW = reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, kAirdropChkText) + 8;
-            ctor(g_w.airdropcheck, nullptr);
-            *reinterpret_cast<void**>(g_w.airdropcheck) = g_chkVtbl;
-            binit(g_w.airdropcheck, nullptr, "", kAirdropChkId,
-                  Rd<int>(kVA_FrameX), Rd<int>(kVA_TabY0) + kChkRowDy + (optRow0 + 3) * kChkRowPitch,
-                  RowW(Rd<int>(kVA_FrameX), kChkTextDx + airTextW + 4), boxH + kChkTextDy, prefwin, 0);
-        }
+        // The option rows, in the user's order (2026-11-07), top to bottom: the update row (a program setting,
+        // like the display rows above it), the mouse group (Modern Control Set with its child, the two map-drag
+        // cells on ONE line, the two camera rows: one block, ending nearest the Drag Hold Time slider it governs),
+        // the gameplay rules (the cloak group, then the airdrop row), and the portrait group closing the list.
+        // A row whose feature is unbound is not built and the rows below it move up: k counts the rows built.
+        // Every row is the same widget class, vtable and painter (CheckContentDraw); the row's window rect is
+        // native and the GraphicWin_init gate scales it once.
+        const int fx = Rd<int>(kVA_FrameX);
+        auto rowY = [&](int k) { return Rd<int>(kVA_TabY0) + kChkRowDy + (optRow0 + k) * kChkRowPitch; };
+        auto labelW = [&](const char* t, int fallback) {   // fallback only while no font is measurable
+            return fm ? reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, t) + 8 : fallback;
+        };
+        auto row = [&](BYTE* w, int id, const char* text, int indent, int k) {   // -> the label width it used
+            const int lw = labelW(text, 160);
+            ctor(w, nullptr);
+            *reinterpret_cast<void**>(w) = g_chkVtbl;
+            binit(w, nullptr, "", id, fx + indent, rowY(k),
+                  RowW(fx + indent, kChkTextDx + lw + 4), boxH + kChkTextDy, prefwin, 0);
+            return lw;
+        };
+        int k = 0;
+
         // the update-check row: the checkbox, then -- on the SAME line, right of its label -- a stock
         // FlatButton (the engine's own face, id kSubBtnId) that clears every "Don't ask me again".
         // Native geometry throughout, like the other rows: the GraphicWin_init gate scales the rects
         // once, and the FlatButton zoom stubs draw the face at g/16 (skill prefwin-settings Recipe A).
         {
-            int updTextW = 200;
-            if (fm)
-                updTextW = reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, kUpdChkText) + 8;
-            const int rowY = Rd<int>(kVA_TabY0) + kChkRowDy + (optRow0 + 4) * kChkRowPitch;
-            ctor(g_w.updcheck, nullptr);
-            *reinterpret_cast<void**>(g_w.updcheck) = g_chkVtbl;
-            binit(g_w.updcheck, nullptr, "", kUpdChkId,
-                  Rd<int>(kVA_FrameX), rowY,
-                  RowW(Rd<int>(kVA_FrameX), kChkTextDx + updTextW + 4), boxH + kChkTextDy, prefwin, 0);
-            int btnTextW = 120;
-            if (fm)
-                btnTextW = reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, kSubBtnText) + 8;
-            const int btnX = Rd<int>(kVA_FrameX) + kChkTextDx + updTextW + 4 + 12;   // a gap after the label
-            const int btnH = Rd<int>(kVA_TabH);                                    // the tab buttons' face height
+            const int y = rowY(k);
+            const int updTextW = row(g_w.updcheck, kUpdChkId, kUpdChkText, 0, k++);   // the row's own width: one measure
+            const int btnTextW = labelW(kSubBtnText, 120);
+            const int btnX = fx + kChkTextDx + updTextW + 4 + 12;   // a gap after the label
+            const int btnH = Rd<int>(kVA_TabH);                     // the tab buttons' face height
             const int btnW = RowW(btnX, btnTextW + 12);
-            ctor(g_w.subbtn, nullptr);                                             // stock vtable: engine face + label
+            ctor(g_w.subbtn, nullptr);                              // stock vtable: engine face + label
             binit(g_w.subbtn, nullptr, kSubBtnText, kSubBtnId,
-                  btnX, rowY - (btnH - (boxH + kChkTextDy)) / 2, btnW, btnH, prefwin, 0);
+                  btnX, y - (btnH - (boxH + kChkTextDy)) / 2, btnW, btnH, prefwin, 0);
         }
 
-        // the portrait rows under it, the cloak rows' parent/child pattern: "Enable User Portraits" at the list's
-        // left edge; nested one box width in, "Use Longevity HD Portrait Pack" (only while the pack is installed: no row for
-        // a pack the player does not have) and "Add Scanlines" (its scanlines are always the brightened kind: the former
-        // "Brighten Scanlines" row made way for the airdrop row above, user 2026-10-30)
+        // the mouse group: the Modern Control Set parent with its nested child, then the two map-drag cells on
+        // ONE line (only with PRACX's drag sites bound; MapDragButton applies with Modern off too), then the two
+        // camera rows (the map stays put on a left click / when a base closes; independent of Modern).
+        // Latched at the FIRST build: a row is constructed once (ctor), so a feature bound or unbound mid-session
+        // shows / hides its row at the next launch -- never a half-built widget
+        if (first) {
+            g_modernRow = ModernControlsAvailable();
+            g_dragRow = MapDragButtonAvailable();
+            g_cameraRow = CameraAvailable();
+        }
+        if (g_modernRow) {
+            row(g_w.moderncheck, kModernChkId, kModernChkText, 0, k++);
+            row(g_w.rcmovecheck, kRcMoveChkId, kRcMoveChkText, kChkSubIndent, k++);
+        } else {
+            UimodDbg("[uimod] prefs: Modern Control Set unavailable -> no rows for it\n");
+        }
+        if (g_dragRow) {
+            const int fw = Rd<int>(kVA_FrameW);
+            const int y = rowY(k++);
+            for (int i = 0; i < kDragCells; ++i) {
+                int w = kChkTextDx + labelW(kDragCellText[i], 160) + 4;
+                if (const int cell = CellX(fx, fw, kDragCells, i + 1) - CellX(fx, fw, kDragCells, i); w > cell) w = cell;
+                ctor(g_w.dragcell[i], nullptr);
+                *reinterpret_cast<void**>(g_w.dragcell[i]) = g_chkVtbl;
+                binit(g_w.dragcell[i], nullptr, "", kDragCellId0 + i, CellX(fx, fw, kDragCells, i), y,
+                      RowW(CellX(fx, fw, kDragCells, i), w), boxH + kChkTextDy, prefwin, 0);
+            }
+        }
+        if (g_cameraRow) {
+            row(g_w.clickview, kClickViewChkId, kClickViewText, 0, k++);
+            row(g_w.baseview, kBaseViewChkId, kBaseViewText, 0, k++);
+        }
+
+        // the gameplay rules: the AI-visibility parent with its two nested rows, then the airdrop-diversion row
+        // (top-level: it covers fog of war, not only cloaks)
+        row(g_w.aicheck, kAiChkId, kAiChkText, 0, k++);
+        row(g_w.cargocheck, kCargoChkId, kCargoChkText, kChkSubIndent, k++);
+        row(g_w.markcheck, kMarkChkId, kMarkChkText, kChkSubIndent, k++);
+        row(g_w.airdropcheck, kAirdropChkId, kAirdropChkText, 0, k++);
+
+        // the portrait group closes the list, the cloak rows' parent/child pattern: "Enable Custom Portraits" at
+        // the list's left edge; nested one box width in, "Use Turovetsky's HD Portrait Pack" (only while the pack is
+        // installed: no row for a pack the player does not have) and "Add Scanlines" (its scanlines are always the
+        // brightened kind: the former "Brighten Scanlines" row made way for the airdrop row, user 2026-10-30)
+        if (first) g_hdRow = PortraitPackInstalled();
+        row(g_w.customcheck, kCustomChkId, kCustomChkText, 0, k++);
+        if (g_hdRow) row(g_w.hdcheck, kHdChkId, kHdChkText, kChkSubIndent, k++);
+        row(g_w.scancheck, kScanChkId, kScanChkText, kChkSubIndent, k++);
+
         {
-            const int fx = Rd<int>(kVA_FrameX);
-            auto rowY = [&](int k) { return Rd<int>(kVA_TabY0) + kChkRowDy + (optRow0 + 5 + k) * kChkRowPitch; };
-            auto labelW = [&](const char* t, int fallback) {
-                return fm ? reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, t) + 8 : fallback;
-            };
-            auto row = [&](BYTE* w, int id, const char* text, int indent, int k) {
-                ctor(w, nullptr);
-                *reinterpret_cast<void**>(w) = g_chkVtbl;
-                binit(w, nullptr, "", id, fx + indent, rowY(k),
-                      RowW(fx + indent, kChkTextDx + labelW(text, 160) + 4), boxH + kChkTextDy, prefwin, 0);
-            };
-            // latched at the FIRST build: the row is constructed once (ctor), so a pack installed or removed
-            // mid-session shows / hides its row at the next launch -- never a half-built widget
-            if (first) g_hdRow = PortraitPackInstalled();
-            int k = 0;
-            row(g_w.customcheck, kCustomChkId, kCustomChkText, 0, k++);
-            if (g_hdRow) row(g_w.hdcheck, kHdChkId, kHdChkText, kChkSubIndent, k++);
-            row(g_w.scancheck, kScanChkId, kScanChkText, kChkSubIndent, k++);
-            // the Modern Control Set group closes the list: the parent, its nested child, then the two map-drag
-            // cells on ONE line (only with PRACX's drag sites bound; MapDragButton applies with Modern off too)
-            if (first) { g_modernRow = ModernControlsAvailable(); g_dragRow = MapDragButtonAvailable(); }
-            if (g_modernRow) {
-                row(g_w.moderncheck, kModernChkId, kModernChkText, 0, k++);
-                row(g_w.rcmovecheck, kRcMoveChkId, kRcMoveChkText, kChkSubIndent, k++);
-            } else {
-                UimodDbg("[uimod] prefs: Modern Control Set unavailable -> no rows for it\n");
-            }
-            if (g_dragRow) {
-                const int fw = Rd<int>(kVA_FrameW);
-                const int y = rowY(k++);
-                for (int i = 0; i < kDragCells; ++i) {
-                    int w = kChkTextDx + labelW(kDragCellText[i], 160) + 4;
-                    if (const int cell = CellX(fx, fw, kDragCells, i + 1) - CellX(fx, fw, kDragCells, i); w > cell) w = cell;
-                    ctor(g_w.dragcell[i], nullptr);
-                    *reinterpret_cast<void**>(g_w.dragcell[i]) = g_chkVtbl;
-                    binit(g_w.dragcell[i], nullptr, "", kDragCellId0 + i, CellX(fx, fw, kDragCells, i), y,
-                          RowW(CellX(fx, fw, kDragCells, i), w), boxH + kChkTextDy, prefwin, 0);
-                }
-            }
-            // the camera rows: the map stays put on a left click / when a base closes (independent of Modern)
-            if (first) g_cameraRow = CameraAvailable();
-            if (g_cameraRow) {
-                row(g_w.clickview, kClickViewChkId, kClickViewText, 0, k++);
-                row(g_w.baseview, kBaseViewChkId, kBaseViewText, 0, k++);
-            }
-            const int scanY = rowY(0);
             // the page's vertical room is runtime layout (PrefWin_build's statics): log it, and say so loudly if
             // the last row would reach the slider-area frame drawn below the option rows
+            const int firstY = rowY(0);
             const int lastBottom = rowY(k - 1) + boxH + kChkTextDy;
             const int frameTop = Rd<int>(kVA_FrameY) - Rd<int>(kVA_BotShift) + kSliderBlockDy;
             char msg[192];
             _snprintf_s(msg, sizeof msg, _TRUNCATE,
-                        "[uimod] prefs: option rows (portraits..map drag) y=%d..%d (native), slider frame top=%d%s\n",
-                        scanY, lastBottom, frameTop, lastBottom > frameTop ? "  !! OVERLAPS THE FRAME" : "");
+                        "[uimod] prefs: %d option rows (updates..portraits) at row indices %d..%d of 0..14, y=%d..%d (native), slider frame top=%d%s\n",
+                        k, optRow0, optRow0 + k - 1, firstY, lastBottom, frameTop, lastBottom > frameTop ? "  !! OVERLAPS THE FRAME" : "");
             if (lastBottom > frameTop) Dbg(msg);  // a real overlap is a fault: every log
             else UimodDbg(msg);
         }
@@ -1415,7 +1396,7 @@ void BuildWidgets()
         // scaling_laws.pref_mode_cell_x (cum(): half_down(i*frameW, 3), never i*(frameW/3)); the gate
         // scales each cell's own x once. Only with PRACX's window code bound (vidmode.cpp).
         if (VidModeAvailable()) {
-            const int fx = Rd<int>(kVA_FrameX), fw = Rd<int>(kVA_FrameW);
+            const int fw = Rd<int>(kVA_FrameW);                 // fx: the option rows' above
             auto cellX = [&](int i) { return CellX(fx, fw, kModeCells, i); };
             for (int i = 0; i < kModeCells; ++i) {
                 int w = 100;
