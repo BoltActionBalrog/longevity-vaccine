@@ -117,7 +117,7 @@ def _installed_template(tmp_path_factory, bak_path, _payload_root):
     rcode, out = _run("--ai", "off", game=g,
                       env_extra={"LONGEVITY_PAYLOAD_ROOT": str(_payload_root)})
     assert "INSTALLATION SUCCESSFUL" in out, out
-    # `--ai off` turns the HD cinematics down exactly as the game's "Don't ask me again" does
+    # `--ai off` turns the HD Cinematics down exactly as the game's "Don't ask me again" does
     # (user 2026-11-01). The template stands for an install that decided nothing about packs, so
     # the tests built on it (new-pack offers, the extras notice) start without that decline.
     assert rc.declined(g) == {"new:movies-hd": rc.DECLINE_ANY}, rc.declined(g)
@@ -849,12 +849,12 @@ def test_a_pack_release_updates_the_pack_with_no_flags(game_installed, tmp_path)
                   versions={"movies-hd": "1.1.0"})
     _, out = _run("--update", "--manifest", str(m2), "--no-prompt", game=game, env_extra=_ENV)
     assert "Already up to date" not in out, out
-    assert "HD cinematics v1.1.0 downloaded" in out, out    # the player-facing label, not the module id
+    assert "HD Cinematics v1.1.0 downloaded" in out, out    # the player-facing label, not the module id
     assert (game / "movies" / "hd" / "a.mp4").read_bytes() == b"v2"
     assert (game / "movies" / "hd" / "b.mp4").read_bytes() == b"new"
     assert rc.module_version(rc.read(game), "movies-hd") == "1.1.0"
-    assert "update offered: HD cinematics v1.0.0 -> v1.1.0" in out, out
-    assert "HD cinematics v1.1.0 installed. Nothing else needed changing." in out, out
+    assert "update offered: HD Cinematics v1.0.0 -> v1.1.0" in out, out
+    assert "HD Cinematics v1.1.0 installed. Nothing else needed changing." in out, out
 
 
 def test_a_base_release_does_not_redownload_a_current_pack(game_installed, tmp_path):
@@ -866,7 +866,7 @@ def test_a_base_release_does_not_redownload_a_current_pack(game_installed, tmp_p
                   versions={"movies-hd": "1.0.0"})
     _, out = _run("--update", "--manifest", str(m2), "--no-prompt", game=game, env_extra=_ENV)
     assert "commit" in out, out                      # the base update itself still happens
-    assert "HD cinematics: up to date (v1.0.0), no download needed" in out, out
+    assert "HD Cinematics: up to date (v1.0.0), no download needed" in out, out
     assert "module movies-hd downloaded" not in out, out
     assert rc.module_version(rc.read(game), "movies-hd") == "1.0.0", \
         "an untouched pack keeps its recorded version"
@@ -948,10 +948,10 @@ def test_only_listed_installs_the_listed_new_pack_and_leaves_a_declined_one(game
     _, out = _run("--update", "--only-listed", "--modules", "portraits-hd", "--manifest", str(m),
                   "--no-prompt", game=game, env_extra=_ENV)
     assert "UPDATE COMPLETE" in out, out
-    assert "HD cinematics v1.1.0: not part of this update" in out, out
-    assert "HD cinematics v1.1.0 downloaded" not in out, out
+    assert "HD Cinematics v1.1.0: not part of this update" in out, out
+    assert "HD Cinematics v1.1.0 downloaded" not in out, out
     # The verdict names the pack left behind -- never "Nothing else needed changing".
-    assert "HD cinematics stays at v1.0.0 (v1.1.0 was not part of this update)" in out, out
+    assert "HD Cinematics stays at v1.0.0 (v1.1.0 was not part of this update)" in out, out
     assert "Nothing else needed changing" not in out, out
     state = rc.read(game)
     assert rc.module_version(state, "portraits-hd") == "1.0.0"
@@ -984,8 +984,8 @@ def test_only_listed_without_modules_brings_only_the_core_current(game_installed
     _, out = _run("--update", "--only-listed", "--manifest", str(m), "--no-prompt", game=game,
                   env_extra=_ENV)
     assert "game patch: applied" in out, out
-    assert "HD cinematics v1.1.0: not part of this update" in out, out
-    assert "HD cinematics: up to date" not in out, out
+    assert "HD Cinematics v1.1.0: not part of this update" in out, out
+    assert "HD Cinematics: up to date" not in out, out
     assert (game / "movies" / "hd" / "a.mp4").read_bytes() == b"v1"
     assert rc.module_version(rc.read(game), "movies-hd") == "1.0.0"
 
@@ -1030,7 +1030,7 @@ def test_an_already_current_run_says_which_pack_could_be_added(game_installed, t
                  versions={"movies-hd": "1.0.0"})
     _, out = _run("--update", "--manifest", str(m), game=game, env_extra=_ENV)
     assert "Already up to date" in out, out
-    assert "HD cinematics: available, not installed" in out, out
+    assert "HD Cinematics: available, not installed" in out, out
     launcher = game / "LongevityMods" / "updater" / "scripts" / "run-install.bat"
     assert launcher.is_file()
     assert f'"{launcher}" --update --modules movies-hd --manifest "{m}"' in out, \
@@ -1047,7 +1047,7 @@ def test_a_pack_can_be_named_by_its_label(game_installed, tmp_path):
     _, out = _run("--update", "--manifest", str(m), "--modules", "hd CINEMATICS",
                   "--no-prompt", game=game, env_extra=_ENV)
     assert (game / "movies" / "hd" / "a.mp4").read_bytes() == b"v1"
-    assert "HD cinematics v1.0.0 installed. Nothing else needed changing." in out, out
+    assert "HD Cinematics v1.0.0 installed. Nothing else needed changing." in out, out
     assert "available, not installed" not in out, "the pack just installed must not be offered"
 
 
@@ -1082,7 +1082,7 @@ def test_a_pack_only_update_whose_download_fails_changes_nothing(game_installed,
     code, out = _run("--update", "--manifest", str(m2), "--no-prompt", game=game,
                      env_extra=_ENV, expect_ok=False)
     assert code == 3, out
-    assert "The update to HD cinematics v1.1.0 could not be downloaded. HD cinematics v1.0.0 " \
+    assert "The update to HD Cinematics v1.1.0 could not be downloaded. HD Cinematics v1.0.0 " \
            "are still installed and work as before. Nothing was changed." in out, out
     assert "NOTHING WAS CHANGED" in out, out
     assert "UPDATE COMPLETE" not in out and "INSTALLATION SUCCESSFUL" not in out
@@ -1105,10 +1105,10 @@ def test_a_base_update_with_a_failed_pack_is_not_reported_as_complete(game_insta
     assert code == 1, out
     assert "UPDATE PARTLY COMPLETE" in out, out
     assert f"Longevity Vaccine v{ver.VERSION} is installed and the game is ready to play. " \
-           "The update to HD cinematics v1.1.0 could not be downloaded. HD cinematics v1.0.0 " \
+           "The update to HD Cinematics v1.1.0 could not be downloaded. HD Cinematics v1.0.0 " \
            "are still installed and work as before." in out, out
     assert "only the pack update is missing" in out and "partway through" not in out, out
-    assert "run the update again to get HD cinematics v1.1.0" in out, out
+    assert "run the update again to get HD Cinematics v1.1.0" in out, out
     assert "UPDATE COMPLETE" not in out and "INSTALLATION SUCCESSFUL" not in out
     assert "INSTALLATION FAILED" not in out
     state = rc.read(game)
@@ -1155,7 +1155,7 @@ def test_check_reports_a_new_pack_then_honours_a_decline(game_installed, tmp_pat
     code, lines, err = _check(game, "--manifest", str(m))
     assert code == 10, err
     assert lines[0] == f"latest={ver.VERSION}"
-    assert lines[1].startswith("new=movies-hd|HD cinematics|1.0.0|"), lines
+    assert lines[1].startswith("new=movies-hd|HD Cinematics|1.0.0|"), lines
     assert not (game / "movies").exists(), "--check installs nothing"
     assert rc.decline(game, "new:movies-hd", "1.0.0")
     code, lines, err = _check(game, "--manifest", str(m))
@@ -1204,7 +1204,7 @@ def test_the_dll_parser_reads_every_real_check_answer(game_installed, tmp_path, 
     code, raw = _check_raw(game, "--manifest", str(m))
     out = _dll_parse(dll_parser, code, raw, tmp_path)
     assert out[0] == "status=ok code=10 badline=0" and out[1] == f"latest={ver.VERSION}"
-    assert re.fullmatch(r"new=movies-hd\|HD cinematics\|1\.0\.0\|\d+", out[2]), out
+    assert re.fullmatch(r"new=movies-hd\|HD Cinematics\|1\.0\.0\|\d+", out[2]), out
     # base update + stale pack
     _with_pack(tmp_path, game, "1.0.0", {"movies/hd/a.mp4": b"v1"})
     m = _publish(tmp_path / "p2", game, latest="9.9.9",
@@ -1212,7 +1212,7 @@ def test_the_dll_parser_reads_every_real_check_answer(game_installed, tmp_path, 
     code, raw = _check_raw(game, "--manifest", str(m))
     out = _dll_parse(dll_parser, code, raw, tmp_path)
     assert out[:3] == ["status=ok code=10 badline=0", "latest=9.9.9", f"base={ver.VERSION}>9.9.9"]
-    assert re.fullmatch(r"stale=movies-hd\|HD cinematics\|1\.0\.0>1\.1\.0\|\d+", out[3]), out
+    assert re.fullmatch(r"stale=movies-hd\|HD Cinematics\|1\.0\.0>1\.1\.0\|\d+", out[3]), out
     # manual (kill switch)
     pub = tmp_path / "p3"
     pub.mkdir()
@@ -1416,7 +1416,7 @@ def test_check_honours_an_any_version_decline_across_releases(game_installed, tm
     assert code == 0 and lines == [f"latest={ver.VERSION}"], (lines, err)
     assert rc.clear_declines(game)
     code, lines, err = _check(game, "--manifest", str(m2))
-    assert code == 10 and lines[1].startswith("new=movies-hd|HD cinematics|2.0.0|"), (lines, err)
+    assert code == 10 and lines[1].startswith("new=movies-hd|HD Cinematics|2.0.0|"), (lines, err)
 
 
 def test_check_reports_a_stale_pack_and_a_base_update(game_installed, tmp_path):
@@ -1429,7 +1429,7 @@ def test_check_reports_a_stale_pack_and_a_base_update(game_installed, tmp_path):
     assert code == 10, err
     assert lines[0] == "latest=9.9.9"
     assert lines[1] == f"base={ver.VERSION}>9.9.9"
-    assert lines[2].startswith("stale=movies-hd|HD cinematics|1.0.0>1.1.0|"), lines
+    assert lines[2].startswith("stale=movies-hd|HD Cinematics|1.0.0>1.1.0|"), lines
     assert (game / "movies" / "hd" / "a.mp4").read_bytes() == b"v1", "--check installs nothing"
 
 
@@ -1484,7 +1484,7 @@ def test_check_keeps_working_when_the_game_folder_is_not_writable(game_installed
                         "--manifest", str(m)], capture_output=True, env=env, timeout=300,
                        stdin=subprocess.DEVNULL)
     assert p.returncode == 10, p.stderr.decode("utf-8", "replace")
-    assert b"new=movies-hd|HD cinematics|1.0.0|" in p.stdout
+    assert b"new=movies-hd|HD Cinematics|1.0.0|" in p.stdout
     assert b"is not writable; caching the manifest under" in p.stderr
     cached = list((tmp_path / "appdata" / "LongevityVaccine").rglob("manifest.json"))
     assert len(cached) == 1, "the manifest is cached per user, per install"
@@ -1555,7 +1555,7 @@ def test_a_fresh_install_can_take_a_pack_from_the_manifest(game, tmp_path):
     assert rc.module_version(state, "movies-hd") == ver.VERSION
     assert rc.module_version(state, "base") == ver.VERSION
     assert _uimod_flag(game) == "1"
-    rows = [l for l in out.split("\n") if l.startswith("  HD cinematics")]
+    rows = [l for l in out.split("\n") if l.startswith("  HD Cinematics")]
     assert rows and rows[-1].split()[-1] == "Success", rows
     lines = out.split("\n")
     assert not any(l.startswith("  recorded") for l in lines), "no bookkeeping row"
@@ -1580,7 +1580,7 @@ def test_a_pack_that_cannot_be_downloaded_leaves_a_partly_complete_install(game,
     state = rc.read(game)
     assert rc.module_version(state, "base") == ver.VERSION
     assert "movies-hd" not in (state.get("modules") or {})
-    rows = [l for l in out.split("\n") if l.startswith("  HD cinematics")]
+    rows = [l for l in out.split("\n") if l.startswith("  HD Cinematics")]
     assert rows and rows[-1].split()[-1] == "Error", rows
 
 

@@ -40,7 +40,7 @@ import assemble_stripes_rwsb as RB  # noqa: E402
 
 G_SWEEP = (16, 18, 21, 22, 25, 32, 40)
 
-PCAVE2, CAVE_LEN = RB.PCAVE2, 0x40000      # >= pcave2 length in patches.yaml (grown 0x30000 -> 0x31000 2026-10-10, caviar_dirty_rect)
+PCAVE2, CAVE_LEN = RB.PCAVE2, 0x44000      # >= pcave2 length in patches.yaml (grown 0x30000 -> 0x31000 2026-10-10, caviar_dirty_rect; 0x41000 2026-11-07, the MP region; 0x44000 2026-11-07, the COMMLINK header)
 G_VA, PERIOD_VA, SBW_VA = RB.G, 0x0066879C, RB.G_SBW
 SB_DRAW = 0x006066F0
 STACK = 0x00200000

@@ -143,3 +143,71 @@ def test_health_never_fails_a_check(monkeypatch, capsys, tmp_path):
     inst._log_health(tmp_path)
     assert "mod health could not be determined (RuntimeError: disk)" in capsys.readouterr().err
     inst._log_health(None)
+
+
+
+class _NoWatchdog:
+    """check_main's wall-clock watchdog is a daemon Timer whose expiry calls os._exit: run in-process it would
+    kill the pytest worker 24 s later. Every in-process check_main test replaces it with this."""
+    started = []
+
+    def __init__(self, *a, **k):
+        self.daemon = False
+
+    def start(self):
+        _NoWatchdog.started.append(self)
+
+    def cancel(self):
+        pass
+
+
+@pytest.fixture
+def no_watchdog(monkeypatch):
+    import threading
+    _NoWatchdog.started.clear()
+    monkeypatch.setattr(threading, "Timer", _NoWatchdog)
+    yield
+    assert _NoWatchdog.started, "check_main no longer arms its watchdog through threading.Timer: update this stub"
+
+
+def test_check_log_redacts_the_profile_folder(tmp_path, monkeypatch, capsys, no_watchdog):
+    """stderr is the game's check.log (public bug reports): a game folder under the profile is not named."""
+    profile = str(tmp_path / "Users" / "Ann")
+    monkeypatch.setenv("USERPROFILE", profile)
+    missing = Path(profile) / "Games" / "SMAC"
+    monkeypatch.setattr(sys, "argv", ["install.py", "--check", "--game-dir", str(missing)])
+    real_err = sys.stderr
+    assert inst.check_main() != 0
+    assert sys.stderr is real_err, "check_main restores stderr"
+    err = capsys.readouterr().err
+    assert "--check: no game directory at %USERPROFILE%" in err and profile not in err
+
+
+def test_check_log_redacts_chatty_stdout_too(tmp_path, monkeypatch, capsys, no_watchdog):
+    """Inside --check, stdout (ix.say, print, fetch progress) is check.log too: a path said there is redacted, and
+    nothing chatty reaches the protocol pipe."""
+    profile = str(tmp_path / "Users" / "Ann")
+    monkeypatch.setenv("USERPROFILE", profile)
+    game = Path(profile) / "Games" / "SMAC"
+    game.mkdir(parents=True)
+    monkeypatch.setattr(sys, "argv", ["install.py", "--check", "--game-dir", str(game)])
+    monkeypatch.setattr(inst, "installer_running", lambda g: False)
+    monkeypatch.setattr(inst, "_log_health", lambda g: None)
+
+    def chatty(game_dir, args):
+        print(f"(could not clear staging: {game_dir}\\staging)")
+        inst.ix.say(f"fetching into {game_dir}")
+        return 0, []
+    monkeypatch.setattr(inst, "do_check", chatty)
+
+    class _Exited(Exception):
+        pass
+
+    def no_exit(code):                 # check_main ends in os._exit(code): in-process it would end pytest
+        raise _Exited(code)
+    monkeypatch.setattr(inst.os, "_exit", no_exit)
+    with pytest.raises(_Exited):
+        inst.check_main()
+    out, err = capsys.readouterr()
+    assert "(could not clear staging: %USERPROFILE%" in err and "fetching into %USERPROFILE%" in err
+    assert profile not in err and profile not in out and "staging" not in out

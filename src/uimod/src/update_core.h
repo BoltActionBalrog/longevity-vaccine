@@ -40,7 +40,7 @@ constexpr char kDownloadUrlShown[] = "longevitymods.com/vaccine/download";
 // with an id it does not know is skipped (a newer installer than this DLL), never displayed.
 struct KnownModule { const char* id; const char* label; };
 constexpr KnownModule kKnownModules[] = {
-    { "movies-hd",    "HD cinematics" },
+    { "movies-hd",    "HD Cinematics" },
     { "portraits-hd", "Turovetsky's HD Portrait Pack" },
 };
 inline const char* KnownLabel(const char* id, size_t n)

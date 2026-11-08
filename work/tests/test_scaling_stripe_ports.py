@@ -43,10 +43,13 @@ OTHER_CELL_READERS = {"t_fdicon_checker", "t_msg_icon", "t_sb_tile2", "t_sbt_zoo
                       "t_lbi_restripe_ph",   # the same reduction for the faction-picker list rows (g_rm_yph)
                       "t_sbt_ph",   # the same reduction for owned-button zoom faces (t_sbt_zoom; [ebp-0x14])
                       "t_dw_face_ph",   # the same reduction for the Design Workshop button faces (g_se_yph)
+                      "t_clhd_draw",   # the COMMLINK MP header strip: stripe_top(dest y) for its scanicon shade
+                      "t_clhd_snap",   # the COMMLINK MP header strip: its inner box snapped to whole periods
                       "t_face_own",   # T = P / 2 for the own-top face phase search (W9A, own_face_stripe_phase)
                       "t_ck_draw",   # T = P / 2 for the checkbox law's (dest row + phase) / T field
                       "t_ck_list",   # floor-reduces the list canvas's parent-local top by P (g_ck_ph)
                       "t_nw_box",   # T = P / 2 for the lobby panel fill's dest-row field
+                      "t_nwf_core",   # the same field: t_nw_box's stripe tail inside the K band (netwin_frame_strokes)
                       "thunk_pp_scrollblit"}   # reads P only to test pitch % P (never draws a stripe)
 
 # add r,4 / lea r,[r+4] then shr|sar r,3: the old period

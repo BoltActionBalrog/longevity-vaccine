@@ -134,7 +134,7 @@ constexpr uintptr_t kVA_ChkOnSprite   = 0x00779530;  // its checked box (sprite_
 constexpr uintptr_t kVA_CkDraw        = 0x00A3F000;  // t_ck_draw: thiscall(ecx=Sprite)(dest,key,x,y,num,den) RET 0x18
 constexpr uintptr_t kVA_CkPhase       = 0x00A3FFF0;  // g_ck_ph: t_ck_draw's grid phase (0 at rest)
 constexpr uintptr_t kVA_StripePeriod  = 0x0066879C;  // g_stripe_period: P = 2T, written with g by thunk_ensure_scale
-constexpr BYTE kCkDrawEntry[] = { 0x81, 0xF9, 0xD8, 0x94, 0x77, 0x00, 0x74, 0x10, 0x81, 0xF9, 0x04, 0x95 };   // cmp ecx,7794D8h; je; cmp ecx,779504h...
+constexpr BYTE kCkDrawEntry[] = { 0x81, 0xF9, 0xD8, 0x94, 0x77, 0x00, 0x74, 0x18, 0x81, 0xF9, 0x04, 0x95 };   // cmp ecx,7794D8h; je; cmp ecx,779504h...
 // The PrefWin pages' CheckLists (PrefWin_ctor 0x492272..0x4922E2: seven CheckList_ctor calls, stride 0xB28;
 // CheckList vtbl 0x670718: [+4] = 0x1C GraphicWin part, [+8] = 0xA34 Dialog part).  The stock option rows
 // are painted by the CheckList painter FUN_0060f030 (decompiled 2026-09-13, user AB shots at 4K/1600/1920):

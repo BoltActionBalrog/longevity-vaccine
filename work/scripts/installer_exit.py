@@ -447,6 +447,51 @@ def write_guard_marker() -> None:
         pass
 
 
+def redact_profile(text, profile: Optional[str] = None):
+    """`text` with the player's profile folder (C:\\Users\\<account>) replaced by %USERPROFILE%.
+
+    Players attach LongevityMods\\logs to public bug reports, and a game folder, a staging cache or a
+    traceback under their profile would name their Windows account. The same rule as the game's
+    uimod.log (src/uimod/src/logredact.h): case-insensitive, either separator, and only a whole folder
+    (C:\\Users\\Ann is not redacted inside C:\\Users\\Anna). `profile` None = %USERPROFILE%. Anything
+    that is not a str is returned as is. A UNC profile (\\\\server\\share\\...) is matched from its first
+    folder name on. Never raises: text that cannot be redacted (out of memory) is withheld, never written
+    as is -- the DLL's UimodLog drops such a line the same way."""
+    if not isinstance(text, str):
+        return text
+    try:
+        p = (os.environ.get("USERPROFILE", "") if profile is None else profile).rstrip("\\/")
+        if len(p) < 4:                     # empty, or a bare drive: nothing account-specific to hide
+            return text
+        import re
+        # A separator is any run of "/" and "\" -- a repr() doubles them (argv lines, OSError messages), a repr of
+        # a repr doubles them again.
+        sep = r"[\\/]+"
+        pat = sep.join(re.escape(part) for part in re.split(r"[\\/]+", p) if part) + r"(?![\w.\-])"
+        return re.sub(pat, lambda _m: "%USERPROFILE%", text, flags=re.IGNORECASE)
+    except Exception:  # noqa: BLE001 - a log line must never fail its writer
+        return "[line withheld: could not redact]\n"
+
+
+class RedactingWriter:
+    """A text stream that passes everything written through redact_profile; every other attribute is the
+    wrapped stream's (flush, close, encoding, fileno...)."""
+
+    def __init__(self, stream, profile: Optional[str] = None):
+        self._stream = stream
+        self._profile = profile
+
+    def write(self, s):
+        return self._stream.write(redact_profile(s, self._profile))
+
+    def writelines(self, lines):
+        for s in lines:
+            self.write(s)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
 def write_crash_log(exc: BaseException, log_dir=None) -> Optional[Path]:
     """Persist a traceback so the user has something to send. Never raises.
 
@@ -465,7 +510,8 @@ def write_crash_log(exc: BaseException, log_dir=None) -> Optional[Path]:
         d.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         p = d / f"install-crash-{stamp}.log"
-        with p.open("w", encoding="utf-8") as f:
+        with p.open("w", encoding="utf-8") as raw:
+            f = RedactingWriter(raw)        # argv and the traceback carry folder paths
             f.write(f"Longevity Vaccine installer crash {stamp}\n")
             f.write(f"python  : {sys.version}\n")
             f.write(f"argv    : {sys.argv!r}\n\n")

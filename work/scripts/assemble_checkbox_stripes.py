@@ -1,7 +1,8 @@
 """Assembler for the checkbox scanline law (group checkbox_stripes, fix 28, 2026-10-24).
 
 The three 18x18 checkbox X sprites (0x7794D8 / 0x779504 / 0x779530; interface.pcx (227,1) / (227,20) / (227,39);
-a 1-row scanline dither over every art class) were enlarged by the engine's plain NN: the type-1 popup lists
+a 1-row scanline dither over every art class) -- and, since 2026-11-07, the lobby's 7x13 pull-down arrow 0x788038 --
+were enlarged by the engine's plain NN: the type-1 popup lists
 (0x405BD4) and the CheckList rows (0x60F41C / 0x60F457) through thunk_checkbox_scale -> Sprite_draw_2 at g/16, the
 lobby's CUSTOM GAME OPTIONS (0x47FAD4 / 0x47FD2B) through thunk_nw_blit_left -> Sprite_blit_scaled_core under the
 scale globals.  NN keeps the 1-px source period, so the dither banded (1,2,1,1,2 at g = 22 / 25, 2,3 at 40).
@@ -23,9 +24,12 @@ Thunks (pcave2 0x33000.., this fix's own region):
               else thunk_checkbox_scale's own arg rewrite (y += (16 - g) >> 1, num = g, den = 16), g_ck_ph =
               ([dest-0x304] + [dest-0x2F4]) floor-mod P (Win +0x140 + +0x150, Win = dest - 0x444), CALL t_ck_draw
               with the six args, clear g_ck_ph, RET 0x18.
-  t_ck_core   the lobby core sites' call-target (replaces {rel32:thunk_nw_blit_left} at 0x47FAD4 / 0x47FD2B):
-              thiscall ecx = Sprite*; dest, key, x, y; RET 0x10.  g <= 16 -> push Sprite_blit_scaled_core / ret
-              (the vanilla call); else CALL t_ck_draw(dest, key, x, y, g, 16) (phase 0: the NetWin canvas), RET 0x10.
+  t_ck_core   the lobby core sites' call-target (replaces {rel32:thunk_nw_blit_left} at 0x47FAD4 / 0x47FD2B), and
+              the core call INSIDE thunk_nw_blit_left (the 11 lobby arrow sites, sprite 0x788038; 2026-11-07):
+              thiscall ecx = Sprite*; dest, key, x, y; RET 0x10.  g <= 16 or dest == NULL -> push
+              Sprite_blit_scaled_core / ret (the vanilla call; a NULL dest is the arrow sites' "no arrow" idiom
+              and the core returns without drawing); else CALL t_ck_draw(dest, key, x, y, g, 16) (phase 0: the
+              NetWin canvas), RET 0x10.
   g_ck_ph     dword, 0 at rest.
 
 Parity: tests/test_checkbox_stripes_asm_parity.py (Unicorn, the yaml bytes vs the law).  End to end on the real
@@ -60,7 +64,7 @@ T_CK_DRAW = PCAVE2 + SLOTS["t_ck_draw"]
 MAX_TEXELS = 0x400
 MAX_RATIO = 14                     # num <= 14 den: dw, dh = 18 num/den <= 252 fit the byte axis maps
 MIN_MEMBER = 4                     # scaling_laws.SCANICON_MIN_MEMBER
-SPRITES = (0x007794D8, 0x00779504, 0x00779530)   # scaling_laws.CHECKBOX_SPRITES: every other sprite -> native
+SPRITES = (0x007794D8, 0x00779504, 0x00779530, 0x00788038)   # scaling_laws.SCANICON_SPRITES: every other sprite -> native
 FRAME = 0xC80
 N_TAB, R_TAB, CNT_TAB = -0x480, -0x880, -0xA80     # ebp-relative: 512 words, 512 words, 256 words (locals above -0x80)
 XMAP, YMAP = -0xB80, -0xC80                         # 256-byte axis maps (scaling_laws.scanicon_axis_map)
@@ -95,6 +99,8 @@ def asm_ck_draw() -> str:
     cmp     ecx, {SPRITES[1]:#x}
     je      spr_ok
     cmp     ecx, {SPRITES[2]:#x}
+    je      spr_ok
+    cmp     ecx, {SPRITES[3]:#x}
     jne     native
 spr_ok:
     mov     eax, dword ptr [esp+0x14]
@@ -631,6 +637,8 @@ def asm_ck_core() -> str:
     return f"""
     cmp     dword ptr [{G:#x}], 0x10
     jle     vanilla
+    cmp     dword ptr [esp+4], 0
+    je      vanilla
     push    0x10
     push    dword ptr [{G:#x}]
     push    dword ptr [esp+0x18]

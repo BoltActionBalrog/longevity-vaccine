@@ -18,7 +18,7 @@ own setup stay private.
 Addresses are for the PRACX-patched GOG binary the mod targets. `g` is the runtime
 scale (16 = the native 1024x768 layout); `s(v)` is `floor(v*g/16)`.
 
-## Lessons (90)
+## Lessons (92)
 
 A rule learned the hard way, with the failure that taught it.
 
@@ -52,6 +52,7 @@ A rule learned the hard way, with the failure that taught it.
 - [feedback-frida-no-engine-calls-from-callbacks](feedback-frida-no-engine-calls-from-callbacks.md): Never drive an engine repaint/UI action via NativeFunction from inside a Frida Interceptor callback — hooks are suppressed on that thread for the nested call; emit a native stub instead
 - [feedback-frida-readcstring-fixed-buffers](feedback-frida-readcstring-fixed-buffers.md): Frida readCString(n) on a fixed-size C buffer returns ALL n bytes (stale garbage after the NUL); feeding that to an engine strcpy (Font_init LOGFONT) smashed its stack frame -> "regression" that was really a no-op proto
 - [feedback-frida-trace-rect-and-sprite-capture](feedback-frida-trace-rect-and-sprite-capture.md): Frida tracing for menu/frame scaling — read the engine's computed rect GLOBAL instead of pixel-inferring; capture a sprite by FIXED SOURCE dims so you also get the g16 vanilla baseline
+- [feedback-fumbled-consent-defaults-restrictive](feedback-fumbled-consent-defaults-restrictive.md): The installer's update-check question ("[Y/n]") treats any answer that is not Enter/y/yes as NO; the maintainer accepted that on purpose (2026-11-07) -- a fumbled consent falls to the more private setting. Do not re-propose re-asking or taking the default.
 - [feedback-game-font-synthetic-bold](feedback-game-font-synthetic-bold.md): In-game "Arial Narrow bold" is GDI SYNTHETIC bold of arialn.ttf (the game registers only arialn.ttf) -- GDI font emulation must load arialn.ttf ONLY
 - [feedback-gate-flag-refcount](feedback-gate-flag-refcount.md): A shared gate/depth global (g_popup_active and kin) must only ever be INC'd / clamped-DEC'd; an absolute := 1 / := 0 writer anywhere silently disarms every scaled draw nested inside it (quit-modal OK hover after Preferences, 2026-09-13)
 - [feedback-global-lever-all-writers](feedback-global-lever-all-writers.md): A scaled engine GLOBAL (font ptr, margin, default) must be scaled at EVERY engine writer — popups_normal/popups_tutorial/config_popups re-install natives mid-session
@@ -103,6 +104,7 @@ A rule learned the hard way, with the failure that taught it.
 - [feedback-thunk-disp32-offsets](feedback-thunk-disp32-offsets.md): Hand-assembled x86 thunks: struct offsets >= 0x80 MUST use disp32 ModRM, not disp8 — disp8 sign-extends and reads a negative offset (silent garbage -> crash)
 - [feedback-thunk-frame-aliasing](feedback-thunk-frame-aliasing.md): Hand-assembled thunk that pushes callee-saved regs THEN uses [ebp-4/-8/-c] as locals corrupts the caller — reserve the local frame BEFORE the reg pushes.
 - [feedback-uimod-shared-dll-gate](feedback-uimod-shared-dll-gate.md): uimod.dll is SHARED by the pristine AND PRACX exes — every DLL feature that touches patcher artifacts (cave VAs, baked thunks, registry slots) must gate on their presence or it crashes the pristine game
+- [feedback-unicorn-patch-before-run](feedback-unicorn-patch-before-run.md): Unicorn caches translated code blocks: a mem_write to code that already ran is IGNORED -- patch thunks / call sites right after E.boot, before any e.call
 - [feedback-unicorn-stub-overlap](feedback-unicorn-stub-overlap.md): Unicorn parity tests — a recording stub written at a real helper's VA must fit that helper's slot (else it overwrites the next helper's stub) and re-stubbed code needs ctl_remove_cache; symptoms are READ_UNMAPPED faults at a mid-instruction eip
 - [feedback-vp-window-sized-from-tables](feedback-vp-window-sized-from-tables.md): A table-driven imm walker's VirtualProtect window is part of the table's contract — derive it from the rows and assert coverage; a constant window crashed the rw_scale_kinds v1 bake on game load
 - [feedback-walker-rows-vs-patched-sites](feedback-walker-rows-vs-patched-sites.md): A proto's imm rows and a bake's detours over the same bytes conflict at RUNTIME (the walker rewrites the detour's rel32) — check every walker row against every patched site mechanically; plus the minidump recipe for a plain-binary crash
@@ -113,7 +115,7 @@ A rule learned the hard way, with the failure that taught it.
 - [feedback-yaml-thunk-content-desync](feedback-yaml-thunk-content-desync.md): A cave thunk's CONTENT bytes are a separate patches.yaml entry from its symbol/group/site — committing only the latter makes a clean apply CALL into a zero-filled cave
 - [feedback-yaml-utf8-encoding](feedback-yaml-utf8-encoding.md): Don't edit patches.yaml (or any UTF-8 file) with a Python open()/write() round-trip on Windows — it corrupts non-ASCII and crashes apply
 
-## Screens and features (104)
+## Screens and features (105)
 
 What was done to one screen or feature, what was tried, and what state it was left in.
 
@@ -137,6 +139,7 @@ What was done to one screen or feature, what was tried, and what state it was le
 - [project-smac-datalinks](project-smac-datalinks.md): Datalinks encyclopedia screen — ARC CLOSED, USER-VERIFIED ALL-RES 2026-09-01 build 43f0c3d9 (dl_scale + portrait/wheel + flow-scroll + poke-addr + palette-source + key-exclusion + btn_ringfix hover ring)
 - [project-smac-design-workshop](project-smac-design-workshop.md): Design Workshop (DesignWin) scaling arc — CLOSED USER-VERIFIED all-res 2026-08-29, live build aacf4c8a (bake v1g: assemble_dw.py, 4 groups, parity 161), committed + pushed; bake history v1..v1g root causes + engine facts in file; OPEN popup-family residual: ornate title inset
 - [project-smac-diplo-talk-screen](project-smac-diplo-talk-screen.md): DIPLOMACY talk screen (DiploTalkWin 0x733990 + anchored speech popup + console-strip content) scaling arc — CLOSED at 4K: build d4a47344 USER-VERIFIED 4K 2026-08-20 + COMMITTED (group diplo_talk_scale incl. console save-under exit-residue fix t_cr_snap/t_cr_tile); 1600 spot-check queued; Council popup width + button banding = PRE-EXISTING (bisect-proven), separate open item
+- [project-smac-directplay-lan-upnp-hairpin](project-smac-directplay-lan-upnp-hairpin.md): SMAC TCP/IP Join "Game Not Found" on a LAN = Windows' DirectPlay NAT helper only resolves its OWN machine's UPnP mappings; fix = uimod lanjoin (QueryAddress completion, loopback-gated); USER-VERIFIED on two PCs 2026-11-08, ships in 1.0.0
 - [project-smac-dl-esi-clobber-crash](project-smac-dl-esi-clobber-crash.md): Crash after a secret project (AV @0x4742BB in MonumentWin_draw near painter) = OUR Datalinks walker entries returned esi = the imm-table VA since the 2026-08-30 dl bake; fixed exe 050459e5 2026-09-20 (NOT committed, awaiting user verify); saves may hold the poisoned Monument record
 - [project-smac-dll-thunk-port-analysis](project-smac-dll-thunk-port-analysis.md): DLL thunk-port architecture analysis (DROPPED 2026-06-24) — why migrating asm thunks to C++ was decided against; retained reasoning + candidate spec if ever revisited
 - [project-smac-drag-scroll-perf](project-smac-drag-scroll-perf.md): PRACX drag/edge scroll latency arc (2026-10-10): why (full MapWin_draw_map per step; units pass = per-unit Caviar voxel render + whole-1024^2 composites), the engine's own shift-and-strip scroll path and why PRACX never gets it, fix 1 (caviar_dirty_rect, baked 62d84688 after audit) and fix 2 (DLL mapscroll.cpp: canvas memmove + strip gen_map; audited + COMMITTED 2aba397, user: very smooth, 38-45 steps/s vs 10-14; audit + commit pending)

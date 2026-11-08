@@ -484,7 +484,7 @@ def run(argv: list = None) -> int:
     apr.add_argument("--update", action="store_true", help=argparse.SUPPRESS)
     apr.add_argument("--modules", default=None,
                      help="Forwarded to the installer: extras to add or re-install "
-                          "(movies-hd = HD cinematics, portraits-hd = Turovetsky's HD Portrait Pack).")
+                          "(movies-hd = HD Cinematics, portraits-hd = Turovetsky's HD Portrait Pack).")
     apr.add_argument("--no-prompt", action="store_true",
                      help="Forwarded to the installer: never ask anything.")
     # The GAME's hand-off flag (FROZEN: the DLL passes it, and every later generation must accept

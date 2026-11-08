@@ -39,7 +39,10 @@ from unicorn.x86_const import UC_X86_REG_ECX, UC_X86_REG_ESP  # noqa: E402
 NW = 0x80A6F8                    # NetWin (the lobby)
 PREFWIN = 0x8578D8
 CK_DRAW = AC.PCAVE2 + AC.SLOTS["t_ck_draw"]
-NW_BOX = AC.PCAVE2 + AC.SLOTS["t_nw_box"]
+# the 17 filled lobby panel sites call t_nwf_box since netwin_frame_strokes (2026-11-07; same thiscall contract, the
+# engine box at the caller's rect inside it, t_nw_box only as its guard fallback) -- the panel recorder hooks its entry
+import assemble_nw_frames as NWF  # noqa: E402
+NW_BOX = NWF.PCAVE2 + NWF.SLOTS["t_nwf_box"]
 BUFFER_TILE_PHASE = 0x5DA860
 SPRITES = (0x7794D8, 0x779504, 0x779530)
 RES = {16: (1024, 768), 18: (1600, 900), 19: (1216, 912), 22: (1920, 1080), 25: (1600, 1200), 30: (2560, 1440),
@@ -92,9 +95,10 @@ class Recorder:
     def _after(self, e):
         d = self.pending.pop()
         c = E.canvas_of(e, d["dest"] - 0x444)
-        n = (18 * d["num"]) // d["den"]
+        nh = (len(d["art"]) * d["num"]) // d["den"]           # the art's own dims (18x18 boxes, the 7x13 lobby arrow)
+        nw = (len(d["art"][0]) * d["num"]) // d["den"]
         y0, x0 = max(d["y"], 0), max(d["x"] - 6, 0)
-        d["snap"] = (y0, x0, c[y0:d["y"] + n, x0:d["x"] + n + 6].copy())
+        d["snap"] = (y0, x0, c[y0:d["y"] + nh, x0:d["x"] + nw + 6].copy())
         self.draws.append(d)
 
 
@@ -145,20 +149,21 @@ def _free(e):
     gc.collect()
 
 
-def lobby(exe, g, rec=None, panels=None):
+def lobby(exe, g, rec=None, panels=None, host=False, hooks=()):
+    """host: [0x93E8C0] = 1, so NetWin_draw_settings also draws its 8 pull-down arrows (0 skips them)."""
     W, H = RES[g]
     e = E.boot(exe, W, H)
     E.Files(e)
     e.call(0x455610, count=0)
     e.call(0x6168F0, ecx=0x9B90D8, args=(0x40000,))
     e.call(0x616A00, count=50_000_000)
-    for va, cb in (rec.hooks() if rec else []) + (panels.hooks() if panels else []):
+    for va, cb in (rec.hooks() if rec else []) + (panels.hooks() if panels else []) + list(hooks):
         e.observe(va, cb)
     e.observe(0x482C8D, lambda e: e.uc.emu_stop())     # after the buttons + font, before the modal (vtbl+0xE4)
     for va in (0x481FD0, 0x632070, 0x630080):          # network / session side of the builder (not UI)
         e.stub_fn(va, lambda e: 0)
     e.w32(0x9B2068, 0)
-    e.w32(0x93E8C0, 0)
+    e.w32(0x93E8C0, 1 if host else 0)
     e.w32(NW + 0x772C, 1)
     if (e.r32(0x58DBDB) + 0x58DBDF) & 0xFFFFFFFF != 0x482490:   # the patched bracket call: its netwin flag
         e.w32(0xA10800, 1)

@@ -806,10 +806,10 @@ def test_generation_two_never_calls_a_pack_current_under_only_listed(game, monke
     monkeypatch.setattr(bs, "_wait_for_pid", lambda *a, **k: True)
     assert bs.run(["--game-dir", str(game), "--generation", "2", "--no-wait",
                    "--only-listed"]) == ix.EXIT_OK
-    assert "up to date" not in bs._VERDICT[1] and "installed packs: HD cinematics v1.0.0" \
+    assert "up to date" not in bs._VERDICT[1] and "installed packs: HD Cinematics v1.0.0" \
         in bs._VERDICT[1], bs._VERDICT
     assert bs.run(["--game-dir", str(game), "--generation", "2", "--no-wait"]) == ix.EXIT_OK
-    assert "(HD cinematics v1.0.0 up to date)" in bs._VERDICT[1]
+    assert "(HD Cinematics v1.0.0 up to date)" in bs._VERDICT[1]
 
 
 def test_an_unknown_flag_from_a_newer_game_is_ignored_not_fatal(game, payload, tmp_path, trust,
@@ -881,7 +881,7 @@ def test_only_listed_with_nothing_listed_and_a_current_base_changes_nothing(game
                    "--only-listed"]) == ix.EXIT_OK
     out = capsys.readouterr().out
     assert called == [], "an empty list was handed to the installer"
-    assert "HD cinematics v1.1.0: not part of this update (stays at v1.0.0)" in out, out
+    assert "HD Cinematics v1.1.0: not part of this update (stays at v1.0.0)" in out, out
     title, body = bs._VERDICT
     assert title == "ALREADY UP TO DATE" and "Everything you have installed is current" not in body
     # Without the flag the same run updates the pack (the console's own semantics).
@@ -902,7 +902,7 @@ def test_an_unknown_extra_is_refused_before_anything_is_fetched(game, payload, t
     with pytest.raises(ix.InstallerError, match='"bogus" is not an extra') as e:
         bs.run(["--update", "--game-dir", str(game), "--no-wait", "--modules", "bogus"])
     assert e.value.changed is False
-    assert "HD cinematics" in (e.value.detail or "")
+    assert "HD Cinematics" in (e.value.detail or "")
 
 
 def test_a_manifest_whose_modules_field_is_not_a_dict_is_refused_cleanly(game, payload,
@@ -989,7 +989,7 @@ def test_a_pack_only_update_names_the_pack_in_its_verdict(game, payload, tmp_pat
     })
     assert bs.run(["--game-dir", str(game), "--manifest", str(m), "--no-wait"]) == ix.EXIT_OK
     assert bs._VERDICT == ("UPDATE COMPLETE",
-                           "HD cinematics v1.1.0 installed. Nothing else needed changing.")
+                           "HD Cinematics v1.1.0 installed. Nothing else needed changing.")
     assert bs._NOTE_ARGS and bs._NOTE_ARGS[0] == game, "the closing note (exe + shortcut) follows every completed update"
 
 
@@ -1265,7 +1265,7 @@ def test_a_completed_update_names_the_base_in_its_verdict(game, payload, tmp_pat
         "movies-hd": {"version": "1.1.0", "url": "file:///y", "sha256": "0" * 64}})
     assert _run_gen1(game, m) == ix.EXIT_OK
     assert rc.module_version(rc.read(game), "base") == "2.0.0"
-    assert bs._VERDICT[1].startswith("Longevity Vaccine v2.0.0, HD cinematics v1.1.0 installed"), \
+    assert bs._VERDICT[1].startswith("Longevity Vaccine v2.0.0, HD Cinematics v1.1.0 installed"), \
         bs._VERDICT
 
 
@@ -1357,10 +1357,10 @@ def test_an_already_current_run_announces_a_pack_the_player_does_not_have(game, 
     })
     assert bs.run(["--game-dir", str(game), "--manifest", str(m), "--no-wait"]) == ix.EXIT_OK
     out = capsys.readouterr().out
-    assert "HD cinematics: available, not installed (1.4 GB download)" in out, out
+    assert "HD Cinematics: available, not installed (1.4 GB download)" in out, out
     assert f'run-install.bat" --update --modules movies-hd --manifest "{m}"' in out, \
         "the notice must give a command that can be pasted as-is, with the launcher's full path"
-    assert "HD cinematics: up to date" not in out
+    assert "HD Cinematics: up to date" not in out
     assert "see \"optional extras\" above" in bs._VERDICT[1]
     # The notice informs, it does not ask -- so --no-prompt (the bootstrap's own worker mode)
     # does not silence it. Gating it did: a player only ever heard about a pack on an idle run.

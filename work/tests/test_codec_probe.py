@@ -189,7 +189,10 @@ def test_the_shipped_dll_set_is_the_probed_set():
     proj = (REPO / "src" / "uimod" / "uimod.vcxproj").read_text(encoding="utf-8")
     m = re.search(r"<DelayLoadDLLs>([^<]+)</DelayLoadDLLs>", proj)
     assert m, "DelayLoadDLLs missing from uimod.vcxproj"
-    assert {x.lower() for x in m.group(1).split(";") if x.endswith(".dll")} == shipped
+    # plus Windows' own Winsock / IP Helper: never shipped, delay-loaded only so a single-player session never maps
+    # them (lanjoin.cpp, the multiplayer home-network fix; test_lanjoin_core.test_winsock_is_not_loaded_at_game_start)
+    system = {"ws2_32.dll", "iphlpapi.dll"}
+    assert {x.lower() for x in m.group(1).split(";") if x.endswith(".dll")} == shipped | system
     movie = (SRC / "movie.cpp").read_text(encoding="utf-8", errors="replace")
     for name, export, _f, stem in LIBS:
         assert f'L"{name}"' in movie and f'"{export}"' in movie, name

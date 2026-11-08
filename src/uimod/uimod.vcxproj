@@ -62,7 +62,11 @@
       <!-- The codec DLLs are DELAY-loaded: a missing or quarantined one must not stop uimod.dll itself from
            loading (the whole mod silently gone). movie.cpp probes them at Init (codecs.h) and keeps the movie
            hook out when one is wrong; its __pfnDliFailureHook2 logs any bind that still fails. -->
-      <DelayLoadDLLs>avformat-62.dll;avcodec-62.dll;avutil-60.dll;swscale-9.dll;swresample-6.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <!-- Winsock and IP Helper too (lanjoin.cpp, the multiplayer home-network fix): nothing in the game, PRACX or
+           Thinker loads Winsock at startup (DirectPlay starts it only when TCP/IP multiplayer is chosen), so
+           neither is even mapped until then, and the third-party network hooks Winsock loads (antivirus, VPN,
+           "gaming accelerator" layers) stay out of every single-player session. -->
+      <DelayLoadDLLs>avformat-62.dll;avcodec-62.dll;avutil-60.dll;swscale-9.dll;swresample-6.dll;ws2_32.dll;iphlpapi.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
       <!-- ffmpeg's mingw-built import libs carry asm objects with no SAFESEH data; x86 MSVC
            defaults to /SAFESEH, so disable it for this image. -->
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
@@ -110,6 +114,8 @@
     <ClCompile Include="src\thinkertext.cpp" />
     <ClCompile Include="src\thinkerversion.cpp" />
     <ClCompile Include="src\interludekey.cpp" />
+    <ClCompile Include="src\lanjoin.cpp" />
+    <ClCompile Include="src\mptimefix.cpp" />
     <ClCompile Include="src\blinkfix.cpp" />
     <ClCompile Include="src\cursorscale.cpp" />
     <ClCompile Include="src\hudmovesfix.cpp" />

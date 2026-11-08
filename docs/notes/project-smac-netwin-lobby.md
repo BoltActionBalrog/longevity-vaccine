@@ -4,6 +4,10 @@ description: MULTIPLAYER SETUP lobby (NetWin) scaling workstream — constructio
 type: project
 ---
 
+**Status 2026-11-08: all of the multiplayer work below SHIPS in 1.0.0 (pracx 9b33669f / pracx_thinker 493e685b), user-verified on two PCs (release gate passed); the "uncommitted / staged / verify pending" marks below are history.**
+
+**2026-11-07 FRAME STROKES BUILT (uncommitted, emulator-verified, 3 audits; in-game verify with a 2nd player PENDING).** Group netwin_frame_strokes (src assemble_nw_frames.py, laws nw_frame_* / nw_title_* / nw_lock_icon_x / nw_chat_log_inset, guard tests/test_scaling_nw_frames.py): every lobby Buffer_box_sprite (d690 backdrop, 5 d5a0 outlines, d618 bands, d528 panels, dca8 toggle cells -- 50 per repaint) on the band-map stroke law K = stroke_width(g) (1 through g 24), painted DIRECTLY by t_nwf_core (engine box + K band + saved K x K corners + t_nw_box's stripe tail inside K) because the band-map thunks cost ~10x the repaint; baked == band-map oracle at every g 17..40. Plus: title band inset native 3 -> s(3) (0x481B33), title outline bottom fl(29g/16) (rectscale's T+fl(26g/16) double floor), lock icon x L+1 -> L+K (0x480599), chat log TextScroll inset 3 -> s(3) (0x482A00). The checkbox_emu.lobby harness reproduces the real 4K shot's strokes pixel-exact (text not drawn). Lock icon LOCKED state never seen (needs a 2nd player).
+
 # NetWin MULTIPLAYER SETUP lobby scaling (started 2026-07-04)
 
 Shared language: refs\Annotate\LobbySetup_annotated.png — A title bar, B1 game-name header, B2 settings list, C PLAYERS header, D player rows ×7 (D-lock/D-name/D-faction/D-hcap), E1/E2 LAUNCH GAME/CANCEL, F chat log, G chat input, H CUSTOM GAME OPTIONS header, I/J option columns.

@@ -8,7 +8,7 @@ key's public hex so the resident installer trusts it. Nothing here touches the g
 Scenarios (what the prompt should show):
     nothing   latest == the installed version               -> no prompt (F1)
     base      core update available (latest 9.9.9)          -> F2 only
-    pack      a NEW pack (HD cinematics) the install lacks  -> F3 only
+    pack      a NEW pack (HD Cinematics) the install lacks  -> F3 only
     both      core update + a new pack + a stale pack       -> F2 then F3
     manual    kill switch (bootstrap_defect)                -> F6
     yanked    latest is yanked                              -> nothing (F1)

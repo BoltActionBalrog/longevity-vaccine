@@ -1202,7 +1202,7 @@ def _patch_log_line(text: str) -> None:
     if _PATCH_LOG is None:
         return
     try:
-        _PATCH_LOG.write(text + "\n")
+        _PATCH_LOG.write(ix.redact_profile(text) + "\n")     # the log goes into public bug reports
         _PATCH_LOG.flush()
     except (OSError, ValueError):
         pass
@@ -1746,7 +1746,7 @@ THINKER_MOVIE_KEY = "MoviePlayerPath"
 def ensure_in_process_movies(game_dir: Path) -> None:
     """`[Alpha Centauri] MoviePlayerPath=` (blank), on every install AND update run, Thinker present or
     not, silently (user decision 2026-10-28, movie ownership option A2: every player gets the mod's
-    in-process player and the HD cinematics; an auto-detected or hand-set external player is
+    in-process player and the HD Cinematics; an auto-detected or hand-set external player is
     overridden without a notice). Written whether or not Thinker is installed so that adding Thinker
     later cannot hand the movies to VLC on its first launch. Idempotent; never raises."""
     if read_ini_str(game_dir, THINKER_MOVIE_SECTION, THINKER_MOVIE_KEY, _INI_ABSENT) == "":
@@ -2052,7 +2052,7 @@ def pick_modules(catalogue: dict, args, game_dir: Path) -> tuple:
     Flags decide without asking (`--modules a,b`, `--ai on|off`, `--no-prompt`); otherwise the
     player ticks packs in a list and the installer WAITS for Confirm -- an install must not run
     past this point on its own (user, 2026-09-27). Turned down = shown in the list and left
-    unticked, or `--ai off` for the HD cinematics: the install records each as the game's
+    unticked, or `--ai off` for the HD Cinematics: the install records each as the game's
     "Don't ask me again" (user 2026-11-01). Nothing is turned down when nobody chose: an
     unattended run, `--no-prompt`, a pack already on disk.
     """
@@ -2119,7 +2119,7 @@ def record_module_choice(game_dir: Path, wanted: list, turned_down: list) -> Non
 def _starts_ticked(name: str, catalogue: dict, game_dir: Path, declines: dict) -> bool:
     """Ticked unless the player said no before (user 2026-11-01: everything on a first run).
     No = "Don't ask me again" on the pack's offer (in game or by an earlier unticked install), or
-    the HD cinematics switched off. A pack already on disk is always ticked."""
+    the HD Cinematics switched off. A pack already on disk is always ticked."""
     if catalogue[name].get("on_disk"):
         return True
     if NEW_PACK_PREFIX + name in declines:
@@ -2332,7 +2332,7 @@ GAME_CONTENT_MODULES = tuple(MODULE_ROOTS)
 #: Player-facing names, COMPILED IN. The manifest carries ids only; a label is never read from it
 #: (see manifest.py's trust boundary). These are what the game shows when it asks about a pack.
 MODULE_LABELS = {
-    "movies-hd": "HD cinematics",
+    "movies-hd": "HD Cinematics",
     "portraits-hd": "Turovetsky's HD Portrait Pack",
 }
 
@@ -3768,7 +3768,8 @@ class _captured:
 
     def __enter__(self):
         import contextlib
-        self._f = open(self.path, "w", encoding="utf-8", errors="replace")
+        # The log goes into public bug reports: the profile folder (the account name) is redacted.
+        self._f = ix.RedactingWriter(open(self.path, "w", encoding="utf-8", errors="replace"))
         self._cm = contextlib.redirect_stdout(self._f)
         self._cm.__enter__()
         return self
@@ -4165,7 +4166,10 @@ def _log_health(game_dir) -> None:
 def check_main() -> int:
     """Entry for --check. Bypasses run_guarded on purpose: no banner, no verdict, no wait --
     stdout is a pipe the game parses, so it carries the protocol lines and nothing else."""
-    real_stdout = sys.stdout
+    real_stdout, real_stderr = sys.stdout, sys.stderr
+    # stderr is the game's check.log, which goes into public bug reports: the profile folder (the account
+    # name) is redacted from every line, tracebacks included.
+    sys.stderr = ix.RedactingWriter(real_stderr)
     sys.stdout = sys.stderr          # fetch progress, ix.say, anything chatty -> stderr
     lines, code = [], ix.CHECK_FAILED
     health_dir = None                # set once --game-dir is a directory; _log_health runs on both paths
@@ -4230,6 +4234,7 @@ def check_main() -> int:
         return ix.CHECK_FAILED
     finally:
         sys.stdout = real_stdout
+        sys.stderr = real_stderr
     # BYTES with a bare LF. A text-mode stdout on Windows wrote CRLF, so a parser splitting on
     # '\n' saw `manual=\r` (not empty) and `latest=0.1.0\r` (not a version).
     payload = b"".join(
@@ -4410,7 +4415,7 @@ def do_uninstall(game_dir: Path, args) -> int:
     # SAY SO, item by item -- an uninstall that leaves a folder behind without mentioning it
     # reads as a failed uninstall the next time the player looks.
     ix.say("\n  Left in place, deliberately:")
-    ix.say("    movies\\hd            - the HD cinematics (a large download; delete it yourself")
+    ix.say("    movies\\hd            - the HD Cinematics (a large download; delete it yourself")
     ix.say("                           if you want the space back)")
     ix.say("    portraits\\           - your own portraits, and Turovetsky's HD Portrait Pack in")
     ix.say("                           portraits\\hd (unused once the mod is gone)")
@@ -4794,16 +4799,16 @@ def main() -> int:
     if not ix.is_worker():
         banner()        # a worker child runs in the bootstrap's console, which printed it already
     apr = argparse.ArgumentParser(
-        description="Longevity Vaccine installer (SMACX UI scaling + HD cinematics)")
+        description="Longevity Vaccine installer (SMACX UI scaling + HD Cinematics)")
     apr.add_argument("--ai", choices=["on", "off", "ask"], default="ask",
-                     help="Install the HD cinematics pack? Default: list the optional modules "
+                     help="Install the HD Cinematics pack? Default: list the optional modules "
                           "and ask. `--modules a,b` picks packs by name instead.")
     apr.add_argument("--payload-root", default=None,
                      help="Where the installer's own files live (default: derived from this "
                           "script's location, which works in a checkout and in an extracted "
                           "release archive alike).")
     apr.add_argument("--pack", default=None,
-                     help="HD cinematic pack dir (default: dist\\movies-hd).")
+                     help="HD Cinematics pack dir (default: dist\\movies-hd).")
     apr.add_argument("--portrait-pack", default=None,
                      help="Turovetsky's HD Portrait Pack dir (default: dist\\portraits-hd).")
     apr.add_argument("--force", action="store_true",

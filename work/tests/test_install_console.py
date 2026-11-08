@@ -145,12 +145,12 @@ def test_the_list_names_every_module_with_its_size_ticked_on_a_first_run(monkeyp
     assert _pick(CATALOGUE, _args(), tmp_path) == (["movies-hd", "portraits-hd"], [])
     out = capsys.readouterr().out
     rows = _rows(out)
-    assert rows[0].startswith(" > [X] HD cinematics") and "1.4 GB" in rows[0]
+    assert rows[0].startswith(" > [X] HD Cinematics") and "1.4 GB" in rows[0]
     assert "[X] Turovetsky's HD Portrait Pack" in rows[1] and "671 MB" in rows[1]
     assert "already installed" in rows[1] and "already installed" not in rows[0]
     assert "already on disk" not in "".join(rows)                   # user wording 2026-11-06
     assert rows[2] == "   Install selected modules" and rows[-1] == " > Install selected modules"
-    assert "Selected: HD cinematics, Turovetsky's HD Portrait Pack" in out
+    assert "Selected: HD Cinematics, Turovetsky's HD Portrait Pack" in out
     assert "Select which optional modules you would like to install. You can download these later from the in-game preferences menu." in out
 
 
@@ -210,7 +210,7 @@ def test_reading_a_key_without_a_console_raises_instead_of_waiting(monkeypatch):
 
 def test_what_starts_ticked_follows_the_players_earlier_no(monkeypatch, tmp_path):
     """Everything on a first run (user 2026-11-01); a pack declined before -- "Don't ask me
-    again" in game, or left unticked by an earlier install -- or the HD cinematics switched off
+    again" in game, or left unticked by an earlier install -- or the HD Cinematics switched off
     start unticked. A pack on disk is always ticked."""
     import receipt as rc
     (tmp_path / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
@@ -648,11 +648,11 @@ def test_summary_rows_are_success_error_or_skipped(monkeypatch, capsys):
     monkeypatch.setattr(ix, "_colour_ok", lambda: True)
     ix.status_line("terranx_PRACX.exe", "ok")
     ix.status_line("prax.dll", "skip")
-    ix.status_line("HD cinematics", "error")
+    ix.status_line("HD Cinematics", "error")
     rows = capsys.readouterr().out.rstrip("\n").split("\n")
     assert rows[0] == "  terranx_PRACX.exe              \x1b[32mSuccess\x1b[0m"
     assert rows[1] == "  prax.dll                       Skipped"
-    assert rows[2] == "  HD cinematics                  \x1b[31mError\x1b[0m"
+    assert rows[2] == "  HD Cinematics                  \x1b[31mError\x1b[0m"
     monkeypatch.setattr(ix, "_colour_ok", lambda: False)
     ix.status_line("x", "ok")
     assert capsys.readouterr().out == "  x                              Success\n"

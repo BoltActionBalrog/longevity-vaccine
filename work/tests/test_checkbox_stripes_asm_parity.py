@@ -43,6 +43,10 @@ REC = 0x00600000                 # stub record: tag, ecx, 6 args
 BOXD = 0x00720000                 # t_nw_box cases: rect, params, four edge sprites, the tile Buffer, the tile texels
 SPR, TEX = 0x007794D8, 0x00701000      # a checkbox sprite address: t_ck_draw refuses every other
 OTHER_SPR = 0x009B8F60                  # CheckList's default 32x32 sprite: must be refused
+ARROW_SPR = 0x00788038                  # the lobby's 7x13 pull-down arrow: accepted since 2026-11-07
+#: the arrow as the engine holds it (interface.pcx +10; key 9), read off the emulated lobby (checkbox_emu.lobby, the
+#: sprite thunk_nw_blit_left receives) -- test_scaling_checkbox_stripes.py pins it against the real image
+ARROW_ART = [[(0xAE if r % 2 == 0 else 0xEE) if c <= min(r, 12 - r) else 9 for c in range(7)] for r in range(13)]
 WIN = 0x00710000                 # GraphicWin; the dest Buffer = WIN + 0x444
 DST = WIN + 0x444
 PIX = 0x00800000                 # dest plane
@@ -101,7 +105,7 @@ class Rig:
         for base, size in ((AC.PCAVE2 + 0x33000, 0x1000), (0x668000, 0x1000), (0x5E4000, 0x1000), (0x5E2000, 0x1000),
                            (BOXD, 0x4000),
                            (STACK, 0x10000), (REC, 0x1000), (0x700000, 0x2000), (SPR & ~0xFFF, 0x1000),
-                           (OTHER_SPR & ~0xFFF, 0x1000), (WIN, 0x1000), (PIX, 0x10000),
+                           (OTHER_SPR & ~0xFFF, 0x1000), (ARROW_SPR & ~0xFFF, 0x1000), (WIN, 0x1000), (PIX, 0x10000),
                            (RET_SITE & ~0xFFF, 0x1000), (STUBS, 0x1000)):
             uc.mem_map(base, size)
         for n, b in CODE.items():
@@ -366,6 +370,37 @@ def test_core_adapter_draws_the_law_at_phase_0(rig):
                 assert got == exp, (art, g, x, y)
 
 
+def test_arrow_art_is_a_scanline_pair():
+    lut, n = SL.scanicon_pair_lut(ARROW_ART, 9)
+    assert lut == {(0xAE, 0): 0xEE, (0xEE, 1): 0xAE} and n == {(0xAE, 0): 25, (0xEE, 1): 24}
+    assert SL.LOBBY_ARROW_SPRITE == ARROW_SPR and ARROW_SPR in SL.SCANICON_SPRITES and ARROW_SPR in AC.SPRITES
+    assert set(AC.SPRITES) == set(SL.SCANICON_SPRITES)
+
+
+def test_core_adapter_draws_the_arrow_by_the_law(rig):
+    """The arrow sites reach t_ck_core through thunk_nw_blit_left: at every g 17..40 the arrow sprite is drawn by
+    the law (phase 0), never refused into the engine's NN."""
+    pal = REAL[1] if REAL else [tuple((i * 37 + k * 11) % 256 for k in range(3)) for i in range(256)]
+    for g in range(17, 41):
+        for x, y in ((10, 21), (11, 50), (-3, 2), (PW - 6, PH - 9)):
+            noise, got, rec = rig.run("t_ck_core", g=g, rows=ARROW_ART, key=9, pal=pal, ph0=0, args=(DST, 9, x, y),
+                                      seed=g * 3 + x, spr=ARROW_SPR)
+            assert rec[0] not in (STUB_SD2, STUB_CORE), ("the arrow fell to an engine draw", g)
+            exp = _expected(noise, g=g, rows=ARROW_ART, key=9, pal=pal, x=x, y=y, num=g, den=16, phase=0)
+            assert got == exp, (g, x, y)
+
+
+@pytest.mark.parametrize("g", [17, 22, 25, 40])
+def test_core_adapter_null_dest_is_the_vanilla_core_call(rig, g):
+    """The roster arrow sites pass dest = flag ? canvas : NULL (neg / sbb / and): a NULL dest keeps the vanilla core
+    (which returns without drawing) with the args untouched -- never t_ck_draw's Sprite_draw_2 fallback chain."""
+    for spr, rows in ((ARROW_SPR, ARROW_ART), (SPR, ARTS["syn0_18x18"][0])):
+        noise, got, rec = rig.run("t_ck_core", g=g, rows=rows, key=9, pal=ARTS["syn0_18x18"][1], args=(0, 9, 10, 21),
+                                  spr=spr)
+        assert rec[0] == STUB_CORE and rec[1] == spr and rec[2:6] == [0, 9, 10, 21]
+        assert got == noise
+
+
 @pytest.mark.parametrize("g", [12, 16])
 def test_core_adapter_g_le_16_is_the_vanilla_core_call(rig, g):
     rows, pal = ARTS["syn0_18x18"]
@@ -386,6 +421,23 @@ def test_sites_point_at_the_adapters_and_the_shared_tail_is_untouched():
         assert "{rel32:t_ck_list}" in new_bytes(s), s
     for s in ("NetWin_draw_options.ckbox0", "NetWin_draw_options.ckboxN"):
         assert "{rel32:t_ck_core}" in new_bytes(s), s
+    # the lobby arrows: thunk_nw_blit_left's one call is t_ck_core inside the g/16 bracket (2026-11-07)
+    i = text.index("      - id: thunk_nw_blit_left")
+    j = text.index('bytes: "', i)
+    body = text[j:text.index(chr(10), j)]
+    assert body.count("{rel32:") == 1 and "E8 {rel32:t_ck_core}" in body
+    assert "A3 18 6D 69 00 C7 05 1C 6D 69 00 10 00 00 00 E8 {rel32:t_ck_core} C7 05 18 6D 69 00 01" in body
+    # ... and every site that reaches it (3 roster via _right, 8 settings via _gap) draws the arrow sprite: the
+    # instruction before each call is `mov ecx, 0x788038` in the pristine exe
+    sites = [int(m, 16) for m in re.findall(r"virtual_addr: (0x[0-9A-Fa-f]+)\n(?:.*\n){0,4}?\s+new_bytes:\s+\"E8 "
+                                           r"\{rel32:thunk_nw_blit_(?:right|gap|left)\}\"", text)]
+    assert len(sites) == 11, sites
+    bak = config.terranx_bak(required=False)
+    if bak and pathlib.Path(bak).exists():
+        import pefile
+        pe = pefile.PE(str(bak), fast_load=True)
+        for va in sites:
+            assert pe.get_data(va - 5 - 0x400000, 5) == bytes.fromhex("B938807800"), hex(va)
     # thunk_checkbox_scale's other users keep it (jackal file icons through t_fdicon_checker)
     for s in ("FUN_00614c50.icon_file", "FUN_00614c50.icon_drive", "FUN_00614c50.icon_folder"):
         assert "{rel32:t_fdicon_checker}" in new_bytes(s), s

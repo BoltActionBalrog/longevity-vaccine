@@ -440,6 +440,7 @@ extern void commlink_on_lclick(int x, int y);  // addr: 0x00477F30  observed  Sp
 extern void commlink_on_rclick(int x, int y);  // addr: 0x00478150  observed  per-faction context Menu (talk/intel/call_council/renounce_pact/withdraw/chat)
 extern void commlink_show(int* self);          // addr: 0x00479970  observed  fastcall; slide-in anim + Win_show; vcall +0x30 redraw first
 extern void commlink_hide(int* self);          // addr: 0x00479C00  observed  fastcall; slide-out anim + Win_hide
+extern void commlink_set_init_rect(int self);   // addr: 0x00479900  observed  thiscall; +0xa38 rect {0,0,0x8a,h}: h = 7 rowH + titleH + footerH (MP: + mpStripH + footerH + 0xE); sets 0x939ED8 bit 0x40
 extern int  commlink_attempter(int a1, int a2); // addr: 0x005589E0  thinker  cdecl
 extern void commlink_attempt(int faction);     // addr: 0x00558C60  thinker  cdecl; opens diplomacy with faction
 extern int  Spot_check(void* self, int x, int y, int* spotPos, int* spotType); // addr: 0x005FAB00  thinker  thiscall
@@ -463,14 +464,22 @@ extern void Spot_kill_type(void* self, int type); // addr: 0x005FAA90  thinker  
 // field: MultiWin +0xff4  int       btnW        (121)
 // field: MultiWin +0xff8  int       btnH        (18)
 // field: MultiWin +0x112c int       mpStripH    (28)
+// field: MultiWin +0xa44  int       init_h      native panel height from commlink_set_init_rect (222 MP, 156 SP); device-scaled in place at build
 // field: MultiWin +0x4c4  int       winW        device width (scaled at build); +0x4c8 = -winH
 // field: MultiWin +0x28ac Spot      spots        (ctor 0x5FA860; row hit-rects, type1=contact row; rebuilt every repaint after Spot_kill_type 2/0/1)
 // field: Spot +0x0 int* entries   0x18-byte slots
 // field: Spot +0x4 int  capacity  Spot_init count
 // field: Spot +0x8 int  count
 // field: SpotEntry +0x0 int x0   +0x4 y0  +0x8 x1(excl)  +0xC y1(excl)  +0x10 type  +0x14 idx   Spot_check half-open, last-added wins
-extern void commlink_draw_mp_header(int self, RECT* rect, int tick); // addr: 0x00478BE0  observed  thiscall; MP header line via +0x2884 font + Buffer_write_cent_l_7
-// field: MultiWin +0xa24  int       collapsed?   (0 -> shown state used by show/hide)
+extern void commlink_draw_mp_header(int self, RECT* rect, int tick); // addr: 0x00478BE0  observed  thiscall RET 8; MP time widget: Spot_add(0, type 2) + time text via +0x2884 font + Buffer_write_cent_l_7
+extern int g_mp_time_ticks;                                                    // addr: 0x007FFF7C  observed  commlink_draw_mp_header tick counter; bit 0 = blink phase
+extern int g_mp_time_last_secs;                                               // addr: 0x007FFF78  observed  commlink_draw_mp_header: the seconds value last drawn
+extern int g_mp_time_hold_depth;                                               // addr: 0x0093F664  guess     turn-timer hold nesting counter (inc/dec pairs 0x593054/0x593079, 0x513EB0/0x530475)
+extern int g_mp_time_hold_ticks;                                               // addr: 0x0093F668  guess     turn-timer hold countdown, decremented per held tick @0x478CC3
+extern int g_mp_time_hold_mask;                                                // addr: 0x0093E8E0  guess     per-player turn-timer hold bitmask
+extern void commlink_spot_rect(void* spots, int idx, int type, RECT* rect); // addr: 0x0047A6F0  observed  thiscall RET 0xC; Spot_add(idx, type, L, T, R-L, B-T)
+extern int  commlink_write_cent(struct Buffer* self, char* str, RECT* rect); // addr: 0x0047A720  observed  thiscall RET 8; Buffer_write_cent_l_7(str, rect, strlen); 0 on NULL str
+// field: MultiWin +0xa24  int       expanded     MP: 0 -> MP strips at the panel bottom, faction rows skipped; also read by show/hide
 extern void Console_menu_proc(struct Console* self, int a2); // addr: 0x0051BC70  thinker  thiscall; MENU-item SELECTION dispatcher (huge switch on item id -> editor/prefs/etc); NOT the opener
 extern void Console_menu_daemon(int a1);       // addr: 0x0051D720  thinker  cdecl; forwards to Console_menu_proc (registered by Console_init @0x51d99d as the menu select callback)
 extern void GraphicWin_resize(struct GraphicWin* self, int w, int h, int a4); // addr: 0x005D5540  thinker  thiscall; resizes the win buffer (Buffer_init) — the menu/panel sizing primitive; a4=1 repaints (vtbl+0x30) synchronously before returning
@@ -537,6 +546,9 @@ extern void Console_cursor_on(struct Console* self, int a2); // addr: 0x00510400
 extern int  Console_edit_lock(void); // addr: 0x004E1F40  thinker  cdecl; 1 = scenario editor with ScrollLock / GameState&0x8000000
 extern int  NetDaemon_lock_veh(struct AlphaNet* self, int* veh_id, int a3, int a4, int a5, int a6); // addr: 0x00531020  thinker  thiscall RET 0x14; this=0x93CD90; 0 = locked
 extern void NetDaemon_unlock_veh(struct AlphaNet* self); // addr: 0x005310F0  thinker  thiscall; this=0x93CD90
+extern int  netconnect_join(int self);          // addr: 0x004E2E50  observed  thiscall; JOIN path: #NETCONNECT_JOIN name, enum sessions, 0 found -> #NETCONNECT_SESSION_NOT_FOUND (Try Again loops), else #NETCONNECT_SESSIONS picker
+extern int  AlphaNet_enum_sessions(struct AlphaNet* self, void* list, char* password); // addr: 0x0062E420  observed  thiscall RET 8; this=0x93CD90; IDirectPlay::EnumSessions (vtbl+0x34, DPENUMSESSIONS_AVAILABLE, default timeout, callback 0x630C30)
+extern int  AlphaNet_enum_sessions_cb();       // addr: 0x00630C30  observed  stdcall; EnumSessions callback, appends to the list in 0x9BE4E8
 extern void synch_veh(int veh_id); // addr: 0x00593220  thinker  cdecl
 extern void StatusWin_set_loc(struct StatusWindow* self, int tx, int ty); // addr: 0x004B9F90  thinker  thiscall RET 8; 'Info on this square' (Ctrl+Shift+right click; also from StatusWin_redraw)
 extern int  g_map_mouse_enabled;               // addr: 0x0090D938  observed  nonzero = the map window accepts mouse clicks (gate of every MapWin_on_* handler)
@@ -1513,6 +1525,12 @@ extern void NetWin_draw_options(void* self);                                   /
 extern void NetWin_modal_proc(void);                                           // addr: 0x00483240  observed  modal idle proc; pumps NetDaemon 0x530320 + redraws via [vtbl+0x30] @0x483274
 extern int  NetWin_on_command(void* self, int id);                             // addr: 0x0047B450  observed  vtable+0xB0 command handler; Net_send/X_pop_2
 extern int  NetWin_player_color(int player);                                   // addr: 0x0047B380  observed  per-player text color (cb stored at NetWin+0x1190)
+extern int  NetWin_on_click();                                                // addr: 0x0047B760  observed  thiscall; vtable+0x4C; Spot_check on NetWin+0xD34 then switch on spot type
+extern int  NetWin_pick_faction(void* self, int slot);                         // addr: 0x0047C530  observed  thiscall; faction-column menu; writes the slot's faction pick, then NetWin_faction_password(1)
+extern int  NetWin_faction_password(void* self, int verify);                   // addr: 0x0047C970  observed  thiscall RET 4; ENTERPASSWORDNEW / ENTERPASSWORDFACTION / VERIFYPASSWORD prompts; padlock spot calls it with 0
+extern char g_mp_slots[];                                                      // addr: 0x0090DB98  observed  lobby player records, stride 0x17C
+// field: g_mp_slots +0x3   char  faction_pick   -1 = Random
+// field: g_mp_slots +0x178 int   faction_password   0 = none
 extern void mp_defaults_init(void* self);                                      // addr: 0x00481E90  observed  thiscall; pure MP-defaults data init (Thinker write_byte 0x481EE0/E7/EE/F5); caller multiplayer_init @0x58DB57
 extern int  multiplayer_init(void);                                            // addr: 0x0058DB30  thinker   callers: top_menu @0x58E904, control_game @0x52AC68; calls NetWin_setup_lobby @0x58DBDA; lobby retcheck cmp eax,esi(=1)/jl @0x58DBDF
 extern int  top_menu(int a1);                                                  // addr: 0x0058E360  thinker   builds/reuses TopMenuWin (GraphicWin_ctor+GraphicWin_init(0,0,ScreenW,ScreenH)) + picks [x]opening[a|b].pcx by ScreenW==800 / SMACX flag [0x9A6488]

@@ -314,7 +314,7 @@ class Emu:
     def __init__(self, image: bytearray, symtab: dict[str, int]):
         self.symtab = symtab
         mu = self.mu = Uc(UC_ARCH_X86, UC_MODE_32)
-        mu.mem_map(PCAVE2, CAVE_LEN)
+        mu.mem_map(PCAVE2, max(CAVE_LEN, (len(image) + 0xFFF) & ~0xFFF))   # the live pcave2 length (0x44000 since 2026-11-07)
         for page in sorted({BUFFER_TILE & ~0xFFF, BUFFER_SET_CLIP & ~0xFFF, BUFFER_COPY_4 & ~0xFFF,
                             IAT_INTERSECTRECT & ~0xFFF, G_VA & ~0xFFF, MARKER & ~0xFFF}):
             mu.mem_map(page, 0x1000)

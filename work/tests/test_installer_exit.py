@@ -700,3 +700,72 @@ def test_a_worker_child_still_prints_detail_and_writes_the_marker(monkeypatch, c
     assert "the reason" in out, "detail is diagnosis, not verdict -- it must survive"
     assert "INSTALLATION FAILED" not in out
     assert marker.is_file(), "the guard marker is the batch handshake and must still be written"
+
+
+# ---- log redaction: LongevityMods\logs goes into public bug reports ---------------------------------
+
+_P = r"C:\Users\Ann"
+
+
+@pytest.mark.parametrize("text,want", [
+    (r"game folder: C:\Users\Ann\Games\SMAC", r"game folder: %USERPROFILE%\Games\SMAC"),
+    (r"c:\users\ann\Downloads\LV\scripts\install.py", r"%USERPROFILE%\Downloads\LV\scripts\install.py"),
+    (r"C:/Users/Ann/x and C:\Users\Ann\y", r"%USERPROFILE%/x and %USERPROFILE%\y"),
+    (r'File "C:\Users\Ann\AppData\Local\Temp\x.py", line 3', r'File "%USERPROFILE%\AppData\Local\Temp\x.py", line 3'),
+    (r"C:\Users\Ann end", r"%USERPROFILE% end"),
+    (r"No such file: 'C:\\Users\\Ann\\SMAC\\x.exe'", r"No such file: '%USERPROFILE%\\SMAC\\x.exe'"),   # a repr()
+    (r"['C:\\\\Users\\\\Ann\\\\f']", r"['%USERPROFILE%\\\\f']"),                                       # repr of a repr
+    (r"C:/Users//Ann/x", r"%USERPROFILE%/x"),
+    (r"C:\Users\Anna\Games", r"C:\Users\Anna\Games"),            # another account sharing the prefix
+    (r"C:\Users\Ann.old\x", r"C:\Users\Ann.old\x"),
+    (r"D:\GOG Games\SMAC", r"D:\GOG Games\SMAC"),
+    ("", ""),
+])
+def test_redact_profile(text, want):
+    assert ix.redact_profile(text, _P) == want
+
+
+def test_redact_profile_edges(monkeypatch):
+    assert ix.redact_profile(r"C:\Users\Ann\x", _P + "/") == r"%USERPROFILE%\x"      # trailing separator
+    for unusable in ("", "C:", "C:\\"):
+        assert ix.redact_profile(r"C:\Users\Ann\x", unusable) == r"C:\Users\Ann\x"
+    assert ix.redact_profile(b"bytes", _P) == b"bytes" and ix.redact_profile(None, _P) is None
+    assert ix.redact_profile(r"C:\Users\Zoë (2)\x", r"C:\Users\Zoë (2)") == r"%USERPROFILE%\x"  # regex-special, non-ASCII
+    monkeypatch.setenv("USERPROFILE", _P)
+    assert ix.redact_profile(r"C:\Users\Ann\x") == r"%USERPROFILE%\x"                    # default = %USERPROFILE%
+
+
+def test_text_that_cannot_be_redacted_is_withheld_not_written(monkeypatch):
+    import re
+
+    def boom(*a, **k):
+        raise MemoryError
+    monkeypatch.setattr(re, "sub", boom)
+    assert ix.redact_profile(r"C:\Users\Ann\x", _P) == "[line withheld: could not redact]\n"
+
+
+def test_redacting_writer_delegates_everything_else(tmp_path):
+    raw = (tmp_path / "x.log").open("w", encoding="utf-8")
+    w = ix.RedactingWriter(raw, _P)
+    w.write(r"at C:\Users\Ann\Games" + "\n")
+    w.writelines([r"C:\Users\Ann\a" + "\n", "plain\n"])
+    w.flush()
+    assert w.encoding == raw.encoding
+    w.close()
+    assert raw.closed
+    assert (tmp_path / "x.log").read_text(encoding="utf-8").splitlines() == [
+        r"at %USERPROFILE%\Games", r"%USERPROFILE%\a", "plain"]
+
+
+def test_crash_log_redacts_argv_and_the_traceback(tmp_path, monkeypatch):
+    monkeypatch.setenv("USERPROFILE", _P)
+    monkeypatch.setattr(sys, "argv", [r"C:\Users\Ann\Downloads\LV\scripts\install.py", "--game-dir", r"C:\Users\Ann\SMAC"])
+    try:
+        raise RuntimeError(r"cannot write C:\Users\Ann\SMAC\terranx.exe")
+    except RuntimeError as e:
+        p = ix.write_crash_log(e, tmp_path)
+    text = p.read_text(encoding="utf-8")
+    assert "Ann" not in text.replace("%USERPROFILE%", "")
+    assert r"%USERPROFILE%\SMAC\terranx.exe" in text
+    argv_line = next(ln for ln in text.splitlines() if ln.startswith("argv"))
+    assert r"%USERPROFILE%\\Downloads" in argv_line and r"%USERPROFILE%\\SMAC" in argv_line     # argv is a repr()

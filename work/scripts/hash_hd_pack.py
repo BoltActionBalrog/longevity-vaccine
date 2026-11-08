@@ -1,4 +1,4 @@
-"""Emit a provenance sidecar for a built HD cinematics pack.
+"""Emit a provenance sidecar for a built HD Cinematics pack.
 
 `build_hd_pack.py` produces 61 .mp4 files and nothing else -- no hashes, no sizes, and no record
 of which upscale model or CRF produced which clip. That provenance lived only in `pipeline.ini`

@@ -5278,8 +5278,14 @@ def msglog_icon_pixels(src: List[List[int]], g: int, key: int) -> List[List[Opti
 #           mate m iff m != index, m won with >= 2 votes, (m, parity ^ 1)'s own plurality is index, and BOTH keys
 #           cover >= SCANICON_MIN_MEMBER texels (a scanline field spans two row pairs in two columns at least; the
 #           checked art's 2-3-texel corner bevel 0xC0 / 0xE2 is art, not dither).  Anything else (anti-aliased
-#           edges, the bevel) keeps its mapped index.  The port refuses every sprite but CHECKBOX_SPRITES (the
+#           edges, the bevel) keeps its mapped index.  The port refuses every sprite but SCANICON_SPRITES (the
 #           plain engine draw then), so no other art -- e.g. CheckList's default 32x32 sprites -- ever reaches it.
+#   SCANICON_SPRITES = the three checkboxes and the lobby's 7x13 arrow 0x788038 (the settings / roster pull-down
+#           arrows; interface.pcx art, key 9, a 1-row ae / ee dither over the whole triangle: plain NN banded it
+#           1,2,1,1,2 at g = 22 -- user 2026-11-07, 1080p host menu "harsh on the eyes").  The arrow sites go
+#           through thunk_nw_blit_left -> t_ck_core (phase 0, the NetWin canvas), the same core as the lobby
+#           checkboxes; a NULL dest (both arrow families' "no arrow" idiom: neg / sbb / and) keeps the vanilla core,
+#           which returns without drawing.
 #   phase = the rows the dest canvas's stripe grid is advanced by: 0 for the lobby (NetWin canvas, every lobby
 #           layer phases from its own row 0); for the list rows the dest is the list's own child canvas, whose
 #           background is the parent's grid shifted by the child's parent-local top -- list_stripe_phase of
@@ -5288,6 +5294,8 @@ def msglog_icon_pixels(src: List[List[int]], g: int, key: int) -> List[List[Opti
 #   g <= 16: never reached (every site keeps its vanilla call).  Ports: t_ck_draw (core, Sprite_draw_2 contract),
 #   t_ck_list (the three list sites), t_ck_core (the two lobby core sites).
 CHECKBOX_SPRITES = (0x7794D8, 0x779504, 0x779530)
+LOBBY_ARROW_SPRITE = 0x788038
+SCANICON_SPRITES = CHECKBOX_SPRITES + (LOBBY_ARROW_SPRITE,)
 SCANICON_MIN_MEMBER = 4
 
 
@@ -5455,6 +5463,438 @@ def panel_fill_pixel(idx: int, y: int, g: int, a: int, b: int, rgb) -> int:
     sa, sb = sum(rgb(a)), sum(rgb(b))
     top, mate = (a, b) if (sa > sb or (sa == sb and a < b)) else (b, a)
     return top if stripe_top(y, g) else mate
+
+
+# ---- the lobby's frame strokes (2026-11-07, group netwin_frame_strokes) ----
+# Every lobby frame is a Buffer_box_sprite at the scaled rect table, so its 1-px stroke stayed 1 px at every g.  The
+# frame the popup family's band-map thickener draws is the law (K = stroke_width(g) on every edge, the 1-px keyed
+# chamfer a K x K block, the d5a0 bevel step a K x K block); the filled boxes' interior inside the K band is on the
+# panel stripe law above (panel_fill_pixel), so the 5-px 1-row-dither ring the native edge sprites left inside every
+# panel at g >= 22 goes too.  Port: assemble_nw_frames.py (t_nwf_core paints these pixels directly; the band-map
+# thunks stay as the test oracle, tests/test_scaling_nw_frames.py).
+
+NW_FRAME_CHAMFER, NW_FRAME_BEVEL = 0, 1      # d690 / d618 / d528 / dca8 (filled)  ;  d5a0 (the section outlines)
+NW_TITLE_INSET = 3                            # NetWin_draw 0x481B33: the d618 title band inside its d5a0 outline
+NW_TITLE_RECT = (3, 3, 797, 29)               # vanilla +0xA14 (the title outline): client inset 3, height 26
+NW_LOCK_ICON_DX = 1                           # NetWin_draw_players 0x48055A / 0x48058A: icon x = lock cell L + 1
+
+
+def nw_frame_stroke(g: int) -> int:
+    """The stroke width of every lobby frame: stroke_width(g) (1 at g 17..24 -- half_down(24, 16) = 1 --, 2 from 25)."""
+    return stroke_width(g)
+
+
+def nw_chat_log_inset(g: int) -> int:
+    """The chat log's text area inside its panel: the engine attaches the TextScroll at the (scaled) panel rect inset
+    by a NATIVE 3 on every side (NetWin_setup_lobby 0x482A00) -- at K = 2 that left a 1-px gap to the stroke where
+    vanilla x g/16 is ~5 -> scale_px(3, g) (4K: 7, gap 5; 1080: 4, gap 3; 1600x1200: 5, gap 3).  g <= 16: 3."""
+    return NW_TITLE_INSET if g <= NATIVE_G else scale_px(NW_TITLE_INSET, g)
+
+
+def nw_frame_bands(rect: Tuple[int, int, int, int], cls: int, g: int) -> List[Tuple[int, int, int, int]]:
+    """The half-open rects painted in the stroke colour.  CHAMFER: the four K-wide bands between the K x K corner
+    blocks (which keep what was under the box).  BEVEL: the four runs between the 2K corner reach, plus the four
+    K x K diagonal steps at (L+K, T+K) and its mirrors -- the native d5a0 corner (stroke from col 2 on row 0, the
+    diagonal pixel (1, 1), stroke from row 2 on col 0) with every cell K wide."""
+    l, t, r, b = rect
+    k = nw_frame_stroke(g)
+    if cls == NW_FRAME_CHAMFER:
+        return [(l + k, t, r - k, t + k), (l + k, b - k, r - k, b), (l, t + k, l + k, b - k), (r - k, t + k, r, b - k)]
+    k2 = 2 * k
+    return [(l + k2, t, r - k2, t + k), (l + k2, b - k, r - k2, b), (l, t + k2, l + k, b - k2), (r - k, t + k2, r, b - k2),
+            (l + k, t + k, l + k2, t + k2), (r - k2, t + k, r - k, t + k2), (l + k, b - k2, l + k2, b - k),
+            (r - k2, b - k2, r - k, b - k)]
+
+
+def nw_frame_interior(rect: Tuple[int, int, int, int], g: int) -> Tuple[int, int, int, int]:
+    """A filled lobby box's stripe rect: inside the K band, [L+K, R-K) x [T+K, B-K)."""
+    l, t, r, b = rect
+    k = nw_frame_stroke(g)
+    return l + k, t + k, r - k, b - k
+
+
+def nw_title_band_inset(g: int) -> int:
+    """The title band's inset from its outline: vanilla 3 -> scale_px(3, g) (the engine kept the native 3 while every
+    other nested lobby pair comes from the scaled rect table).  4K: 7 (channel 7 - K = 5 = 2 x 2.5)."""
+    return NW_TITLE_INSET if g <= NATIVE_G else scale_px(NW_TITLE_INSET, g)
+
+
+def nw_title_rect_bottom(t: int, g: int) -> int:
+    """The title outline's bottom from its top: thunk_nw_rectscale stores T + fl(26g/16) with T = fl(3g/16) (a double
+    floor, up to 1.44 px short of 29 g/16 at g 19 / 25 / 30 / 35 ...); the outline is drawn at
+    T - fl(3g/16) + fl(29g/16) = the client top + fl(29 g/16), within 1 px of vanilla x g/16 at every g."""
+    if g <= NATIVE_G:
+        return t + NW_TITLE_RECT[3] - NW_TITLE_RECT[1]
+    return t - (NW_TITLE_RECT[1] * g) // NATIVE_G + (NW_TITLE_RECT[3] * g) // NATIVE_G
+
+
+def nw_lock_icon_x(l: int, g: int) -> int:
+    """The roster lock icon's x: vanilla L + 1, the column right after the cell's 1-px stroke -> L + K (it abuts the
+    K-wide stroke at every g; at g = 16, L + 1)."""
+    return l + (NW_LOCK_ICON_DX if g <= NATIVE_G else nw_frame_stroke(g))
+
+
+# ---- the COMMLINK panel's multiplayer click spots (2026-11-07, group commlink_mp_spots) ----
+# The COMMLINK panel (MultiWin 0x7FD648) draws in device space through commlink_menu_scale: x = commlink_sc(x),
+# y = commlink_row_y(y) (hm_sc / hm_rowY, the panel's uniform row pitch), and its faction rows' Spot_add rects follow
+# (thunk_comm_rowrect).  The multiplayer-only spots were left native: the time widget's (commlink_draw_mp_header
+# 0x478BE0, type 2 -- a click opens the time controls), the strip under it (commlink_redraw 0x47947E via 0x47A6F0,
+# type 2) and each faction row's mute LED (commlink_draw_faction_row 0x4786DE, type 0); and the strip's text clip
+# (0x47946F) was native, so its text was clipped away.  At 4K the widget is drawn at y 450..520 while its spot stayed
+# at 180..208, under the faction rows (Spot_check: last added wins) -- the widget could not be clicked, and a mute-LED
+# click hit another row's LED (the wrong player muted at g 22 / 25) or nothing.  Law: every spot covers what is drawn
+# for it.  Port: assemble_commlink_mp.py.
+
+COMMLINK_ROW_BASE, COMMLINK_ROW_PITCH = 6, 18      # the panel's native row grid (hm_rowY)
+
+
+def commlink_sc(v: int, g: int) -> int:
+    """hm_sc: round(v g / 16), halves up -- the COMMLINK panel's x / width scale (commlink_menu_scale)."""
+    return (v * g + 8) >> 4
+
+
+def commlink_row_y(y: int, g: int) -> int:
+    """hm_rowY: a native panel y = 6 + 18k + r lands at sc(6) + k sc(18) + sc(r) (one device pitch for every row);
+    y < 6 -> sc(y).  Identity at g = 16."""
+    if y < COMMLINK_ROW_BASE:
+        return commlink_sc(y, g)
+    k, r = divmod(y - COMMLINK_ROW_BASE, COMMLINK_ROW_PITCH)
+    return k * commlink_sc(COMMLINK_ROW_PITCH, g) + commlink_sc(COMMLINK_ROW_BASE, g) + commlink_sc(r, g)
+
+
+COMMLINK_MP_FIELDS = dict(row_h=18, footer_h=24, title_h=6, header_h=28, strip_h=0xE)   # MultiWin +0x1158 / +0x11B4 /
+#: +0x1100 / +0x112C, and the strip's literal 0xE (commlink_redraw 0x479433)
+
+
+def commlink_mp_native_height(row_h: int = 18, footer_h: int = 24, title_h: int = 6, header_h: int = 28,
+                              strip_h: int = 0xE) -> int:
+    """The multiplayer panel's native height, the engine's own sum (0x479900): 7 rows + title + footer + the time
+    widget + footer + the strip = 7 row_h + 2 footer_h + title_h + header_h + 0xE (222).  In the COLLAPSED layout
+    (MultiWin +0xA24 = 0) commlink_redraw starts the title strip at 7 row_h + 2 footer_h, so the strip under the
+    widget ends exactly here: the collapsed content is bottom-aligned in the box, the rows above it transparent."""
+    return 7 * row_h + 2 * footer_h + title_h + header_h + strip_h
+
+
+def commlink_pin_shift(g: int, panel_h: int, native_h: int = 222) -> int:
+    """The collapsed multiplayer layout's bottom pin (user decision 2026-11-07, "pin strips to bottom"): the box is
+    panel_h = commlink_sc(native_h) tall while its rows run on commlink_row_y, which ends up to 5 rows short of it
+    (g 19) or 6 past it (g 20 / 28 / 36); every collapsed y is shifted by panel_h - commlink_row_y(native_h, g), so
+    the strip under the time widget ends ON the box bottom.  The collapsed content is one rigid block (title strip,
+    widget, strip, contiguous) above transparent rows, so the shift moves nothing relative to anything drawn.
+    0 at g 16 and at 4K (exact).  Only while the canvas IS that box (panel_h == commlink_sc(native_h)): a box built
+    for single player, or the 0-tall canvas of commlink_win_build's own repaints, is not pinned (0)."""
+    if panel_h != commlink_sc(native_h, g):
+        return 0
+    return panel_h - commlink_row_y(native_h, g)
+
+
+def commlink_panel_y(y: int, g: int, panel_h: int = -1, collapsed_mp: bool = False, native_h: int = 222) -> int:
+    """The patched hm_rowY (t_clmp_rowy): commlink_row_y, plus commlink_pin_shift in the collapsed multiplayer
+    layout (MultiplayerActive [0x93F660] != 0 and MultiWin +0xA24 == 0); single player and the expanded layout are
+    commlink_row_y unchanged."""
+    y1 = commlink_row_y(y, g)
+    return y1 + commlink_pin_shift(g, panel_h, native_h) if collapsed_mp else y1
+
+
+def commlink_bottom(b: int, g: int, panel_h: int, collapsed_mp: bool = False) -> int:
+    """A native bottom edge -> device: commlink_panel_y, except the panel's own bottom.  The box is scaled linearly
+    (thunk_comm_gwinit: panel_h = commlink_sc(native height)) while the rows run on commlink_row_y: a bottom with
+    commlink_sc(b) == panel_h IS the panel's bottom -> panel_h.  In the collapsed multiplayer layout the pin already
+    lands it there (commlink_panel_y(native_h) == panel_h)."""
+    if commlink_sc(b, g) == panel_h:
+        return panel_h
+    return commlink_panel_y(b, g, panel_h, collapsed_mp)
+
+
+def commlink_strip_rows(x: int, y: int, sh: int, num: int, den: int, g: int, mp: bool, panel_h: int = -1,
+                        collapsed_mp: bool = False) -> int:
+    """The device rows hm_synth_core re-synthesizes for a COMMLINK panel strip blitted at native y (sh native rows,
+    the blit's num / den): (sh num + den / 2) / den -- and in multiplayer at least the strip's row-law span
+    commlink_panel_y(y + sh) - commlink_panel_y(y), so a strip always reaches the next one's top.  The multiplayer
+    title (6 rows) and time widget (28 rows) sit OFF the 18-row grid: drawn sc(h) tall from their row-law tops they
+    fell 1 row short of the next strip at most g (a see-through hairline between title / widget / strip, both
+    layouts; found 2026-11-07).  Grow only (an overlap is drawn over by the next strip, top to bottom), never more
+    than 1 row; only the full-width strips (blitted at x = 0: the mute LEDs at x = 7 keep their square); single
+    player unchanged (no gap there at any g)."""
+    rows = (sh * num + den // 2) // den
+    if not mp or x != 0:
+        return rows
+    span = commlink_panel_y(y + sh, g, panel_h, collapsed_mp) - commlink_panel_y(y, g, panel_h, collapsed_mp)
+    return max(rows, span)
+
+
+# ---- The COMMLINK title strip: even lines (2026-11-07) ----
+# MultiWin +0x10E4 (0x7FE72C) is the panel's 138 x 6 top edge, drawn at native y by thunk_hudmenu_sbc and redrawn at
+# device density by hm_synth_core (g_clmp_son set): MEASURED on the pristine image -- rows 0..2 the metal plate
+# (0x50 / 0x4E highlight, then 0x51 / 0x18 body), row 3 the dark c6 line (green 0x29 accents), rows 4..5 the
+# near-black 40 / 41 fill the header continues.  The core's DDA row map NN-enlarged every 1-row line: 3,2,3,2 rows at
+# g = 40, 2,1,2 at 25, 1,2 at 22 (user 2026-11-07, 4K: "color banding at the top of the COMMLINK, both collapsed and
+# expanded" -- "the title strips come out uneven at 2.5x").  LAW (the frame / MENU-strip rule: lines on the one stroke
+# K = stroke_width(g), the remainder in the fill): dest row j of the strip's H rows shows native row j // K while
+# j < 4 K (the four lines, top-anchored, equal), else the fill regenerated at device density -- native row 4 (the
+# art's even member, as hm_synth_core's pair remap puts an even-row member on top) on stripe_top(dest row y, g),
+# row 5 elsewhere.  H is the core's own dest height (commlink_strip_rows: sc(6), the multiplayer row-law span
+# included), so the strip still meets the next one; a strip too short for the lines plus one fill row (never at
+# g 17..40) keeps the core's DDA row.  g <= 16: the core is not entered (vanilla 1:1).
+COMMLINK_TITLE_SPRITE = 0x7FD648 + 0x10E4
+COMMLINK_TITLE_ROWS = 6
+COMMLINK_TITLE_LINES = 4
+COMMLINK_TITLE_FILL = (4, 5)
+
+
+def commlink_title_src_row(j: int, y: int, h: int, g: int, num: int, den: int) -> int:
+    """The native row of the COMMLINK title strip that dest row j (dest-buffer row y = dy + j) of its h re-synthesized
+    rows shows (law above).  num / den = the blit's scale (the DDA fallback)."""
+    k = stroke_width(g)
+    lines = COMMLINK_TITLE_LINES * k
+    if h < lines + 1:
+        return min((j * den) // num, COMMLINK_TITLE_ROWS - 1)
+    if j < lines:
+        return j // k
+    return COMMLINK_TITLE_FILL[0] if stripe_top(y, g) else COMMLINK_TITLE_FILL[1]
+
+
+def commlink_title_synth(dest: bytearray, stride: int, buf_w: int, buf_h: int, src_rows, key: int, dx: int, dy: int,
+                         num: int, den: int, g: int, h: Optional[int] = None) -> None:
+    """hm_synth_core for the COMMLINK title strip (the sprite COMMLINK_TITLE_SPRITE, COMMLINK_TITLE_ROWS tall, under
+    g_clmp_son): strip_synth with the row map commlink_title_src_row in place of the floor NN row; h = the core's dest
+    height (strip_synth_dims' by default; the multiplayer span may grow it, commlink_strip_rows).  Columns, the pair
+    remap and the key skip are strip_synth's.  Any other sprite height: strip_synth exactly."""
+    if g <= NATIVE_G:
+        return
+    sh, sw = len(src_rows), len(src_rows[0])
+    if not (STRIP_SYNTH_SRC_W[0] <= sw <= STRIP_SYNTH_SRC_W[1] and STRIP_SYNTH_SRC_H[0] <= sh <= STRIP_SYNTH_SRC_H[1]):
+        return
+    if den <= 0:
+        return
+    if num <= den:
+        raise ValueError(f"commlink_title_synth: num {num} <= den {den} is outside the asm's single-step DDA domain")
+    dw, dh = strip_synth_dims(sw, sh, num, den)
+    if h is not None:
+        dh = h
+    xs, ys = max(dx, 0), max(dy, 0)
+    xe, ye = min(dx + dw, buf_w), min(dy + dh, buf_h)
+    if xe <= xs or ye <= ys:
+        return
+    pair = strip_synth_pair(src_rows, key)
+    cols = [min(((x - dx) * den) // num, sw - 1) for x in range(xs, xe)]
+    for y in range(ys, ye):
+        j = y - dy
+        if sh == COMMLINK_TITLE_ROWS:
+            r = commlink_title_src_row(j, y, dh, g, num, den)
+        else:
+            r = min((j * den) // num, sh - 1)
+        src = src_rows[r]
+        tex = (pair[0] if stripe_top(y, g) else pair[1]) if pair else None
+        o = y * stride
+        for x, c in zip(range(xs, xe), cols):
+            v = src[c]
+            if pair and v in pair:
+                v = tex
+            if v != key:
+                dest[o + x] = v
+
+
+# ---- The COMMLINK multiplayer header strip: a 9-slice box on the zone law + the scanicon shade (2026-11-07) ----
+# MultiWin +0x1110 (0x7FE758), 138 x 28, the time widget's strip (multiplayer, both layouts), re-synthesized by
+# hm_synth_core.  MEASURED on the pristine image: a rounded box -- rows: 2 field | the e4 top border + the two
+# corner rows (3 one-row cells) | 18 field | 3 corner / border cells | 2 field; columns: the e9 edge | 4 field | a bf
+# rail | 4 field | 3 corner cells (col 10 = the e4 side border) | 113 field | 3 corner cells | 4 field | a bf rail |
+# 4 field.  The fields are TWO scanline pairs sharing c5: c5 / 41 outside the box, c2 / c5 inside it, c5 on the even
+# rows outside and the odd rows inside (scanicon_pair_lut finds exactly (c5,0)-41, (41,1)-c5, (c2,0)-c5, (c5,1)-c2).
+# The core's one-pair probe (middle column) found (c2, c5) and recoloured the OUTSIDE c5 rows with it while its NN
+# beat the 41 rows -- a 3-colour 1/2/3-row banding (user 2026-11-07, 4K shot 210436 y 1413..1480: "color banding at
+# the top of the COMMLINK, both collapsed and expanded") -- and its 1-px border / corner / rail lines came out 2 / 3
+# px.  LAW: both axes on commlink_zone_map (every one-cell chrome line K = stroke_width(g); the fields share the
+# rest -- each small field half_down(len R / F), the largest (the box interior) the remainder, mirror_nn_src
+# inside every zone), then every texel through the art's own pair LUT (scanicon_pair_lut) with the EVEN native row
+# on stripe_top(dest y, g) -- strip_synth's convention, so the stripes run on into the strip below -- swapped to its
+# mate only where the mate IS one of its vertical neighbours in the art (the shared c5 also sits, odd, in the top-right
+# corner's outer AA ring, where the LUT's (c5, 1) -> c2 would paint an inside colour outside the box; audit 2026-11-07).
+# The inner box (native rows 6..21, 8 whole periods in vanilla, opening on its top member) is snapped to whole dest
+# periods (commlink_header_rowmap): its first and last+1 dest rows move to the nearest y with y mod P == 0 that stays
+# inside the 18-row field (a tie: the lower), at most T rows; the field's rows outside it show native row 5 / 22 -- otherwise
+# its edges fell at a random phase (a 1-row sliver or a doubled band; audit 2026-11-07).  Dims: the
+# core's (strip_synth_dims x its H, the multiplayer span included).  Key texels leave the pixel; the cut is the
+# buffer's.  A zone map that cannot fit (a field < 1 px; never at g 17..60) leaves the core's draw.  g <= 16: not
+# entered.  Port: t_clhd_draw after hm_synth_core (t_clmp_post).
+COMMLINK_HEADER_SPRITE = 0x7FD648 + 0x1110
+COMMLINK_HEADER_ROWS, COMMLINK_HEADER_COLS = 28, 138
+COMMLINK_HEADER_ROW_SEGS = ((2, 0), (1, 1), (1, 1), (1, 1), (18, 0), (1, 1), (1, 1), (1, 1), (2, 0))   # (len, line)
+COMMLINK_HEADER_COL_SEGS = ((1, 1), (4, 0), (1, 1), (4, 0), (1, 1), (1, 1), (1, 1), (113, 0), (1, 1), (1, 1), (1, 1),
+                            (4, 0), (1, 1), (4, 0))
+
+
+def commlink_zone_map(segs, dst_n: int, k: int) -> Optional[List[int]]:
+    """Dest index -> native index over dst_n for a strip axis cut into zones (len, line): a line zone (one native cell)
+    is k wide; with R = dst_n - k * lines and F the native field length, each field but the largest (the first of the
+    largest) is half_down(len R, F) wide, the largest the rest; mirror_nn_src inside each field.  None when a field
+    would be < 1 px."""
+    lines = sum(1 for n, ln in segs if ln)
+    r = dst_n - k * lines
+    f = sum(n for n, ln in segs if not ln)
+    fields = [i for i, (n, ln) in enumerate(segs) if not ln]
+    if r <= 0 or f <= 0:
+        return None
+    big = max(fields, key=lambda i: (segs[i][0], -i))
+    w = {i: half_down(segs[i][0] * r, f) for i in fields if i != big}
+    w[big] = r - sum(w.values())
+    if min(w.values()) < 1:
+        return None
+    out, start = [], 0
+    for i, (n, ln) in enumerate(segs):
+        if ln:
+            out += [start] * k
+        else:
+            out += [start + mirror_nn_src(x, n, w[i]) for x in range(w[i])]
+        start += n
+    assert len(out) == dst_n
+    return out
+
+
+def commlink_header_rowmap(h: int, dy: int, g: int) -> Optional[List[int]]:
+    """The header's row map for h dest rows starting at dest row dy: commlink_zone_map of COMMLINK_HEADER_ROW_SEGS with
+    the inner box (native rows 6..21) snapped to whole stripe periods (law above).  None when the zone map is."""
+    rmap = commlink_zone_map(COMMLINK_HEADER_ROW_SEGS, h, stroke_width(g))
+    if rmap is None:
+        return None
+    p = stripe_period(g)
+    zs, s = rmap.index(5), rmap.index(6)
+    e = len(rmap) - rmap[::-1].index(21)
+    ze = len(rmap) - rmap[::-1].index(22)
+
+    def snap(j: int, lo: int, hi: int) -> int:
+        """The nearest y with y mod P == 0 (a tie: the lower) within [lo, hi]; j itself when neither neighbour fits."""
+        r = (dy + j) % p
+        cands = [c for c in ((j - r, j + p - r) if r else (j,)) if lo <= c <= hi]
+        return min(cands, key=lambda c: (abs(c - j), c)) if cands else j
+    s2 = snap(s, zs, ze)
+    e2 = snap(e, s2 + 2, ze)
+    if e2 - s2 < 2:
+        return rmap
+    for j in range(zs, ze):
+        rmap[j] = 5 if j < s2 else 22 if j >= e2 else 6 + mirror_nn_src(j - s2, 16, e2 - s2)
+    return rmap
+
+
+def commlink_header_synth(dest: bytearray, stride: int, buf_w: int, buf_h: int, src_rows, key: int, dx: int, dy: int,
+                          num: int, den: int, g: int, h: Optional[int] = None) -> bool:
+    """t_clhd_draw: the whole header rect redrawn by the law above over what the core drew; h = the core's dest height
+    (strip_synth_dims' by default).  Returns False (dest untouched) where the port refuses: g <= 16, another art size,
+    den <= 0, a zone map that cannot fit, an empty cut."""
+    if g <= NATIVE_G or den <= 0:
+        return False
+    sh, sw = len(src_rows), len(src_rows[0])
+    if (sh, sw) != (COMMLINK_HEADER_ROWS, COMMLINK_HEADER_COLS):
+        return False
+    dw, dh = strip_synth_dims(sw, sh, num, den)
+    if h is not None:
+        dh = h
+    k = stroke_width(g)
+    rmap = commlink_header_rowmap(dh, dy, g)
+    cmap = commlink_zone_map(COMMLINK_HEADER_COL_SEGS, dw, k)
+    if rmap is None or cmap is None:
+        return False
+    xs, ys = max(dx, 0), max(dy, 0)
+    xe, ye = min(dx + dw, buf_w), min(dy + dh, buf_h)
+    if xe <= xs or ye <= ys:
+        return False
+    lut, _n = scanicon_pair_lut(src_rows, key)
+    for y in range(ys, ye):
+        r = rmap[y - dy]
+        p = r & 1
+        want = 0 if stripe_top(y, g) else 1
+        row = src_rows[r]
+        o = y * stride
+        for x in range(xs, xe):
+            c = cmap[x - dx]
+            v = row[c]
+            if v == key:
+                continue
+            m = lut.get((v, p))
+            if m is not None and p != want and ((r > 0 and src_rows[r - 1][c] == m) or
+                                                (r + 1 < sh and src_rows[r + 1][c] == m)):
+                v = m
+            dest[o + x] = v
+    return True
+
+
+# ---- Every railed COMMLINK strip on ONE column map (2026-11-08) ----
+# The 138-wide COMMLINK strips that carry the panel's rails -- the MP header +0x1110, the faction-row strip +0x113C,
+# its highlight +0x116C, the footer +0x1198 -- all share the columns e9 | 4 field | bf rail (col 5) | ... | bf rail (col
+# 133) | 4 field (measured on the pristine image).  The header was laid on commlink_zone_map while the rest kept
+# hm_synth_core's floor-NN column DDA -- at their own scale too: the 18-row strips blit at (sc(18), 18), so their dest
+# width was (138 sc(18) + 9) / 18 (192 at 1080 against the panel's 190) -- and the rails came out 1 / 2 px wide at
+# different x: a seam between the time widget's rails and the rail below (user 2026-11-08 shots 235902 / 235905, "not
+# even at certain resolutions ... a seam with a rail below them").  LAW (the MENU strip's one-map rule): every
+# 138-wide COMMLINK strip blitted at x = 0 except the 6-row title (its own plate art, no rails) is synthesized
+# commlink_strip_width(g) = hm_sc(138) wide on commlink_strip_cols(g) -- the header's column zone map -- and keeps the
+# core's row map, pair remap and key skip (strip_synth).  g <= 16: not entered.  Port: t_clmp_pre (gate, g_mc_w, the
+# map into g_clhd_cmap, g_mc_on = 2) + t_clmp_col (the core's column call in that mode).
+COMMLINK_STRIP_COLS = 138
+
+
+def commlink_strip_width(g: int) -> int:
+    """The panel width every railed COMMLINK strip is synthesized to: hm_sc(138) = (138 g + 8) >> 4."""
+    return (COMMLINK_STRIP_COLS * g + 8) >> 4
+
+
+def commlink_strip_cols(g: int) -> Optional[List[int]]:
+    """Dest column -> native column for every railed COMMLINK strip (and the MP header): commlink_zone_map of the
+    header's column segments over commlink_strip_width(g)."""
+    return commlink_zone_map(COMMLINK_HEADER_COL_SEGS, commlink_strip_width(g), stroke_width(g))
+
+
+def commlink_rail_strip(sw: int, sh: int, dx: int) -> bool:
+    """The gate: a 138-wide strip blitted at x = 0 that is not the 6-row title."""
+    return sw == COMMLINK_STRIP_COLS and sh != COMMLINK_TITLE_ROWS and dx == 0
+
+
+def commlink_rail_strip_synth(dest: bytearray, stride: int, buf_w: int, buf_h: int, src_rows, key: int, dx: int,
+                              dy: int, num: int, den: int, g: int, h: Optional[int] = None) -> None:
+    """hm_synth_core for a railed COMMLINK strip (the gate above holds): strip_synth with the dest width
+    commlink_strip_width(g) and the columns commlink_strip_cols(g); rows (the floor DDA at num / den, edge-clamped),
+    the pair remap and the key skip exactly strip_synth's; h = the core's dest height (strip_synth_dims' by default)."""
+    if g <= NATIVE_G or den <= 0:
+        return
+    sh, sw = len(src_rows), len(src_rows[0])
+    if num <= den:
+        raise ValueError(f"commlink_rail_strip_synth: num {num} <= den {den} is outside the asm's DDA domain")
+    cmap = commlink_strip_cols(g)
+    dw = commlink_strip_width(g)
+    dh = strip_synth_dims(sw, sh, num, den)[1] if h is None else h
+    xs, ys = max(dx, 0), max(dy, 0)
+    xe, ye = min(dx + dw, buf_w), min(dy + dh, buf_h)
+    if xe <= xs or ye <= ys:
+        return
+    pair = strip_synth_pair(src_rows, key)
+    cols = [cmap[x - dx] for x in range(xs, xe)]
+    for y in range(ys, ye):
+        src = src_rows[min(((y - dy) * den) // num, sh - 1)]
+        tex = (pair[0] if stripe_top(y, g) else pair[1]) if pair else None
+        o = y * stride
+        for x, c in zip(range(xs, xe), cols):
+            v = src[c]
+            if pair and v in pair:
+                v = tex
+            if v != key:
+                dest[o + x] = v
+
+
+def commlink_spot(x: int, y: int, w: int, h: int, g: int, native_x: bool, panel_h: int = -1,
+                  collapsed_mp: bool = False) -> Tuple[int, int, int, int]:
+    """A Spot_add rect (x, y, w, h) registered native by a multiplayer COMMLINK site -> the device rect of what is
+    drawn there: top through commlink_panel_y, bottom through commlink_bottom; x / right through commlink_sc when the
+    site's x is native too (the mute LED), untouched when it is already device (the time widget and its strip span
+    the panel's device width +0x4C4).  panel_h = the panel canvas height (|h| of the Buffer at 0x7FDA8C).
+    g <= 16: unchanged."""
+    if g <= NATIVE_G:
+        return x, y, w, h
+    y0, y1 = commlink_panel_y(y, g, panel_h, collapsed_mp), commlink_bottom(y + h, g, panel_h, collapsed_mp)
+    if native_x:
+        x0, x1 = commlink_sc(x, g), commlink_sc(x + w, g)
+        return x0, y0, x1 - x0, y1 - y0
+    return x, y0, w, y1 - y0
 
 
 def checkbox_list_phase(rect1_top: int, rect2_top: int, g: int) -> int:

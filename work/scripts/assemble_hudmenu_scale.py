@@ -113,10 +113,27 @@ ASMS["hm_sc"] = f"""
     ret
 """
 
+# 2026-11-07 (group commlink_mp_spots, src assemble_commlink_mp.py, law scaling_laws.commlink_panel_y): the first 6
+# bytes (`cmp eax, 6 / jl hry_small / push ebx`) are `push t_clmp_rowy; ret` -- the entry now pins the collapsed
+# multiplayer layout to the box bottom; t_clmp_rowy runs the displaced 6 bytes and re-enters here (+6 body, +0x54
+# hry_small).  The body's offsets are unchanged.
+T_CLMP_ROWY = PCAVE2 + 0x40D60
+# 2026-11-07 (same group): thunk_hudmenu_sbc's post-blit `call hm_synth_core` -> `call t_clmp_synth` (the same args
+# under g_clmp_son); hm_synth_core's dest-height block (20 bytes) -> `call t_clmp_synh` + 15 nops, identical while
+# g_clmp_son == 0 (the MENU strips and the button faces), + the multiplayer strip row-law span (grow only,
+# scaling_laws.commlink_strip_rows) for the COMMLINK panel's x = 0 strips.
+T_CLMP_SYNTH = PCAVE2 + 0x40C70
+T_CLMP_SYNH = PCAVE2 + 0x40CB0
+# 2026-11-07 (COMMLINK title strip, even lines): the core's source-row block (DDA row clamped to sh - 1) is
+# `call t_clmp_trow` + 7 nops -- the same row with g_clmp_son clear or any sprite but the COMMLINK title strip
+# (scaling_laws.commlink_title_src_row / commlink_title_synth).
+T_CLMP_TROW = PCAVE2 + 0x40C00
+# 2026-11-08 (COMMLINK rails on one column map): the core's column call is `call t_clmp_col` -- the COMMLINK rail
+# mode's map lookup while g_mc_on == 2 (t_clmp_pre), else a tail jump to t_mc_col (unchanged behaviour).
+T_CLMP_COL = PCAVE2 + 0x41A80
 ASMS["hm_rowY"] = f"""
-    cmp eax, 6
-    jl hry_small
-    push ebx
+    push {T_CLMP_ROWY:#x}
+    ret
     push ecx
     sub eax, 6
     xor edx, edx
@@ -729,7 +746,7 @@ sbc_resume:
     push dword ptr [{V['g_hm_sbc_args']+8:#x}]
     push dword ptr [{V['g_hm_sbc_args']+4:#x}]
     push dword ptr [{V['g_hm_sbc_args']:#x}]
-    call {V['hm_synth_core']:#x}
+    call {T_CLMP_SYNTH:#x}
     pop eax
     jmp dword ptr [{V['g_hm_sbc_ret']:#x}]
 """
@@ -811,14 +828,22 @@ sy_bhok:
     nop
     nop
     nop
-    mov eax, dword ptr [ebp-0x14]
-    imul eax, dword ptr [ebp+0x14]
-    mov edx, ecx
-    sar edx, 1
-    add eax, edx
-    xor edx, edx
-    div ecx
-    mov dword ptr [ebp-0x30], eax
+    call {T_CLMP_SYNH:#x}
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
     mov eax, dword ptr [ebp+0xC]
     test eax, eax
     jge sy_x0
@@ -927,12 +952,14 @@ sy_pdone:
     mov eax, dword ptr [ebp-0x38]
     mov dword ptr [ebp-0x74], eax
 sy_row:
-    mov eax, dword ptr [ebp-0x64]
-    cmp eax, dword ptr [ebp-0x14]
-    jl sy_srok
-    mov eax, dword ptr [ebp-0x14]
-    dec eax
-sy_srok:
+    call {T_CLMP_TROW:#x}
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
     imul eax, dword ptr [ebp-0xC]
     add eax, dword ptr [ebp-8]
     mov esi, eax
@@ -954,7 +981,7 @@ sy_texok:
     mov ecx, dword ptr [ebp-0x70]
     mov edx, dword ptr [ebp-0x34]
 sy_col:
-    call {T_MC_COL:#x}
+    call {T_CLMP_COL:#x}
     nop
     nop
     nop

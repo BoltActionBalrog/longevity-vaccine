@@ -24,7 +24,7 @@ and disables itself with a log line when the bytes differ (another mod, another 
 | `vidmode.cpp`, `gpuscale.cpp` | Persisted Fullscreen / Borderless / Windowed display mode, with a GPU present for the stretched modes. |
 | `vidsafety.h`, `vidwatch.cpp` | Display-topology safety for those modes: a monitor change (not a USB or work-area notice that leaves the monitors as they were, not PRACX's own mode switch) releases the pointer clip, topmost and the backdrop; they come back 3 s after the display settles, on the game's own monitor only (the game is never moved to another monitor by itself). A watchdog thread releases the clip and the backdrop when the game thread is really hung (5 s, or Windows' own hung test) and logs shorter stalls; it cannot take a hung window out of the topmost band (Ctrl+Alt+Del then). It also owns the escape hotkey (`[UIMod] EscapeHotkey`, default Ctrl+Alt+Shift+End). |
 | `prefs.cpp` | The "Longevity Mod Preferences" page in the game's Preferences window. |
-| `update.cpp`, `update_core.h` | Update checker: runs the resident installer's `--check` as a hidden child and shows the in-game prompt. The DLL does no networking and trusts nothing from the network. |
+| `update.cpp`, `update_core.h` | Update checker: runs the resident installer's `--check` as a hidden child and shows the in-game prompt. The update checker does no networking in-process and trusts nothing from the network. |
 | `wheel.cpp` | Mouse wheel over lists and scrollbars, routed by what is under the cursor. |
 | `rowindent.cpp` | Reply-row text indent scales with the UI. |
 | `techwin.cpp` | Tech breakthrough window opens its text boxes at the top (original-game bug). |
@@ -41,6 +41,8 @@ and disables itself with a log line when the bytes differ (another mod, another 
 | `mapscroll.cpp` | Smooth map scrolling under PRACX: each drag / edge-scroll step shifts the map canvas in place and re-renders only the exposed strips (the engine's filtered `MapWin_gen_map` through PRACX's wrapper, with our own strip rects), instead of PRACX's full redraw per step; the scroll's end settles with one full draw. |
 | `debugdump.cpp` | Developer diagnostic: with `uimod_debug.flag` beside the exe, Pause dumps popup geometry to the log. Read-only. |
 | `cursorscale.cpp` | The engine's map cursors (go-to, patrol, airdrop, artillery and the rest) at vanilla x g/16. |
+| `lanjoin.cpp`, `lanjoin_core.h` | TCP/IP multiplayer between two PCs on one home network behind a router without NAT loopback (Windows' DirectPlay NAT-helper bug): completes the NAT helper's address query from the router's UPnP mappings. The DLL's only networking; Winsock is delay-loaded and never touched in single player. `[UIMod] DirectPlayLanFix=0` turns it off. |
+| `mptimefix.cpp` | The multiplayer "No Time Control" readout no longer flashes black on a redraw (original-game bug). |
 | `interludekey.cpp` | The keystroke that closes a story interlude no longer leaks to the map (original-game bug). |
 | `portrait_files.cpp`, `prewarm.cpp` | Replaceable leader portraits from the `portraits/` folder and the HD pack: fail-closed decode of untrusted image files, cache, and a background pre-bake so a faction's first portrait does not stall. |
 | `winlines.cpp`, `lineoverlay.h` | Lines the engine draws straight onto the game window, kept right while the frame is stretched into a client of another size. |

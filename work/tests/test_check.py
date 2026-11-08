@@ -69,7 +69,7 @@ def test_a_stale_pack_with_the_base_current():
     doc = _doc(base="1.0.0", **{"movies-hd": "1.2.0"})
     code, lines = _report(doc, _state(**{"movies-hd": "1.1.0"}))
     assert code == ix.CHECK_UPDATES
-    assert lines == ["latest=1.0.0", f"stale=movies-hd|HD cinematics|1.1.0>1.2.0|{1300 << 20}"]
+    assert lines == ["latest=1.0.0", f"stale=movies-hd|HD Cinematics|1.1.0>1.2.0|{1300 << 20}"]
 
 
 def test_a_pack_the_player_does_not_have():
@@ -115,7 +115,7 @@ def test_labels_are_compiled_in_never_from_the_manifest():
     doc["modules"]["movies-hd"] = {"version": "1.2.0", "label": "Free RAM download",
                                    "name": "x", "size": 5, "url": "https://x", "sha256": "0"}
     _, lines = _report(doc, _state(**{"movies-hd": "1.0.0"}))
-    assert lines[1] == "stale=movies-hd|HD cinematics|1.0.0>1.2.0|5"
+    assert lines[1] == "stale=movies-hd|HD Cinematics|1.0.0>1.2.0|5"
 
 
 @pytest.mark.parametrize("size,shown", [(True, ""), (-1, ""), (1.5, ""), ("9", ""), (0, "0"),
@@ -136,7 +136,7 @@ def test_an_unreadable_receipt_version_is_offered_as_unknown():
     assert "base=0.0.0>1.1.0" in lines
     # An unreadable PACK version is still an INSTALLED pack (its files are on disk): it is
     # offered as stale from UNKNOWN, never as "new" and never silently skipped.
-    assert any(ln.startswith("stale=movies-hd|HD cinematics|0.0.0>1.0.0|") for ln in lines), lines
+    assert any(ln.startswith("stale=movies-hd|HD Cinematics|0.0.0>1.0.0|") for ln in lines), lines
     assert not any(ln.startswith("new=") for ln in lines)
 
 

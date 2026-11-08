@@ -59,11 +59,11 @@ def test_base_update(exe, tmp_path):
 
 
 def test_everything_in_the_fixed_order(exe, tmp_path):
-    text = ("latest=1.1.0\nbase=0.0.0>1.1.0\nstale=movies-hd|HD cinematics|1.0.0>1.2.0|671088640\n"
+    text = ("latest=1.1.0\nbase=0.0.0>1.1.0\nstale=movies-hd|HD Cinematics|1.0.0>1.2.0|671088640\n"
             "new=portraits-hd|Turovetsky's HD Portrait Pack|1.0.0|\n")
     out = parse(exe, tmp_path, 10, text)
     assert out == ["status=ok code=10 badline=0", "latest=1.1.0", "base=0.0.0>1.1.0",
-                   "stale=movies-hd|HD cinematics|1.0.0>1.2.0|671088640",
+                   "stale=movies-hd|HD Cinematics|1.0.0>1.2.0|671088640",
                    "new=portraits-hd|Turovetsky's HD Portrait Pack|1.0.0|"]
 
 
@@ -132,11 +132,11 @@ def test_overflow_is_refused(exe):
 def test_accepted_edges(exe, tmp_path):
     """17-char versions (version.py's maximum), a 16-digit size under 2**50, the id/label caps."""
     text = ("latest=65535.65535.65535\nbase=0.1.0>65535.65535.65535\n"
-            "stale=movies-hd|HD cinematics|10000.10000.10000>10000.10000.10001|1125899906842623\n"
+            "stale=movies-hd|HD Cinematics|10000.10000.10000>10000.10000.10001|1125899906842623\n"
             "new=portraits-hd|" + "L" * 47 + "|1.0.0|0\n")
     out = parse(exe, tmp_path, 10, text)
     assert out == ["status=ok code=10 badline=0", "latest=65535.65535.65535", "base=0.1.0>65535.65535.65535",
-                   "stale=movies-hd|HD cinematics|10000.10000.10000>10000.10000.10001|1125899906842623",
+                   "stale=movies-hd|HD Cinematics|10000.10000.10000>10000.10000.10001|1125899906842623",
                    "new=portraits-hd|Turovetsky's HD Portrait Pack|1.0.0|0"]
 
 
@@ -154,7 +154,7 @@ def test_unknown_ids_are_skipped_not_fatal(exe, tmp_path):
 def test_the_pipe_label_is_never_shown(exe, tmp_path):
     """The DLL shows its OWN name for a known id; the pipe's label is validated and discarded."""
     out = parse(exe, tmp_path, 10, "latest=1.0.0\nstale=movies-hd|#xs 9999 ; evil|1.0.0>1.1.0|\n")
-    assert out[2] == "stale=movies-hd|HD cinematics|1.0.0>1.1.0|"
+    assert out[2] == "stale=movies-hd|HD Cinematics|1.0.0>1.1.0|"
 
 
 def test_known_modules_match_the_installer(exe):
@@ -438,13 +438,13 @@ def test_reply_sets(exe):
 
 
 def test_update_body_names_every_item_and_the_action(exe, tmp_path):
-    text = "latest=0.2.0\nbase=0.1.0>0.2.0\nstale=movies-hd|HD cinematics|0.1.0>0.2.0|671088640\n"
+    text = "latest=0.2.0\nbase=0.1.0>0.2.0\nstale=movies-hd|HD Cinematics|0.1.0>0.2.0|671088640\n"
     p = tmp_path / "in.txt"
     p.write_bytes(text.encode())
     # user wording 2026-11-04, one space 2026-11-06: the label, a single space, the meaning; "Not now" unexplained
     NO = '"Don\'t ask me again" Skips these updates (undo in Preferences).\n'
     menu = run(exe, "body", "update", 0, 10, p)
-    assert menu == ("Updates are available:\nLongevity Mod 0.1.0 -> 0.2.0\nHD cinematics 0.1.0 -> 0.2.0 (640 MB)\n\n"
+    assert menu == ("Updates are available:\nLongevity Mod 0.1.0 -> 0.2.0\nHD Cinematics 0.1.0 -> 0.2.0 (640 MB)\n\n"
                     "Updating closes the game and opens the updater in its own window. "
                     "Your saved games are not affected.\n\n" + NO)
     game = run(exe, "body", "update", 1, 10, p)
@@ -464,19 +464,19 @@ def test_update_body_names_every_item_and_the_action(exe, tmp_path):
 
 
 def test_pack_body_variants(exe, tmp_path):
-    text = "latest=0.2.0\nnew=movies-hd|HD cinematics|0.2.0|1395864371\nnew=portraits-hd|Turovetsky's HD Portrait Pack|0.2.0|\n"
+    text = "latest=0.2.0\nnew=movies-hd|HD Cinematics|0.2.0|1395864371\nnew=portraits-hd|Turovetsky's HD Portrait Pack|0.2.0|\n"
     p = tmp_path / "in.txt"
     p.write_bytes(text.encode())
     NO = '"Don\'t ask me again" Skips this pack (undo in Preferences).\n'      # user wording 2026-11-04, one space 2026-11-06
     standalone = run(exe, "body", "pack", 0, 1, 0, "0.2.0", 10, p)
-    assert standalone == ("HD cinematics 0.2.0 is available. It is an optional 1.3 GB download. "
+    assert standalone == ("HD Cinematics 0.2.0 is available. It is an optional 1.3 GB download. "
                           "Installing it also brings Longevity Mod up to 0.2.0 (required).\n\n"
                           "Installing closes the game and opens the updater in its own window. "
                           "Your saved games are not affected.\n\n" + NO)
     pending = run(exe, "body", "pack", 1, 2, 1, "-", 10, p)
     assert pending == "You chose to update. Add Turovetsky's HD Portrait Pack to that update? It is optional.\n\n" + NO
     pending_sz = run(exe, "body", "pack", 0, 2, 0, "-", 10, p)
-    assert "Add HD cinematics (1.3 GB) to that update?" in pending_sz
+    assert "Add HD Cinematics (1.3 GB) to that update?" in pending_sz
     ingame = run(exe, "body", "pack", 1, 1, 0, "-", 10, p)
     assert " If you install without saving, progress since your last save is lost.\n" in ingame
     assert "brings Longevity Mod" not in ingame
@@ -815,7 +815,7 @@ def test_the_shipped_check_parser_gets_the_game_dir(exe, shipped, tmp_path, rel,
 
 def test_handoff_modules_are_the_listed_stale_packs_plus_the_accepted_new_ones(exe, tmp_path):
     p = tmp_path / "in.txt"
-    p.write_bytes(b"latest=0.3.0\nbase=0.2.0>0.3.0\nstale=movies-hd|HD cinematics|0.1.0>0.2.0|10\n"
+    p.write_bytes(b"latest=0.3.0\nbase=0.2.0>0.3.0\nstale=movies-hd|HD Cinematics|0.1.0>0.2.0|10\n"
                   b"stale=portraits-hd|Turovetsky's HD Portrait Pack|0.1.0>0.2.0|20\n")
     # the update popup accepted: every stale pack it listed, in the order it listed them
     assert run(exe, "handoffmods", 10, p, 1).strip() == "movies-hd,portraits-hd"
@@ -831,5 +831,5 @@ def test_handoff_modules_are_the_listed_stale_packs_plus_the_accepted_new_ones(e
     # a stale line whose id this build does not know is NOT handed off (it was never named in a popup)
     unknown = tmp_path / "unknown.txt"
     unknown.write_bytes(b"latest=0.3.0\nbase=0.2.0>0.3.0\nstale=future-pack|Future|0.1.0>0.2.0|10\n"
-                        b"stale=movies-hd|HD cinematics|0.1.0>0.2.0|10\n")
+                        b"stale=movies-hd|HD Cinematics|0.1.0>0.2.0|10\n")
     assert run(exe, "handoffmods", 10, unknown, 1).strip() == "movies-hd"

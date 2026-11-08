@@ -57,6 +57,29 @@ VA, LIVE = LIVE_ALL["hm_synth_core"]
 # g_mc_on clear (always, outside t_mc_synth) they compute exactly what the blocks did -- run here with the core.
 DIMS_VA, LIVE_DIMS = LIVE_ALL["t_mc_dims"]
 COL_VA, LIVE_COL = LIVE_ALL["t_mc_col"]
+# 2026-11-07 (commlink_mp_spots): the core's dest-height block is `call t_clmp_synh` (+ the MP strip span while
+# g_clmp_son is set, i.e. only under t_clmp_synth); with the cell clear it is the old block -- run here with the core.
+SYNH_VA, LIVE_SYNH = LIVE_ALL["t_clmp_synh"]
+CLMP_PAGE = SYNH_VA & ~0xFFF
+# 2026-11-07 (COMMLINK title strip): the core's source-row block is `call t_clmp_trow` (the title strip's even lines
+# while g_clmp_son is set and the sprite is MultiWin +0x10E4); otherwise the old block -- run here with the core.
+TROW_VA, LIVE_TROW = LIVE_ALL["t_clmp_trow"]
+TITLE = SL.COMMLINK_TITLE_SPRITE
+H_PAGE = S["g_clmp_h"] & ~0xFFF                 # t_clmp_synh stashes H there (the header post-pass reads it)
+HDR_LO, HDR_HI = H_PAGE, H_PAGE + 0x3000       # pcave2 0x41000..0x43FFF: t_clmp_col / t_clmp_pre / t_clhd_zone + maps
+
+
+def _load_hdr_region(mu):
+    """Map the COMMLINK header region (the core's column call goes through t_clmp_col; t_clmp_synth calls t_clmp_pre)
+    and write every live entry in it."""
+    for p in range(HDR_LO + 0x1000, HDR_HI, 0x1000):
+        mu.mem_map(p, 0x1000)
+    for name, (va, b) in LIVE_ALL.items():
+        if HDR_LO <= va < HDR_HI:
+            mu.mem_write(va, b)
+
+
+MP_PAGE = 0x0093F000                             # t_clmp_synh reads MultiplayerActive [0x93F660] under g_clmp_son
 G, PER = S["g_popup_scale_num"], S["g_stripe_period"]
 STACK, MARKER = 0x00200000, 0x00300000
 SPR, DBUF, SDATA, DDATA = 0x00700000, 0x00710000, 0x00720000, 0x01000000
@@ -77,17 +100,29 @@ def sc18(g: int) -> int:
 
 def run(code: bytes, g: int, src, *, bw: int, bh: int, dx: int, dy: int, num: int, den: int, key: int = KEY,
         data: bool = True, pitch: int | None = None, ddata: bool = True, stride: int | None = None,
-        dims: bytes = LIVE_DIMS):
+        dims: bytes = LIVE_DIMS, spr: int = SPR, son: int = 0, trow: bytes = LIVE_TROW, rail: bool = False):
     sh, sw = len(src), len(src[0])
     pitch = sw if pitch is None else pitch
     stride = bw if stride is None else stride
     mu = Uc(UC_ARCH_X86, UC_MODE_32)
     for p in sorted({VA & ~0xFFF, (VA + len(code)) & ~0xFFF, G & ~0xFFF, PER & ~0xFFF, DIMS_VA & ~0xFFF,
-                     S["g_mc_on"] & ~0xFFF}):
+                     S["g_mc_on"] & ~0xFFF, CLMP_PAGE}):
         mu.mem_map(p, 0x1000)
+    assert S["g_clmp_son"] & ~0xFFF == CLMP_PAGE and TROW_VA & ~0xFFF == CLMP_PAGE
+    mu.mem_write(SYNH_VA, LIVE_SYNH)
+    mu.mem_write(TROW_VA, trow)
+    _w32(mu, S["g_clmp_son"], son)
+    mu.mem_map(H_PAGE, 0x1000)
+    _load_hdr_region(mu)
+    mu.mem_map(MP_PAGE, 0x1000)                   # MultiplayerActive 0: the plain height (the MP span: the e2e guard)
+    if rail:                                      # the COMMLINK rail mode as t_clmp_pre leaves it
+        w = SL.commlink_strip_width(g)
+        _w32(mu, S["g_mc_w"], w)
+        _w32(mu, S["g_mc_on"], 2)
+        mu.mem_write(S["g_clhd_cmap"], bytes(SL.commlink_strip_cols(g)))
     mu.mem_write(DIMS_VA, dims)
     mu.mem_write(COL_VA, LIVE_COL)
-    mu.mem_map(SPR, 0x1000)
+    mu.mem_map(spr & ~0xFFF, 0x1000)
     mu.mem_map(DBUF, 0x1000)
     mu.mem_map(SDATA, 0x40000)
     mu.mem_map(DDATA, 0x400000)
@@ -95,11 +130,11 @@ def run(code: bytes, g: int, src, *, bw: int, bh: int, dx: int, dy: int, num: in
     mu.mem_map(MARKER, 0x1000)
     mu.mem_write(VA, code)
     mu.mem_write(G, struct.pack("<i", g))         # conftest pairs the period cell: stripe_period(g)
-    _w32(mu, SPR + 4, SDATA if data else 0)
-    mu.mem_write(SPR + 8, bytes([key]))
-    _w32(mu, SPR + 0xC, pitch)
-    _w32(mu, SPR + 0x10, sw)
-    _w32(mu, SPR + 0x14, sh)
+    _w32(mu, spr + 4, SDATA if data else 0)
+    mu.mem_write(spr + 8, bytes([key]))
+    _w32(mu, spr + 0xC, pitch)
+    _w32(mu, spr + 0x10, sw)
+    _w32(mu, spr + 0x14, sh)
     if sw <= max(pitch, 1) and pitch > 0:
         mu.mem_write(SDATA, b"".join(bytes(r) + b"\x00" * (pitch - sw) for r in src))
     _w32(mu, DBUF + 0x54, DDATA if ddata else 0)
@@ -109,7 +144,7 @@ def run(code: bytes, g: int, src, *, bw: int, bh: int, dx: int, dy: int, num: in
     total = max(stride, 1) * bh
     mu.mem_write(DDATA, bytes([FILL]) * (total + 0x1000))
     sp = STACK
-    mu.mem_write(sp, struct.pack("<I6i", MARKER, DBUF, dx, dy, num, den, SPR) + b"\xA5" * 16)
+    mu.mem_write(sp, struct.pack("<I6i", MARKER, DBUF, dx, dy, num, den, spr) + b"\xA5" * 16)
     mu.reg_write(UC_X86_REG_ESP, sp)
     for r, v in REGS.items():
         mu.reg_write(r, v)
@@ -186,6 +221,124 @@ def test_synthesis_is_strip_synth(g):
     assert law_problems(LIVE, g) == []
 
 
+def rail_art(pair=(0xC5, 0x41)):
+    """A railed COMMLINK strip: e9 edge | 4 field | bf rail | field | bf rail | 4 field, the field a row pair."""
+    return [[0xE9 if x == 0 else 0xBF if x in (5, 133) else (pair[0] if y % 2 == 0 else pair[1]) if (x + y) % 17
+             else 0x30 + y for x in range(138)] for y in range(18)]
+
+
+@pytest.mark.parametrize("g", tuple(range(17, 61)))
+def test_rail_strips_are_commlink_rail_strip_synth(g):
+    """g_mc_on == 2 (t_clmp_pre's COMMLINK rail mode): the core's columns are commlink_strip_cols(g) over the panel
+    width hm_sc(138), at both callers' (num, den); rows / pair remap / key as strip_synth."""
+    src = rail_art()
+    for num, den in callers_pairs(g):
+        for dy in (0, 5, -3):
+            w = SL.commlink_strip_width(g)
+            bw, bh = w + 6, (18 * num) // den + abs(dy) + 4
+            res = run(LIVE, g, src, bw=bw, bh=bh, dx=0, dy=dy, num=num, den=den, spr=SPR, son=0, rail=True)
+            want = bytearray([FILL]) * (bw * bh)
+            SL.commlink_rail_strip_synth(want, bw, bw, bh, src, KEY, 0, dy, num, den, g)
+            assert res["plane"] == want and res["tail_clean"], (g, num, den, dy)
+            assert res["esp"] == 4 + 0x18 and res["kept"]
+
+
+def test_rail_columns_line_up_and_are_k_wide():
+    """The law's statement: on every railed strip and the header the e9 edge and both bf rails are K = stroke_width
+    columns at the same x, at every g 17..60 -- one map, so no seam between strips."""
+    for g in range(17, 61):
+        cols = SL.commlink_strip_cols(g)
+        k = SL.stroke_width(g)
+        for c in (0, 5, 133):
+            xs = [j for j, v in enumerate(cols) if v == c]
+            assert len(xs) == k and xs == list(range(xs[0], xs[0] + k)), (g, c)
+        assert len(cols) == SL.strip_synth_dims(138, 28, g, 16)[0]
+
+
+def title_art(paired: bool):
+    """A 138 x 6 COMMLINK-title-like strip: rows 0..2 a plate (two classes per row, key corners on rows 0 / 1), row 3
+    a dark line with accents, rows 4 / 5 the fill (two members mixed per column).  paired: rows 2..5 at the middle
+    column alternate a, b, a, b (the core's pair probe finds a pair; the remap must then apply on top of the map)."""
+    rows = []
+    for y in range(6):
+        r = []
+        for x in range(138):
+            if (y == 0 and x < 3) or (y == 1 and x == 0) or (y == 0 and x > 134):
+                r.append(KEY)
+            elif y < 3:
+                r.append((0x50, 0x51, 0x51)[y] if (x * 7 + y) % 5 else (0x4E, 0x18, 0x17)[y])
+            elif y == 3:
+                r.append(0x29 if x % 11 == 3 else 0xC6)
+            else:
+                r.append((0x40 if (x + y) % 3 else 0x41) if y == 4 else (0x41 if x % 2 else 0x40))
+        rows.append(r)
+    if paired:
+        for y in range(2, 6):
+            rows[y][69] = 0xC5 if y % 2 == 0 else 0x42
+    return rows
+
+
+TITLE_CASES = [(0, 174, 4, 6), (0, 0, 0, 3), (3, 5, 8, 6), (-2, -3, 6, 6), (0, 10, 0, -4), (5, 1, -30, 2)]
+
+
+def title_problems(g: int, trow: bytes = LIVE_TROW) -> list:
+    out = []
+    for paired in (False, True):
+        src = title_art(paired)
+        for dx, dy, pw, ph_ in TITLE_CASES:
+            for num, den in callers_pairs(g):
+                bw = max(1, (138 * num) // den + abs(dx) + pw)
+                bh = max(1, (6 * num) // den + abs(dy) + ph_)
+                res = run(LIVE, g, src, bw=bw, bh=bh, dx=dx, dy=dy, num=num, den=den, spr=TITLE, son=1, trow=trow)
+                want = bytearray([FILL]) * (bw * bh)
+                SL.commlink_title_synth(want, bw, bw, bh, src, KEY, dx, dy, num, den, g)
+                if res["plane"] != want or not res["tail_clean"]:
+                    out.append(("title", g, paired, dx, dy, num, den))
+                if res["esp"] != 4 + 0x18 or not res["kept"]:
+                    out.append(("contract", g, res["esp"], res["kept"]))
+    return out
+
+
+@pytest.mark.parametrize("g", tuple(range(17, 61)))
+def test_title_strip_is_commlink_title_synth(g):
+    """The COMMLINK title strip under g_clmp_son: the core's bytes (with t_clmp_trow) == the law, every g the core can
+    see (no clamp), both callers' (num, den), negative / cut offsets, with and without a probe pair."""
+    assert title_problems(g) == []
+
+
+@pytest.mark.parametrize("g", (17, 22, 25, 40))
+def test_title_map_only_for_the_title_under_son(g):
+    """g_clmp_son clear, another sprite, or a sprite of another height: the plain strip_synth (MENU strips, button
+    faces, every other COMMLINK strip)."""
+    src = title_art(False)
+    for spr, son, rows in ((TITLE, 0, src), (SPR, 1, src), (TITLE, 1, src[:5]), (TITLE, 1, src + [src[4], src[5]])):
+        bw, bh = (138 * g) // 16 + 4, (len(rows) * g) // 16 + 4
+        res = run(LIVE, g, rows, bw=bw, bh=bh, dx=2, dy=1, num=g, den=16, spr=spr, son=son)
+        assert res["plane"] == expected(g, rows, bw=bw, bh=bh, dx=2, dy=1, num=g, den=16), (hex(spr), son, len(rows))
+
+
+def test_title_law_lines_are_even():
+    """The law's own statement: the four lines are K = stroke_width(g) rows each at every g 17..40, the fill the rest
+    (>= 1 row), every fill row a stripe member on the dest grid."""
+    for g in range(17, 41):
+        k = SL.stroke_width(g)
+        for h in ((6 * g + 8) // 16, (6 * g + 8) // 16 + 1):
+            for y0 in (0, 1, 174, 450):
+                rows = [SL.commlink_title_src_row(j, y0 + j, h, g, g, 16) for j in range(h)]
+                assert [rows.count(r) for r in range(4)] == [k] * 4 and rows[:4 * k] == sorted(rows[:4 * k]), (g, h)
+                assert h - 4 * k >= 1
+                assert all(r == (4 if SL.stripe_top(y0 + j, g) else 5) for j, r in enumerate(rows) if j >= 4 * k)
+
+
+def test_title_mutants_are_killed():
+    """The sweep catches a K off by one (sar 5 -> sar 4), the fill members swapped, and the gate dropped."""
+    muts = {"K": (b"\xC1\xF9\x05", b"\xC1\xF9\x04"), "fill swap": (b"\x7C\x01\x40", b"\x7D\x01\x40")}
+    for name, (old, new) in muts.items():
+        assert LIVE_TROW.count(old) == 1, name
+        bad = LIVE_TROW.replace(old, new)
+        assert any(title_problems(g, trow=bad) for g in (22, 25, 40)), name
+
+
 def test_law_facts():
     """The law's own statements, independent of the bytes: half-up dims, the even-native-row member is light."""
     assert SL.strip_synth_dims(8, 8, 17, 16) == (9, 9)                 # 8.5 -> 9 (half_down would give 8)
@@ -239,13 +392,18 @@ def _callers_uc():
     mu = Uc(UC_ARCH_X86, UC_MODE_32)
     mu.mem_map(PCAVE2, 0x31000)
     mu.mem_map(LIVE_ALL["t_mc_synth"][0] & ~0xFFF, 0x1000)               # W9C F55: sd2's post-blit call target
-    for name in ("hm_sc", "hm_rowY", "thunk_hudmenu_sd2", "thunk_hudmenu_sbc", "t_mc_synth"):
+    mu.mem_map(CLMP_PAGE, 0x1000)                                         # t_clmp_rowy / _synth / _synh + g_clmp_son
+    mu.mem_map(H_PAGE, 0x1000)                                            # g_clmp_h (t_clmp_synth arms it -1)
+    _load_hdr_region(mu)                                                  # t_clmp_pre / t_clhd_zone
+    for name in ("hm_sc", "hm_rowY", "thunk_hudmenu_sd2", "thunk_hudmenu_sbc", "t_mc_synth",
+                 "t_clmp_rowy", "t_clmp_synth", "t_clmp_synh"):
         va, b = LIVE_ALL[name]
         mu.mem_write(va, b)
     mu.mem_write(VA, b"\xF4")                      # hm_synth_core: the hook records its args
     mu.mem_write(HM.PORTRAIT_AVG, b"\xC2\x18\x00")  # the Sprite_draw_2 chain's next owner: stdcall RET 0x18
     for p in sorted({G & ~0xFFF, HM.SCALE_NUM & ~0xFFF, CORE_CONT & ~0xFFF, HM.MENU_BUF & ~0xFFF,
-                     HM.BTN1_BUF & ~0xFFF, HM.BTN2_BUF & ~0xFFF, HM.MW_BUF & ~0xFFF, HM.ELSE_RET & ~0xFFF}):
+                     HM.BTN1_BUF & ~0xFFF, HM.BTN2_BUF & ~0xFFF, HM.MW_BUF & ~0xFFF, HM.ELSE_RET & ~0xFFF,
+                     0x0093F000, 0x007FE000}):            # t_clmp_rowy: MultiplayerActive, MultiWin +0xA24 / +0x1158..
         try:
             mu.mem_map(p, 0x1000)
         except unicorn.UcError:
@@ -319,8 +477,8 @@ def test_callers_pass_num_above_den(g):
 
 
 def test_only_two_callers():
-    """No other entry reaches hm_synth_core (rel32 call / jmp, abs32 push / mov): COMMLINK's thunk_hudmenu_sbc and
-    t_mc_synth, which thunk_hudmenu_sd2 calls instead since W9C F55 (it passes every non-MENU-strip draw on unchanged)."""
+    """No other entry reaches hm_synth_core (rel32 call / jmp, abs32 push / mov): t_clmp_synth (which COMMLINK's
+    thunk_hudmenu_sbc calls since 2026-11-07) and t_mc_synth, which thunk_hudmenu_sd2 calls instead since W9C F55 (it passes every non-MENU-strip draw on unchanged)."""
     refs = set()
     for cid, (va, b) in LIVE_ALL.items():
         for i in range(len(b) - 4):
@@ -329,7 +487,11 @@ def test_only_two_callers():
                 refs.add(cid)
             if int.from_bytes(b[i:i + 4], "little") == VA and cid != "hm_synth_core":
                 refs.add(cid)
-    assert refs == {"t_mc_synth", "thunk_hudmenu_sbc"}, refs
+    assert refs == {"t_mc_synth", "t_clmp_synth"}, refs
+    sbc_va, sbc = LIVE_ALL["thunk_hudmenu_sbc"]          # 2026-11-07: sbc's post-blit call -> t_clmp_synth -> the core
+    tc = LIVE_ALL["t_clmp_synth"][0]
+    assert any(sbc[i] == 0xE8 and (sbc_va + i + 5 + int.from_bytes(sbc[i + 1:i + 5], "little", signed=True))
+               & 0xFFFFFFFF == tc for i in range(len(sbc) - 4))
     sd2_va, sd2 = LIVE_ALL["thunk_hudmenu_sd2"]
     t = LIVE_ALL["t_mc_synth"][0]
     assert any(sd2[i] == 0xE8 and (sd2_va + i + 5 + int.from_bytes(sd2[i + 1:i + 5], "little", signed=True))

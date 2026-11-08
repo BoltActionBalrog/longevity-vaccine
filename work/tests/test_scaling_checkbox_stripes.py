@@ -267,8 +267,8 @@ def _check_draws(rec, g, pal, *, list_phase: bool):
                     assert snap[Y, X] == v, (hex(d["spr"]), d["x"], d["y"], j, i)
         # the grid the box stripes on == the grid of the background beside it (the nearest 2-member column left /
         # right): EVERY box that has one must match
-        n = len(exp)
-        for X in [d["x"] - 1 - k - x0 for k in range(4)] + [d["x"] + n + k - x0 for k in range(4)]:
+        n, nw = len(exp), len(exp[0])
+        for X in [d["x"] - 1 - k - x0 for k in range(4)] + [d["x"] + nw + k - x0 for k in range(4)]:
             if not 0 <= X < snap.shape[1]:
                 continue
             col = [int(v) for v in snap[max(d["y"] - y0, 0):d["y"] - y0 + n, X]]
@@ -331,9 +331,82 @@ def test_every_checkbox_is_the_law_on_the_canvas_grid(baked_exe, screen, g):
         assert sprites & {0x779530} and sprites & {0x7794D8, 0x779504}, "checked AND unchecked boxes"
     refs = _check_draws(rec, g, pal, list_phase=screen != "lobby")
     assert refs >= len(rec.draws) - 2, f"a background reference beside only {refs} of {len(rec.draws)} boxes"
+    if screen == "lobby":                               # the pull-down arrows (2026-11-07): the same law, phase 0
+        arrows = [d for d in rec.draws if d["spr"] == SL.LOBBY_ARROW_SPRITE]
+        assert len(arrows) >= 8, "the roster arrows reach t_ck_draw"
+        assert all(d["art"] == ARROW_ART for d in arrows), "the real arrow is the 7x13 ae / ee art"
     if pr is not None:
         assert len(pr.boxes) >= 40                      # 17 sites, the roster rows repeat
         assert _check_panels(pr, g, pal) == {(0xC6, 0x41), (0xC4, 0x41), (0x27, 0x22)}
+
+
+#: the lobby's pull-down arrow 0x788038 as the engine holds it (interface.pcx +10, key 9): a 1-row ae / ee dither
+ARROW_AE, ARROW_EE = 0xAE, 0xEE
+ARROW_ART = [[(ARROW_AE if r % 2 == 0 else ARROW_EE) if c <= min(r, 12 - r) else 9 for c in range(7)] for r in range(13)]
+
+
+@pytest.mark.parametrize("g", list(range(17, 41)))
+def test_law_arrow_is_uniform_stripes_and_mirror_symmetric(g):
+    """The arrow under the law: every texel shows the member its dest row's stripe wants (the law's own top parity)
+    and the triangle's outline stays mirror-symmetric about its tip row."""
+    import checkbox_emu as CE
+    pal = CE.palette()
+    rgb = lambda i: tuple(int(c) for c in pal[i])  # noqa: E731
+    lut, n = SL.scanicon_pair_lut(ARROW_ART, 9)
+    qt = SL.scanicon_top_parity(lut, n, rgb)
+    top = ARROW_AE if qt == 0 else ARROW_EE
+    other = ARROW_EE if top == ARROW_AE else ARROW_AE
+    for y0 in (0, 1, 84, 115, 266):
+        pix = SL.scanicon_pixels(ARROW_ART, 9, g, 16, g, y0, 0, rgb)
+        assert len(pix) == (13 * g) // 16 and len(pix[0]) == (7 * g) // 16
+        for j, row in enumerate(pix):
+            want = top if SL.stripe_top(y0 + j, g) else other
+            assert all(v in (None, want) for v in row), (g, y0, j)
+        shape = [[v is not None for v in row] for row in pix]
+        widths = [sum(r) for r in shape]
+        assert widths == widths[::-1], (g, widths)          # 13 rows: an odd source, the middle texel takes the rest
+
+
+def test_engine_nn_bands_the_arrow():
+    """The before image: the engine's NN of the arrow puts its two members on rows no stripe phase explains at 1080p."""
+    for g in (22, 25):
+        n = (13 * g) // 16
+        rows = [ARROW_ART[SL.nn_center_index(j, n, 13)][0] for j in range(n)]
+        runs, k = [], 1
+        for a, b in zip(rows, rows[1:]):
+            if a == b:
+                k += 1
+            else:
+                runs.append(k)
+                k = 1
+        runs.append(k)
+        assert len(set(runs[1:-1])) > 1, (g, runs)
+
+
+ARROW_SITES_ROSTER = (0x47FFD2, 0x48027C, 0x480620)                         # via thunk_nw_blit_right
+ARROW_SITES_SETTINGS = (0x480BA8, 0x480CCA, 0x480EC2, 0x4810EB, 0x481297, 0x481441, 0x4815ED, 0x481797)   # via _gap
+NW_BLIT_LEFT = 0x00A0C000 + 0x4920
+
+
+@pytest.mark.parametrize("g", (18, 22, 25, 40))
+def test_every_lobby_arrow_site_draws_the_law(baked_exe, g):
+    """The host lobby (NetWin_draw_settings draws its arrows only for the host): all 11 arrow sites reach
+    thunk_nw_blit_left, every one of those draws reaches t_ck_draw (none falls back to the engine), and each is the
+    law on the canvas grid (_check_draws)."""
+    import checkbox_emu as CE
+    from unicorn.x86_const import UC_X86_REG_ESP
+    pal = CE.palette()
+    rec = CE.Recorder(pal)
+    sites = []
+    hook = (NW_BLIT_LEFT, lambda e: sites.append(e.r32(e.reg(UC_X86_REG_ESP)) - 5))
+    out = CE.lobby(str(baked_exe), g, rec, host=True, hooks=[hook])
+    assert out["g"] == g
+    assert set(sites) == set(ARROW_SITES_ROSTER + ARROW_SITES_SETTINGS), sorted(map(hex, set(sites)))
+    assert all(sites.count(s) == 1 for s in ARROW_SITES_SETTINGS)
+    arrows = [d for d in rec.draws if d["spr"] == SL.LOBBY_ARROW_SPRITE]
+    assert len(arrows) == len(sites), "every arrow draw went through the law"
+    assert all(d["art"] == ARROW_ART for d in arrows)
+    _check_draws(rec, g, pal, list_phase=False)
 
 
 LOBBY_PANEL_SITES = (0x47F9A5, 0x47FA3E, 0x47FA51, 0x47FEAB, 0x47FEBE, 0x47FF2B, 0x4801DB, 0x4803CD, 0x48049D,

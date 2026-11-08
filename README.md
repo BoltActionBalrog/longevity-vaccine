@@ -51,7 +51,7 @@ This is the source the mod is built from. Each `v<version>` tag points at the ex
 | `work/scripts/` | The patcher, the installer, the thunk assemblers, the scaling laws, packaging and reverse-engineering tools. |
 | `work/tests/` | The regression suite. |
 | `work/symbols/terranx.h` | The symbol map of the game binary. |
-| `work/video-upscale/` | The HD cinematics pipeline. |
+| `work/video-upscale/` | The HD Cinematics pipeline. |
 | `work/scripts/PROBES.md` | Which Frida scripts only observe and which write to the game. Read the writers. Don't run them. |
 | `docs/skills/` | How the scaling work is done. |
 | `docs/notes/` | Engineering notes and history. A `[[name]]` link means `docs/notes/name.md`. Start at `docs/notes/README.md`. |
@@ -109,7 +109,7 @@ The installer's end-to-end tests skip until `work/build/runtime` exists. An inst
 
 ### What the installer changes
 
-It writes to the game folder: the patched exe with a `.bak`, `uimod.dll`, the ffmpeg DLLs and a `LongevityMods` folder. It adds a desktop shortcut if you say yes. If the game folder isn't writable, it caches downloads in `%LOCALAPPDATA%\LongevityVaccine`. Every download is HTTPS and checked against a signed manifest. The DLL does no networking itself.
+It writes to the game folder: the patched exe with a `.bak`, `uimod.dll`, the ffmpeg DLLs and a `LongevityMods` folder. It adds a desktop shortcut if you say yes. If the game folder isn't writable, it caches downloads in `%LOCALAPPDATA%\LongevityVaccine`. Every download is HTTPS and checked against a signed manifest. The DLL's only network traffic is the multiplayer home-network fix (`src/uimod/src/lanjoin.cpp`): during TCP/IP multiplayer it asks your router over UPnP on the local network and test-connects to the other PC. Single player never loads Winsock, and `DirectPlayLanFix=0` under `[UIMod]` turns the fix off.
 
 ### Not in this repo
 

@@ -2,7 +2,7 @@
 
 UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
-## 1.0.0 -- 2026-11-06
+## 1.0.0 -- 2026-11-08
 
 ### High-resolution UI scaling
 - The entire interface now scales to your resolution instead of staying at its original size.
@@ -42,20 +42,13 @@ UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 - Movies now play inside the game window at your resolution, with no resolution switch and no external player. Esc or a click skips them.
 - New optional pack: all 61 movies AI-upscaled to 4x resolution.
 
+### Multiplayer
+- Two PCs on the same home network now find each other's TCP/IP multiplayer games on routers without NAT loopback. This was a Windows DirectPlay bug.
+- The multiplayer "No Time Control" readout no longer flashes black when the mouse moves over it. This was an original-game bug.
+
 ### Windows 7 Compatibility
 - Runs on Windows 7 SP1 with update KB2533623.
 - Windows 7 is a lightly tested platform. Please submit any issues to GitHub via the website.
-
-### Power-user settings
-These go under `[UIMod]` in `Alpha Centauri.ini`.
-- `SmoothPortraits=0` turns off the smooth portrait and picture enlarging.
-- `FullscreenModeSwitch=1` brings back the real monitor resolution switch in Fullscreen.
-- `DpiAware=0` leaves display scaling to Windows.
-- `SmoothScroll=0` brings back PRACX's map scrolling.
-- `BigF4Indicators=0` draws the F4 base-locator blink at its normal scaled size.
-- `UpscaledVideos=0` plays the classic movies even with the HD cinematics pack installed.
-- `EscapeHotkey=` sets the key that frees the mouse pointer and minimises the game if it stops responding. The default is Ctrl+Alt+Shift+End.
-- `MovieAudio=waveout` or `MovieAudio=off` changes how movie sound plays.
 
 ### Base-game fixes
 - Cloaking Device and Deep Pressure Hull now hide units from computer players. Hidden units no longer show through go-to routes or withdrawal demands, a transport's cargo no longer gives it away, and a red mark shows which of your cloaked units have been spotted. This also works with Thinker Mod.
@@ -102,3 +95,15 @@ These go under `[UIMod]` in `Alpha Centauri.ini`.
 - The mouse wheel now scrolls lists instead of moving the selection.
 - The mouse wheel over a list on top of the map now scrolls the list instead of zooming the map.
 - The HQ report screens' technology and base lists no longer paint a stray row after a mouse-wheel scroll.
+
+### Power-user settings
+These go under `[UIMod]` in `Alpha Centauri.ini`.
+- `SmoothPortraits=0` turns off the smooth portrait and picture enlarging.
+- `FullscreenModeSwitch=1` brings back the real monitor resolution switch in Fullscreen.
+- `DpiAware=0` leaves display scaling to Windows.
+- `SmoothScroll=0` brings back PRACX's map scrolling.
+- `BigF4Indicators=0` draws the F4 base-locator blink at its normal scaled size.
+- `UpscaledVideos=0` plays the classic movies even with the HD Cinematics pack installed.
+- `EscapeHotkey=` sets the key that frees the mouse pointer and minimises the game if it stops responding. The default is Ctrl+Alt+Shift+End.
+- `MovieAudio=waveout` or `MovieAudio=off` changes how movie sound plays.
+- `DirectPlayLanFix=0` turns off the home-network multiplayer fix.

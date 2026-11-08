@@ -51,6 +51,9 @@
 #include "vidmode.h"
 #include "wheel.h"
 #include "interludekey.h"
+#include "lanjoin.h"
+#include "logredact.h"
+#include "mptimefix.h"
 
 namespace {
 
@@ -64,6 +67,25 @@ HMODULE g_self = nullptr;
 // Non-static: feature modules (prefs.cpp) log through this too.
 void UimodLog(const char* msg)
 {
+    // Players attach this log to public bug reports: a path under their profile folder would name their Windows
+    // account, so it reads %USERPROFILE% in every line from every module (logredact.h).  The profile is a plain
+    // buffer filled once (nothing to destroy at detach), and UimodLog never throws: callers include out-of-memory
+    // handlers and worker threads, so a line that cannot be redacted is dropped, never written as is.
+    static char profile[MAX_PATH];
+    static INIT_ONCE profileOnce = INIT_ONCE_STATIC_INIT;
+    InitOnceExecuteOnce(&profileOnce, [](PINIT_ONCE, PVOID, PVOID*) -> BOOL {
+        const DWORD n = GetEnvironmentVariableA("USERPROFILE", profile, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH) profile[0] = '\0';
+        return TRUE;
+    }, nullptr, nullptr);
+    std::string redacted;
+    try {
+        redacted = logredact::RedactProfile(msg ? msg : "", profile);
+    } catch (...) {
+        return;
+    }
+    msg = redacted.c_str();
+
     OutputDebugStringA(msg);
 
     char path[MAX_PATH];
@@ -107,7 +129,7 @@ void UimodLog(const char* msg)
         written = 0;
     }
 
-    // A line built from several calls (movie.cpp's "playing: " + path + "\n") is assembled per THREAD and written,
+    // A line built from several calls is assembled per THREAD and written,
     // stamped once, only when it is complete: two threads' partial lines can no longer interleave.
     thread_local char part[1024];
     thread_local size_t partLen = 0;
@@ -310,6 +332,17 @@ extern "C" void __stdcall Init(HMODULE self)
     // menu over the interlude (base-game bug, user 2026-10-30). A thread-local message hook keyed on the InterludeWin
     // class swallows that one character. Both exes. See interludekey.cpp.
     InstallInterludeKeyFix();
+
+    // Multiplayer over TCP/IP: two PCs behind the same router find each other's games even when the router does not
+    // loop traffic back through its public address (Windows' DirectPlay NAT helper only recognises its own machine's
+    // mappings, so the reply went to the public address and was dropped -- "Game Not Found"). DirectPlay's own
+    // "is this address behind my router?" answer is completed; nothing changes elsewhere. Both exes; [UIMod]
+    // DirectPlayLanFix=0 turns it off. See lanjoin.cpp.
+    InstallLanJoinFix();
+
+    // Base-game bug: the multiplayer time widget ("No Time Control", the turn timer) flashed black when it was
+    // redrawn between timer ticks -- two locals were written only on the tick path. Both exes. See mptimefix.cpp.
+    InstallMpTimeFix();
 
     // Update check: the resident installer's `--check` runs as a hidden child on a worker thread
     // (zero start-time cost); the wheel module's message hook consumes the answer. Cave-free, both

@@ -126,7 +126,7 @@ def test_the_patch_log_is_a_record_not_a_transcript(tmp_path, monkeypatch, capsy
     text = log.read_text(encoding="utf-8")
     lines = text.splitlines()
     assert lines[0].startswith(f"Longevity Vaccine {ver.VERSION} -- update patch run 20")
-    assert lines[1] == f"game folder: {game}"
+    assert lines[1] == inst.ix.redact_profile(f"game folder: {game}")      # the account name is redacted
     assert lines[2] == (f"terranx_PRACX.exe: target 'pracx' ({spec.label}), clean base {spec.base_md5}, "
                         f"expected result {spec.patched_md5}")
     assert "[ok] Patching: SUCCESS (1425/1455 sites patched, 30 skipped, 2 code cave(s) written)" in lines
@@ -264,7 +264,7 @@ def test_a_fresh_install_writes_the_same_record(tmp_path, bak_path):
     assert path.parent == d
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0].startswith(f"Longevity Vaccine {ver.VERSION} -- install patch run 20")
-    assert lines[1] == f"game folder: {game}"
+    assert lines[1] == inst.ix.redact_profile(f"game folder: {game}")      # the account name is redacted
     assert lines[2] == (f"terranx_PRACX.exe: target 'pracx' ({spec.label}), clean base {spec.base_md5}, "
                         f"expected result {spec.patched_md5}")
     assert any(l.startswith("[ok] Patching: SUCCESS (") for l in lines), lines
@@ -369,3 +369,24 @@ def test_the_kept_count_is_small_and_the_update_path_uses_the_helper():
     assert "run_patch_logged(patch_log, game_dir, target, spec, work, companions, notes=left_alone)" in body
     assert "tx.apply_transactional(" not in body, "the update path never calls the patcher unlogged"
     assert "(log: {patch_log})" in body, "a failed commit names the log"
+
+
+# ---------------------------------------------------------------- redaction (logs go into public bug reports)
+
+def test_both_patch_logs_redact_the_profile_folder(tmp_path, monkeypatch):
+    """A game folder under the player's profile reaches neither patch log with the account name in it."""
+    import transact as _tx
+    profile = str(tmp_path / "Users" / "Ann")
+    monkeypatch.setenv("USERPROFILE", profile)
+    game = Path(profile) / "Games" / "SMAC"
+    _logs(game)
+    monkeypatch.setattr(_tx, "apply_transactional", _fake_transactional([]))
+    spec = ap.load_targets(PATCHES)["pracx"]
+    log = inst._log_path(game, "patch")
+    inst.run_patch_logged(log, game, game / "terranx_PRACX.exe", spec, game / "work", companions=[])
+    text = log.read_text(encoding="utf-8")
+    assert r"game folder: %USERPROFILE%\Games\SMAC" in text and profile not in text
+    with inst.fresh_patch_log(game) as path:
+        inst._patch_log_line(f"measured base at {game}")
+    text = Path(path).read_text(encoding="utf-8")
+    assert "%USERPROFILE%" in text and profile.lower() not in text.lower()
