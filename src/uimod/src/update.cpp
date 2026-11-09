@@ -132,6 +132,8 @@ struct Result {
     DWORD bytes, elapsedMs, lastErr;
     int   parseStatus, badLine;
     char  note[160];
+    DWORD_PTR cpusBefore, cpusAfter;   // the child's CPU mask as created / after the widen (read back, not assumed)
+    DWORD jobErr;                      // the kill-on-close job could not be applied (0 = it was)
 };
 
 Job    g_job;
@@ -226,6 +228,34 @@ void Note(Result* r, const char* what, DWORD err)
 // so it can never block on a pipe the child stopped writing to, closes its own copy of the write
 // end at once (else EOF never comes), and does not wait for EOF at all (a grandchild could hold
 // the write end): when the child exits, whatever is in the pipe is the answer.
+// A child process (Python never loads ddraw.dll) gets the system's CPUs as this 32-bit process sees them (at most 32
+// of its processor group under WOW64), not the game's set: DDrawCompat pins
+// the game process to ONE CPU by default ([default] CpuAffinity = 1) and a child inherits that mask.  Measured
+// 2026-11-08: the update check, below normal on that one core under the game's startup and the portrait pre-bake,
+// took 24-32 s at a cold launch and hit the 30 s deadline 3 times in 11.  The child is created suspended, widened,
+// then resumed (so it never runs a step pinned).
+// NOT kernel32's SetProcessAffinityMask: DDrawCompat (v0.5.4, Win32/Thread.cpp) hooks it process-wide and, while its
+// CpuAffinity is set, returns TRUE without calling through -- for any process handle (audit 2026-11-08, probed with
+// the game's own ddraw.dll: "success", child still 0x1).  ntdll's NtSetInformationProcess(ProcessAffinityMask) is
+// not hooked (probed: the child runs on every CPU), and exists on Windows 7.  The mask is READ BACK
+// (GetProcessAffinityMask on the child is not faked) and logged, so a silent no-op can never hide again.  Best
+// effort: a failure leaves the child as it was.
+void WidenAffinity(HANDLE process, DWORD_PTR* before, DWORD_PTR* after)
+{
+    DWORD_PTR proc = 0, sys = 0, mine = 0, child = 0;
+    *before = *after = 0;
+    if (GetProcessAffinityMask(process, &child, &sys)) *before = *after = child;
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &mine, &proc) || !proc || proc == child) return;
+    typedef LONG (NTAPI* FSetInfo)(HANDLE, ULONG, PVOID, ULONG);
+    const HMODULE nt = GetModuleHandleW(L"ntdll.dll");
+    const FSetInfo setInfo = nt ? reinterpret_cast<FSetInfo>(GetProcAddress(nt, "NtSetInformationProcess")) : nullptr;
+    if (!setInfo) return;
+    constexpr ULONG kProcessAffinityMask = 21;   // PROCESSINFOCLASS ProcessAffinityMask (a KAFFINITY)
+    DWORD_PTR want = proc;                        // the system's CPUs (this process's group; at most 32 under WOW64)
+    setInfo(process, kProcessAffinityMask, &want, sizeof want);
+    if (GetProcessAffinityMask(process, &child, &sys)) *after = child;
+}
+
 void WorkerBody(Job* j, Result* r)
 {
     static char buf[kCapBytes + 1];
@@ -262,7 +292,7 @@ void WorkerBody(Job* j, Result* r)
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attrSize);
     static BYTE attrBuf[256];
     LPPROC_THREAD_ATTRIBUTE_LIST attrs = nullptr;
-    DWORD flags = CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS;
+    DWORD flags = CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED;   // resumed below (WidenAffinity)
     if (attrSize && attrSize <= sizeof attrBuf) {
         attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attrBuf);
         if (InitializeProcThreadAttributeList(attrs, 1, 0, &attrSize) &&
@@ -292,7 +322,7 @@ void WorkerBody(Job* j, Result* r)
     if (hErr != INVALID_HANDLE_VALUE) CloseHandle(hErr);
     if (!ok) { CloseHandle(rd); Note(r, "CreateProcess failed", spawnErr); return; }
     r->started = true;
-    CloseHandle(pi.hThread);
+    WidenAffinity(pi.hProcess, &r->cpusBefore, &r->cpusAfter);   // the system's CPUs, not the game's pinned one
 
     // Kill-on-close job: if the game dies mid-check, the child dies with it. Best effort (fails
     // inside a nested job on old Windows; then the child simply finishes on its own).
@@ -304,13 +334,21 @@ void WorkerBody(Job* j, Result* r)
             !AssignProcessToJobObject(job, pi.hProcess)) {
             // Windows 7 has no nested jobs: a game started by GOG Galaxy / a launcher already sits in one and the
             // assign fails with ERROR_ACCESS_DENIED. The check still runs; only "the child dies with the game" is
-            // lost (it ends on the installer's own network timeouts) -- said once, so a lingering python.exe in a
-            // bug report has its explanation.
-            Log("kill-on-close job not available (error %lu; a launcher's job on Windows 7?) -> the check runs without it",
-                GetLastError());
+            // lost (it ends on the installer's own network timeouts) -- said once (by LogResult: the worker never
+            // logs, and the child must be resumed whatever happens), so a lingering python.exe in a bug report has
+            // its explanation.
+            r->jobErr = GetLastError();
+            if (!r->jobErr) r->jobErr = ERROR_GEN_FAILURE;
             CloseHandle(job); job = nullptr;
         }
     }
+    // created suspended: it runs only now -- inside its job and on the system's CPUs.  A resume that fails (a fresh
+    // full-access handle: practically never) is not left to the 30 s deadline as a "timeout": ended and said so.
+    if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
+        Note(r, "ResumeThread failed", GetLastError());
+        TerminateProcess(pi.hProcess, lvupd::kCodeFailed);
+    }
+    CloseHandle(pi.hThread);
 
     size_t n = 0;
     bool overflow = false;
@@ -365,9 +403,15 @@ DWORD WINAPI WorkerThunk(LPVOID)
 
 void LogResult(const Result& r)
 {
+    if (r.jobErr)
+        Log("kill-on-close job not available (error %lu; a launcher's job on Windows 7?) -> the check ran without it", r.jobErr);
     Log("check done: exit %d, %lu bytes, %lu ms%s%s%s%s", r.exitCode, r.bytes, r.elapsedMs,
         r.timedOut ? ", timed out (killed)" : "", r.overflow ? ", output over the 64 KB cap" : "",
         r.note[0] ? ", " : "", r.note);
+    if (r.started)
+        Log("check ran on CPUs 0x%llx (created on 0x%llx%s)", static_cast<unsigned long long>(r.cpusAfter),
+            static_cast<unsigned long long>(r.cpusBefore),
+            r.cpusAfter == r.cpusBefore ? "; the game's CPU set already covered the system, or the widen had no effect" : "");
     if (r.parseStatus != lvupd::kOk) {
         Log("answer refused (%s at line %d) -> treated as could-not-check; nothing will be shown",
             lvupd::ParseStatusName(r.parseStatus), r.badLine);
@@ -625,11 +669,24 @@ bool SpawnUpdater(const char* const* mods, int nMods)
     STARTUPINFOW si; memset(&si, 0, sizeof si);
     si.cb = sizeof si;
     PROCESS_INFORMATION pi; memset(&pi, 0, sizeof pi);
-    const BOOL ok = CreateProcessW(cmdExe, cmd, nullptr, nullptr, FALSE, CREATE_NEW_CONSOLE, nullptr, g_job.gameDir, &si, &pi);
+    const BOOL ok = CreateProcessW(cmdExe, cmd, nullptr, nullptr, FALSE, CREATE_NEW_CONSOLE | CREATE_SUSPENDED, nullptr,
+                                   g_job.gameDir, &si, &pi);
     if (!ok) { Log("hand-off failed (error %lu): %ls", GetLastError(), cmd); return false; }
+    DWORD_PTR cpusBefore = 0, cpusAfter = 0;
+    WidenAffinity(pi.hProcess, &cpusBefore, &cpusAfter);         // the updater (cmd -> Python) inherits it
+    if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {   // never ran: no console, no updater -- say so
+        const DWORD err = GetLastError();
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        Log("hand-off failed (ResumeThread error %lu): %ls", err, cmd);
+        return false;
+    }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     Log("hand-off: %ls", cmd);
+    Log("hand-off ran on CPUs 0x%llx (created on 0x%llx)", static_cast<unsigned long long>(cpusAfter),
+        static_cast<unsigned long long>(cpusBefore));
     return true;
 }
 

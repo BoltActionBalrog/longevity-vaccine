@@ -224,6 +224,23 @@ void EnsureDpiAware()
                    : "[uimod] DPI: awareness already set (compatibility flag or manifest)\n");
 }
 
+// No ghost window for the game. Windows calls a window "not responding" after 5 s without a message pump, and a
+// late-game AI turn runs that long on the game thread while it keeps drawing; Windows would then swap the game for a
+// frozen ghost copy. Games turn this off (DDrawCompat's ddraw.dll in a PRACX install carries the same call). Before
+// any window exists; resolved at run time like SetProcessDPIAware. Once.
+void EnsureNoGhosting()
+{
+    static bool done = false;
+    if (done) return;
+    done = true;
+    typedef void (WINAPI *FNoGhost)();
+    const HMODULE user32 = GetModuleHandleA("user32.dll");
+    const FNoGhost off = user32 ? reinterpret_cast<FNoGhost>(GetProcAddress(user32, "DisableProcessWindowsGhosting")) : nullptr;
+    if (!off) { UimodLog("[uimod] ghosting: DisableProcessWindowsGhosting unavailable\n"); return; }
+    off();
+    UimodLog("[uimod] ghosting: off (a busy game is never swapped for a 'not responding' copy)\n");
+}
+
 bool g_preInitRan = false;
 
 } // namespace
@@ -240,6 +257,7 @@ extern "C" void __stdcall PreInit(HMODULE prax)
     g_preInitRan = true;
     UimodLog("[uimod] PreInit: before PRACX init\n");
     EnsureDpiAware();
+    EnsureNoGhosting();
     VidModePreInit(prax);
 }
 
@@ -249,6 +267,7 @@ extern "C" void __stdcall Init(HMODULE self)
     UimodLog("[uimod] Init: v" UIMOD_VERSION_STRING "\n");
     if (g_preInitRan) UimodLog("[uimod] Init: PreInit ran (two-phase bootstrap)\n");
     EnsureDpiAware();   // a no-op after PreInit; the one-phase chain (older exe) sets it here, still before any window
+    EnsureNoGhosting(); // likewise
 
     const bool pracx = PracxPresent();
     if (pracx) {

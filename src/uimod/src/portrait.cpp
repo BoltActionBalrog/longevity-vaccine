@@ -414,8 +414,15 @@ void OnFactionArtLoadedInner(int f)
             // the measured scanline parameters: the pre-bake's prediction for this file is checked against them
             // (a wrong one re-keys its jobs) BEFORE the bake looks the result up
             if (prewarm::Started()) prewarm::ReportMeasured(g_factionName[f], s, st.bright, st.ratio);
+        }
+        // The four native bakes, shared with the pre-bake's workers: they go to the front of the queue and idle
+        // workers start on them from slot 0 while this thread bakes from slot 3 (a lookup takes over a still-queued
+        // job and waits, bounded, on a running one).  Before the pre-bake has the file resolved: all four here.
+        if (prewarm::Started()) prewarm::Expedite(g_factionName[f]);
+        for (int s = 3; s >= 0; --s) {
+            if (!g_slots[f][s].valid) continue;
             BakeSlot(f, s);
-            baked += st.replaced ? 1 : 0;
+            baked += g_slots[f][s].replaced ? 1 : 0;
         }
         static int lastBaked[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
         if (baked != lastBaked[f]) {
@@ -429,8 +436,9 @@ void OnFactionArtLoadedInner(int f)
             for (int s = 0; s < 4; ++s)
                 if (g_slots[f][s].valid) prewarm::ReportMeasured(g_factionName[f], s, g_slots[f][s].bright, g_slots[f][s].ratio);
             if (prewarm::Start(snap))
-                Logf("[uimod] portrait: prewarm started (g=%d, scan mode %d): decode + bake every replacement portrait in the background\n",
-                     snap.g, snap.scan);
+                Logf("[uimod] portrait: prewarm started (g=%d, scan mode %d, %d worker%s, %d usable core%s): decode + bake every replacement portrait in the background\n",
+                     snap.g, snap.scan, prewarm::Workers(), prewarm::Workers() == 1 ? "" : "s",
+                     prewarm::UsableCoreCount(), prewarm::UsableCoreCount() == 1 ? "" : "s");
         }
         FlushPrewarmLog();
     } catch (...) {

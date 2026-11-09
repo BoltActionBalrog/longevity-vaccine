@@ -29,10 +29,11 @@
 //     period, not waiting for a restore or for its monitor, and not after the escape hotkey (until the game is
 //     activated again).
 //   * The backdrop follows the window's monitor; one thread owns it, decided once.
-//   * The watchdog thread (vidwatch.cpp) releases the clip and the backdrop when the game thread is really hung
-//     (Windows' own hung test, or kWatchHangMs without an answer), and logs every shorter stall. It cannot drop a
-//     hung window out of the topmost band: SWP_ASYNCWINDOWPOS and ShowWindowAsync are queued to the hung thread
-//     itself. Against that window the user has Ctrl+Alt+Del (Task Manager -> End task) and Windows' ghost window.
+//   * The watchdog thread (vidwatch.cpp) releases on a display event and on the escape hotkey, never on a stall: it
+//     only measures and logs the game thread's stalls (a long AI turn is one). It cannot drop a hung window out of
+//     the topmost band: SWP_ASYNCWINDOWPOS and ShowWindowAsync are queued to the hung thread itself. Against a game
+//     thread that truly hangs the user has the escape hotkey (clip and backdrop released at once) and Ctrl+Alt+Del
+//     (Task Manager -> End task).
 //   * The GPU present (gpuscale.cpp) creates no device, resizes nothing and presents nothing within kGpuQuietMs of
 //     a counted event, and after a device loss makes a new one after a growing back-off (2 s, 10 s, then 60 s).
 #pragma once
@@ -57,7 +58,6 @@ constexpr uint32_t kGpuStableMs = 60000;       // a device that ran this long re
 constexpr uint32_t kGpuCreateWarnMs = 10000;   // a device creation still running after this is logged
 constexpr uint32_t kWatchPeriodMs = 500;       // watchdog probe period
 constexpr uint32_t kWatchProbeMs = 500;        // SendMessageTimeout on the probe
-constexpr uint32_t kWatchHangMs = 5000;        // unanswered this long (or Windows' own hung test) = hung: release
 constexpr uint32_t kWatchStallLogMs = 1000;    // a shorter stall is only logged, with its length
 constexpr int      kEventsLoggedPerBurst = 8;  // display events logged one by one per quiet period; the rest counted
 constexpr uint32_t kIgnoredLogMs = 60000;      // "device notice, monitors unchanged" logged at most once per minute
@@ -665,34 +665,31 @@ private:
 };
 
 // ---- watchdog (vidwatch.cpp) ---------------------------------------------------------------------------------------
-// Probes the game thread (a WM_NULL our subclass answers) all the time, and releases only while it holds something
-// that can trap the user: the pointer clip, a topmost game window or a topmost backdrop (a Borderless backdrop is not
-// in the topmost band and does not count). Long engine work (AI turns, map generation, loads) stops the game thread pumping for seconds, so only a
-// real hang releases: Windows' own hung test (IsHungAppWindow, ~5 s) or kWatchHangMs without an answer. Every stall of
-// kWatchStallLogMs or more is reported with its length once it ends, so real gaps can be measured. Once per hang; when
-// the game thread answers again it re-states its own state.
-enum WatchAction { kWatchNothing = 0, kWatchRelease, kWatchResumed, kWatchStall };
+// Probes the game thread (a WM_NULL our subclass answers) and MEASURES its stalls: every one of kWatchStallLogMs or
+// more is reported with its length once it ends. It never releases anything on a stall. A long AI turn stops the game
+// thread pumping messages for 5-10 s on a late-game map while it keeps drawing, Windows' own hung test
+// (IsHungAppWindow) calls that "not responding", and a release then dropped a working game out of the topmost band:
+// a black flash and a flicker when the turn ended (2026-11-08, measured: no portrait work, vanilla PRACX clean). A game
+// thread that truly hangs is left to the user: the escape hotkey and Ctrl+Alt+Del.
+enum WatchAction { kWatchNothing = 0, kWatchStall };
 
 struct Watch {
-    bool released = false;
     bool missing = false;          // a probe went unanswered and none has been answered since
     uint32_t missSince = 0;        // when the game thread was last known to answer (the failed probe's send time)
-    uint32_t stallMs = 0;          // the length of the stall that just ended (kWatchResumed / kWatchStall)
+    uint32_t stallMs = 0;          // the length of the stall that just ended (kWatchStall)
     // `now` = after the probe returned (an unanswered one waited kWatchProbeMs)
-    WatchAction Step(uint32_t now, bool danger, bool answered, bool hungApp)
+    WatchAction Step(uint32_t now, bool answered)
     {
-        if (answered && !hungApp) {
+        if (answered) {
             WatchAction a = kWatchNothing;
             if (missing) {
                 stallMs = Since(now, missSince);
-                a = released ? kWatchResumed : stallMs >= kWatchStallLogMs ? kWatchStall : kWatchNothing;
+                if (stallMs >= kWatchStallLogMs) a = kWatchStall;
             }
             missing = false;
-            released = false;
             return a;
         }
         if (!missing) { missing = true; missSince = now - kWatchProbeMs; }
-        if (!released && danger && (hungApp || Since(now, missSince) >= kWatchHangMs)) { released = true; return kWatchRelease; }
         return kWatchNothing;
     }
 };

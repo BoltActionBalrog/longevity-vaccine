@@ -1,7 +1,8 @@
 // uimod display-mode watchdog: a thread of its own that undoes what the game thread holds (the pointer clip, the
-// letterbox backdrop) when that thread is hung, on a display topology change, and on the escape hotkey. Under a real
-// hang it cannot take the game window out of the topmost band (that request is queued to the hung thread). It never
-// calls engine or PRACX code. See vidwatch.cpp, vidsafety.h.
+// letterbox backdrop) on a display topology change and on the escape hotkey; it only measures the game thread's
+// stalls and releases nothing on one. While the game thread is stalled it cannot take the game window out of the
+// topmost band (that request is queued to the stalled thread). It never calls engine or PRACX code. See
+// vidwatch.cpp, vidsafety.h.
 #pragma once
 
 #include <windows.h>

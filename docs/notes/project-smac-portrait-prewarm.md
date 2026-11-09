@@ -4,6 +4,16 @@ description: Background pre-bake of the HD leader portraits (uimod prewarm.cpp):
 type: project
 ---
 
+**2026-11-08 rework (user: "do all three"; 4 audits):** job ORDER = an expedited (loading) faction's natives, then
+every current-mode native, then the hot-phase enlarges, other phases, other-mode natives -- a save loaded early used to
+make the game thread bake all 28 natives (~1.6 s) because the startup factions' speculative enlarges ran first; now
+every native is ready ~7 s after start in game. portrait.cpp's load hook measures all 4 slots, Expedite()s the file,
+bakes slot 3..0 while workers take 0..3. Workers = physical cores the PROCESS may use - 2, in 1..3 (fewer above g=48):
+**DDrawCompat (the GOG ddraw.dll) pins the game to ONE CPU by default (CpuAffinity = 1, rotated)** -- a thread cannot
+leave it, so in game it is 1 worker (3 workers measured: no faster). WOW64 folds core masks above 32 CPUs (count
+DISTINCT masks). The "prewarm done" line is written by the last worker itself, with "every native bake ready at N ms".
+Related: [[feedback-ddrawcompat-affinity]].
+
 Brief: work/briefs/portrait-prewarm-brief.md (user decision 2026-10-14: option 1, pre-bake on a worker at startup).
 Branch feat/portrait-prewarm (worktree in the scratch files; DLL-only, no exe bytes, no patches.yaml). The DLL built
 from it is uimod.dll ef3fda71 (lacks the master tree's UNCOMMITTED changes, e.g. modernctl.cpp: rebuild after merging).

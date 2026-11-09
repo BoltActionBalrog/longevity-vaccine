@@ -22,17 +22,31 @@
 //    of the current scale is a job (2T of them, 4 at g = 22..47); the first draw at a site makes its phase "hot"
 //    and the remaining factions' jobs at that phase go first.
 //
-// LOGGING: the worker's own lines go through a small ring the game thread drains (TakeLog); portrait_files'
-// decode lines are written by whichever thread decodes (UimodLog is one fopen / append / close per line).
+// LOGGING: the workers' lines go through a small ring the game thread drains (TakeLog) -- except the run's "done"
+// line, which the last worker out writes itself (outside the lock: at the main menu no portrait draw comes to drain
+// the ring); portrait_files' decode lines are written by whichever thread decodes (UimodLog is one fopen / append /
+// close per line, thread-safe).
 //
-// THREADING (the user's rules, 2026-10-14): one SRWLOCK over every shared structure, one condition variable for
-// waiters; the worker holds the lock only to pick / publish, never while computing; it never takes another lock
-// while holding this one (portrait_files has its own, taken outside ours).  A waiter waits only on a job the
-// worker is RUNNING (bounded, kWaitMs); a queued job is taken over by the waiter (state sTaken) so nothing is
-// ever built twice, and a failed or cancelled job is a plain miss.  The worker body is under SEH and C++ catch:
-// a fault marks the job failed and wakes the waiter.  COM is initialised on the worker for WIC.  Shutdown: the
-// state is heap-allocated and never freed, no static destructor touches it, nothing joins the thread -- ExitProcess
-// ends it, and the loader lock never waits on it.  Memory: results are bytes, capped at kBudgetBytes.
+// THREADING (the user's rules, 2026-10-14; workers 2026-11-08): one SRWLOCK over every shared structure, one event
+// for waiters; a worker holds the lock only to pick / publish, never while computing; it never takes another lock
+// while holding this one (portrait_files has its own, taken outside ours).  A waiter waits only on a job a worker
+// is RUNNING (bounded, kWaitMs); a queued job is taken over by the waiter (state sTaken) so nothing is ever built
+// twice, and a failed or cancelled job is a plain miss.  The worker body is under SEH and C++ catch: a fault marks
+// that worker's job failed and wakes the waiter.  COM is initialised on each worker for WIC.  Shutdown: the state is
+// heap-allocated and never freed, no static destructor touches it, nothing joins a thread -- ExitProcess ends them,
+// and the loader lock never waits on them.  Memory: results are bytes, capped at kBudgetBytes.
+//
+// WORKERS (2026-11-08): up to kMaxWorkers = physical cores - 2 (one core for the game thread, one for the update
+// check, the GPU device thread, audio and the driver), all below normal priority.  Measured: the bakes scale
+// linearly to 8 at once (no memory contention); the image decode shares the files lock but is ~1% of the work.  The
+// LEAD (worker 0) resolves the images and predictions, then starts the helpers; every worker runs jobs from the one
+// queue.  A run is over when the last worker leaves.  Who holds the lock is recorded (holder), so a game-thread
+// entry that cannot get it tells a dead holder (orphaned lock: the dead state) from a merely slow one (a miss).
+//
+// ORDER (2026-11-08, measured on the user's save: the save's seven factions' native bakes were reached ~30 s in, so
+// a save loaded early made the game thread bake all 28 itself): a faction the game is loading right now (Expedite)
+// first; then every faction's native bakes in the current mode; then the enlarges at each slot's known draw phase;
+// then the other phases; then the other scan mode's natives.
 #include "prewarm.h"
 #include "portrait_files.h"
 #include "portrait_law.h"
@@ -63,6 +77,8 @@ constexpr int kMaxSheetSide = 4096;
 constexpr DWORD kWaitMs = 4000;               // a waiter's cap on ONE running job (the longest is ~280 ms at 4K)
 constexpr int kMaxFailures = 3;               // after this many failed jobs the worker gives up (sync path only)
 constexpr size_t kResampleKeep = 6;           // worker-local Lanczos results, shared by the phases of one enlarge
+constexpr int kMaxWorkers = 3;                // the cap: past 3 nothing in play waits on the bake (the rest is the tail)
+inline int ClampInt(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 // The engine's rects in the sheet (load_faction_art @0x453710, Sprite_extract_2 literals), kSlotDefs order
 struct SheetRect { int x, y; };
 const SheetRect kSheetRects[kSlots] = { { 0x58, 0x1C9 }, { 0xB9, 0x1C9 }, { 0x130, 0x1C9 }, { 0x213, 1 } };
@@ -71,9 +87,12 @@ const int kSlotRank[kSlots] = { 3, 2, 0, 1 };
 
 enum State { sQueued, sRunning, sDone, sFailed, sTaken, sDropped };
 bool HasQueued();
+bool HasUnresolved();
 void WorkerFault(const char* what, bool lockFree);
 bool StartThread();
+void StartHelpers();
 void ReapThread();
+thread_local int t_worker = -1;               // this thread's worker index (-1: the game thread / the harness)
 bool Stale(unsigned gen);                 // under the lock: cancelled, or a newer generation
 enum Kind { kNative, kEnlarge };
 
@@ -94,6 +113,9 @@ struct Entry {
     portrait_law::Rect crop{};
     int tw = 0, th = 0, scan = 0, bright = 0, ratio = 256, y0 = 0, rows = 1;
     int state = sQueued;
+    int runner = -1;                          // sRunning: the worker on it (its index)
+    int pickNo = 0;                           // the order workers picked it in (diagnostics / the harness)
+    bool urgent = false;                      // a faction the game is loading right now (Expedite): first
     std::vector<uint8_t> fit;                 // sDone: tw*th palette indices
     uint64_t imgId = 0, palHash = 0;
 };
@@ -109,10 +131,17 @@ struct Shared {
     std::vector<std::unique_ptr<Entry>> entries;   // pointers stay valid: only ever appended
     int hot[kSlots] = { -1, -1, -1, -1 };
     bool started = false;
-    bool running = false, restartPending = false;   // a worker thread is alive / one must follow it
+    bool restartPending = false;              // a run must follow the one winding down
+    int wantWorkers = 1;                      // this machine's worker count (Start), or the harness's
+    int testWorkers = 0;                      // (test) the worker count to use instead of the machine's (0 = the machine's)
+    int cores = 0;                            // the physical cores this process may use (AutoWorkers; 0 = not measured)
+    DWORD nativesMs = 0;                      // when no current-mode native bake was left to do (0 = not yet), from t0
+    int nLive = 0;                            // workers started and not yet left (the run is over at 0); under the lock
+    bool live[kMaxWorkers] = {};
     unsigned gen = 0;                         // bumped by Restart: an older worker winds down at its next check
-    HANDLE thread = nullptr;                  // the worker (never joined; closed only when replaced); under the lock
-    volatile LONG threadId = 0;               // its id: readable without the lock (WorkerAlive opens its own handle)
+    HANDLE threads[kMaxWorkers] = {};         // never joined; closed only when the slot is reused; under the lock
+    volatile LONG threadIds[kMaxWorkers] = {};   // readable without the lock (WorkerAlive opens its own handle)
+    volatile LONG holder = 0;                 // the thread id holding `lock` (0 = free): a dead holder = orphaned lock
     volatile LONG cancel = 0;                 // test / fatal only: no worker ever again
     size_t doneBytes = 0;
     int nDone = 0, nFailed = 0, nDropped = 0, nTaken = 0, nHit = 0, nWait = 0;
@@ -122,6 +151,10 @@ struct Shared {
     int testFailEvery = 0, testThrowEvery = 0, testFaultEvery = 0, testDieInJob = 0, jobs = 0;
     volatile LONG testDieLocked = 0, testFaultOutside = 0;
     volatile LONG hotDirty = 0;               // a slot's draw phase changed since HotPhases last read them
+    volatile LONG testPause = 0;              // (test) workers wait before every pick
+    int pickSeq = 0;
+    int maxLive = 0;                          // the most workers live at once (diagnostics / the harness)
+    volatile LONG nResample = 0;              // Lanczos passes run by the workers (diagnostics / the harness)
 };
 constexpr DWORD kGameLockMs = 50;             // the game thread's bound on taking the lock (held for microseconds normally)
 Shared* g = nullptr;                          // heap, never freed (see the header comment)
@@ -135,15 +168,20 @@ Shared* Ensure()                              // the shared state (the event too
     return g;
 }
 void Wake() { if (g->done) SetEvent(g->done); }
-bool WorkerAlive()                            // no lock: a handle of our own from the id (g->thread may be being replaced)
+bool ThreadAlive(DWORD tid)                   // no lock: a handle of our own from the id
 {
-    const DWORD tid = static_cast<DWORD>(g->threadId);
     if (!tid) return false;
     const HANDLE h = OpenThread(SYNCHRONIZE | THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
     if (!h) return false;
     const bool alive = WaitForSingleObject(h, 0) == WAIT_TIMEOUT && GetProcessIdOfThread(h) == GetCurrentProcessId();
     CloseHandle(h);
     return alive;
+}
+bool WorkerAlive()                            // any worker (no lock: the ids may be being replaced)
+{
+    for (int i = 0; i < kMaxWorkers; ++i)
+        if (ThreadAlive(static_cast<DWORD>(g->threadIds[i]))) return true;
+    return false;
 }
 // The worker is gone or its lock is orphaned: remembered, so no later call pays the bounded wait again and no
 // worker is ever started again (no lock needed: Interlocked).
@@ -153,13 +191,29 @@ void MarkDead()
     InterlockedExchange(&g->cancel, 1);
     if (g->done) SetEvent(g->done);           // a waiter in GetFit leaves at once
 }
-// A bounded try-acquire failed: a worker that is alive was merely starved (a loaded machine) -- this call misses and
-// the next one tries again; a worker that is gone has orphaned the lock -- remembered.
-void LockFailed() { if (!WorkerAlive()) MarkDead(); }
+// A bounded try-acquire failed: a holder that is alive was merely starved (a loaded machine) -- this call misses and
+// the next one tries again; a holder that is gone has orphaned the lock -- remembered.  (No holder recorded and no
+// worker alive: the same, the window between an acquire and its record.)
+void LockFailed()
+{
+    const DWORD tid = static_cast<DWORD>(g->holder);
+    // this very thread orphaned it (an SEH fault inside a locked region skips the release): over at once
+    if (tid == GetCurrentThreadId() || (tid ? !ThreadAlive(tid) : !WorkerAlive())) MarkDead();
+}
 
-struct Lk {                                   // the worker: a plain acquire
-    explicit Lk(Shared* s) : s_(s) { AcquireSRWLockExclusive(&s_->lock); }
-    ~Lk() { ReleaseSRWLockExclusive(&s_->lock); }
+// Every acquire / release of g->lock goes through these two: the holder is always the thread inside.
+void Acquired() { InterlockedExchange(&g->holder, static_cast<LONG>(GetCurrentThreadId())); }
+void Unlock() { InterlockedExchange(&g->holder, 0); ReleaseSRWLockExclusive(&g->lock); }
+bool TryAcquire()
+{
+    if (!TryAcquireSRWLockExclusive(&g->lock)) return false;
+    Acquired();
+    return true;
+}
+
+struct Lk {                                   // a worker: a plain acquire
+    explicit Lk(Shared* s) : s_(s) { AcquireSRWLockExclusive(&s_->lock); Acquired(); }
+    ~Lk() { Unlock(); }
     Shared* s_;
 };
 // The game thread: a bounded try-acquire.  A worker that died inside a locked region (a fault the SEH handler
@@ -170,12 +224,12 @@ struct TryLk {
     {
         const DWORD t0 = GetTickCount();
         for (;;) {
-            ok = TryAcquireSRWLockExclusive(&s_->lock) != 0;
+            ok = TryAcquire();
             if (ok || GetTickCount() - t0 >= ms) break;
             Sleep(1);
         }
     }
-    ~TryLk() { if (ok) ReleaseSRWLockExclusive(&s_->lock); }
+    ~TryLk() { if (ok) Unlock(); }
     bool ok = false;
     Shared* s_;
 };
@@ -421,6 +475,7 @@ struct LocalResample : portrait_law::ResampleCache {    // the Lanczos pass, sha
     {
         std::vector<uint8_t> px(big.size());      // built first: a bad_alloc here leaves every entry as it was
         for (size_t i = 0; i < big.size(); ++i) px[i] = static_cast<uint8_t>(big[i]);
+        InterlockedIncrement(&g->nResample);  // (diagnostics: Lanczos passes the workers ran)
         R* lru = &keep[0];
         for (R& r : keep) if (r.stamp < lru->stamp) lru = &r;
         lru->px.swap(px);
@@ -437,6 +492,7 @@ struct JobCopy {                              // a running job's inputs, copied 
     portrait_law::Rect crop{};
     int tw = 0, th = 0, scan = 0, bright = 0, ratio = 256, y0 = 0, rows = 1;
     uint8_t pal[1024];                        // the snapshot's palette AS KEYED (a Restart may swap the snapshot meanwhile)
+    int jobNo = 0;                            // ++g->jobs under the lock when picked
 };
 
 // Stage 1: the image and the predicted parameters of every plan; the entries.
@@ -500,26 +556,51 @@ void ResolvePlans(unsigned gen)
     }
 }
 
-// Under the lock: the next job -- the hot phase of a slot a draw has shown, then native bakes before enlarges,
-// then the picker's slot before the others, then the factions in load order, then the phase.
-Entry* Pick()
+// The tier of a queued job (lower first) -- see ORDER in the header comment.
+enum Tier { kTierUrgent = 0, kTierNative, kTierHot, kTierEnlarge, kTierOtherMode };
+int JobTier(const Entry& e)
 {
+    if (e.kind == kNative) return e.scan != g->snap.scan ? kTierOtherMode : e.urgent ? kTierUrgent : kTierNative;
+    return e.slot >= 0 && g->hot[e.slot] >= 0 && e.phase == g->hot[e.slot] ? kTierHot : kTierEnlarge;
+}
+
+// Two jobs share one Lanczos pass (LocalResample: the phases of one enlarge differ only in the stripe phase).
+bool SameResample(const Entry& a, const Entry& b)
+{
+    return a.kind == kEnlarge && b.kind == kEnlarge && a.imgId == b.imgId && a.tw == b.tw && a.th == b.th &&
+           a.crop.x == b.crop.x && a.crop.y == b.crop.y && a.crop.w == b.crop.w && a.crop.h == b.crop.h;
+}
+
+// Under the lock: the next job for the calling worker (`mine` = its previous job, or null).  Tiers (JobTier);
+// within one: not a sibling of an enlarge ANOTHER worker is running (it would repeat that worker's Lanczos pass:
+// audit 2026-11-08 measured +67% resamples, 1.45x instead of ~3x, without this), then a sibling of this worker's own
+// last job (its resample cache holds the pass); the loaded factions (the game's rows) before the rest; the picker's
+// slot before the others (a loading faction's slots in index order: the game thread bakes them from the last, the
+// workers from the first, and they meet); load order; phase.
+Entry* Pick(const Entry* mine)
+{
+    const Entry* others[kMaxWorkers];
+    int nOthers = 0;
+    for (auto& ue : g->entries)
+        if (ue->state == sRunning && ue->runner != t_worker && ue->kind == kEnlarge && nOthers < kMaxWorkers)
+            others[nOthers++] = ue.get();
     Entry* best = nullptr;
     long bestRank = 0;
     for (auto& ue : g->entries) {
         Entry* e = ue.get();
         if (e->state != sQueued) continue;
         if (g->doneBytes + static_cast<size_t>(e->tw) * static_cast<size_t>(e->th) > kBudgetBytes) { Drop(e); continue; }
-        // Tiers: a slot's known draw phase first; the loaded factions (the picker's rows) before the rest; the
-        // current mode's native bakes, then the enlarges, then the other modes' natives (a toggle's, rare);
-        // the picker's slot before the others; load order; phase.
         const Plan& p = *g->plans[static_cast<size_t>(e->plan)];
         bool loaded = false;
         for (int s = 0; s < kSlots; ++s) loaded = loaded || p.measured[s];
-        const bool hot = e->kind == kEnlarge && g->hot[e->slot] >= 0 && e->phase == g->hot[e->slot];
-        const long kindRank = e->kind == kNative ? (e->scan == g->snap.scan ? 0L : 2L) : 1L;
-        const long rank = ((hot ? 0L : 1L) << 29) | ((loaded ? 0L : 1L) << 28) | (kindRank << 26) |
-                          (static_cast<long>(kSlotRank[e->slot]) << 20) | (static_cast<long>(e->plan & 0xFFF) << 8) | (e->phase & 0xFF);
+        bool busy = false;
+        for (int i = 0; i < nOthers; ++i) busy = busy || SameResample(*e, *others[i]);
+        const bool own = mine && SameResample(*e, *mine);
+        const int tier = JobTier(*e);
+        const long slotRank = tier == kTierUrgent ? e->slot : kSlotRank[e->slot];
+        const long rank = (static_cast<long>(tier) << 27) | ((busy ? 1L : 0L) << 26) | ((own ? 0L : 1L) << 25) |
+                          ((loaded ? 0L : 1L) << 24) | (slotRank << 20) | (static_cast<long>(e->plan & 0xFFF) << 8) |
+                          (e->phase & 0xFF);
         if (!best || rank < bestRank) { best = e; bestRank = rank; }
     }
     return best;
@@ -527,8 +608,8 @@ Entry* Pick()
 
 bool ComputeJob(const JobCopy& j, LocalResample& rc, std::vector<int>* fit)
 {
-    if (g->testFaultEvery && g->jobs % g->testFaultEvery == 0) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
-    if (g->testDieInJob && g->jobs == g->testDieInJob) { Sleep(300); ExitThread(0); }   // (test) dies holding nothing
+    if (g->testFaultEvery && j.jobNo % g->testFaultEvery == 0) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+    if (g->testDieInJob && j.jobNo == g->testDieInJob) { Sleep(300); ExitThread(0); }   // (test) dies holding nothing
     rc.id = j.img->id;
     return portrait_law::FromRgb(j.img->rgb.data(), j.img->rgb.size(), j.img->w, j.img->h, j.crop, j.tw, j.th,
                                  j.pal, j.scan, j.bright, j.ratio, j.y0, j.rows, fit, &rc);
@@ -541,7 +622,24 @@ int ComputeGuarded(const JobCopy* j, LocalResample* rc, std::vector<int>* fit)
     __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
 }
 
-void Publish(Entry* e, int ok, const std::vector<int>& fit)
+// Under the lock: a current-mode native bake still to do (queued or being baked)?
+bool NativesPending()
+{
+    for (auto& e : g->entries)
+        if (e->kind == kNative && e->scan == g->snap.scan && (e->state == sQueued || e->state == sRunning)) return true;
+    return false;
+}
+
+// Under the lock, for the CURRENT generation only: the moment every faction's native bakes were ready (what a save
+// load needs) -- every image resolved and no current-mode native queued or running.  Called wherever a native stops
+// being pending: a worker's publish or drop, the game thread taking one over, the lead's resolve (a Restart keeps
+// finished natives: none may be published at all).
+void NoteNatives()
+{
+    if (!g->nativesMs && !HasUnresolved() && !NativesPending()) g->nativesMs = (GetTickCount() - g->t0) | 1;
+}
+
+void Publish(Entry* e, int ok, const std::vector<int>& fit, unsigned gen)
 {
     Lk l(g);
     if (g->testDieLocked) ExitThread(0);      // (test) a worker that dies inside a locked region: the lock is orphaned
@@ -561,6 +659,7 @@ void Publish(Entry* e, int ok, const std::vector<int>& fit)
             ++g->failures;
         }
     }
+    if (!Stale(gen)) NoteNatives();           // (a stale worker's publish says nothing about this generation)
     Wake();
 }
 
@@ -568,12 +667,14 @@ void Publish(Entry* e, int ok, const std::vector<int>& fit)
 void RunJobs(unsigned gen)
 {
     LocalResample rc;
+    const Entry* last = nullptr;              // this worker's previous job (entries are never freed: stays valid)
     for (;;) {
         JobCopy j;
+        while (g->testPause && !g->cancel) Sleep(1);   // (test) the queue is inspected before anything is picked
         {
             Lk l(g);
             if (Stale(gen) || g->failures >= kMaxFailures) return;
-            j.e = Pick();
+            j.e = Pick(last);
             if (!j.e) return;
             Plan& p = *g->plans[static_cast<size_t>(j.e->plan)];
             memcpy(j.name, p.name, sizeof j.name);
@@ -581,25 +682,28 @@ void RunJobs(unsigned gen)
             j.crop = j.e->crop; j.tw = j.e->tw; j.th = j.e->th; j.scan = j.e->scan; j.bright = j.e->bright;
             j.ratio = j.e->ratio; j.y0 = j.e->y0; j.rows = j.e->rows;
             memcpy(j.pal, g->snap.pal, sizeof j.pal);
-            if (j.e->palHash != g->palHash) { Drop(j.e); continue; }   // keyed on an older palette: not this snapshot's
+            if (j.e->palHash != g->palHash) { Drop(j.e); NoteNatives(); continue; }   // keyed on an older palette: not this snapshot's
             j.e->state = sRunning;
-            ++g->jobs;
+            j.e->runner = t_worker;
+            j.e->pickNo = ++g->pickSeq;
+            last = j.e;
+            j.jobNo = ++g->jobs;              // this job's number, fixed under the lock (the test hooks count with it)
         }
         int ok = 0;
         std::vector<int> fit;
         if (g->testFaultOutside) RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);   // (test) past every job guard
         j.img = portrait_files::Find(j.name);                 // the files cache's lock, never ours
         if (!j.img || j.img->id != j.imgId) ok = 0;          // gone (a setting switched), or edited: dropped, not a failure
-        else if (g->testFailEvery && g->jobs % g->testFailEvery == 0) ok = -1;
+        else if (g->testFailEvery && j.jobNo % g->testFailEvery == 0) ok = -1;
         else {
             try {
-                if (g->testThrowEvery && g->jobs % g->testThrowEvery == 0) throw std::bad_alloc();
+                if (g->testThrowEvery && j.jobNo % g->testThrowEvery == 0) throw std::bad_alloc();
                 ok = ComputeGuarded(&j, &rc, &fit);
             }
             catch (...) { ok = -1; }          // bad_alloc and friends
             if (ok == 0) ok = -1;             // the law declined the inputs: a failure, not a drop
         }
-        Publish(j.e, ok, fit);
+        Publish(j.e, ok, fit, gen);
         if (ok < 0) {
             Lk l(g);
             if (g->failures >= kMaxFailures) {
@@ -610,16 +714,36 @@ void RunJobs(unsigned gen)
     }
 }
 
+// This worker leaves the run.  The last one out logs the run, and starts the next if a Restart asked for it or a job
+// arrived after the workers had decided to leave (ReportMeasured / Expedite saw them still live): nothing stranded.
 void FinishRun(unsigned gen)
 {
-    Lk l(g);
-    g->running = false;
-    if (!Stale(gen))
-        Say("[uimod] portrait: prewarm done in %lu ms: %d results (%u KB), %d failed, %d dropped, %d taken by the game thread\n",
-            static_cast<unsigned long>(GetTickCount() - g->t0), g->nDone, static_cast<unsigned>(g->doneBytes >> 10),
-            g->nFailed, g->nDropped, g->nTaken);
-    if (g->restartPending && !g->cancel) { g->restartPending = false; StartThread(); }   // a Restart while we ran
-    Wake();
+    char done[300] = {};
+    {
+        Lk l(g);
+        const int me = t_worker;
+        if (me >= 0 && me < kMaxWorkers && g->live[me]) { g->live[me] = false; --g->nLive; }
+        if (g->nLive == 0) {
+            if (!Stale(gen))
+            {
+                NoteNatives();
+                char at[24] = "n/a";
+                if (g->nativesMs) _snprintf_s(at, sizeof at, _TRUNCATE, "%lu ms", static_cast<unsigned long>(g->nativesMs));
+                _snprintf_s(done, sizeof done, _TRUNCATE,
+                            "[uimod] portrait: prewarm done in %lu ms (every native bake ready at %s; %d worker%s): %d results "
+                            "(%u KB), %d failed, %d dropped, %d taken by the game thread\n",
+                            static_cast<unsigned long>(GetTickCount() - g->t0), at,
+                            g->wantWorkers, g->wantWorkers == 1 ? "" : "s", g->nDone, static_cast<unsigned>(g->doneBytes >> 10),
+                            g->nFailed, g->nDropped, g->nTaken);
+            }
+            const bool more = !Stale(gen) && g->failures < kMaxFailures && (HasQueued() || HasUnresolved());
+            if ((g->restartPending || more) && !g->cancel) { g->restartPending = false; StartThread(); }
+        }
+        Wake();
+    }
+    // written by this thread, outside the lock (UimodLog is thread-safe; the decode lines are written the same way):
+    // the ring is drained only by a portrait draw or a faction load, and at the main menu neither may come
+    if (done[0]) UimodLog(done);
 }
 
 void WorkerMain()
@@ -628,14 +752,23 @@ void WorkerMain()
     { Lk l(g); gen = g->gen; }
     const HRESULT ci = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     const bool own = ci == S_OK || ci == S_FALSE;
+    const bool lead = t_worker == 0;
     try {
-        // until nothing is queued, decided under the lock that also clears `running`: a job reported in between
-        // (ReportMeasured) is either run here or restarts the thread, never stranded
+        // until nothing is queued (and, for the lead, nothing is left to resolve), decided under the lock FinishRun
+        // takes too: a job reported in between is either run here or restarts the run, never stranded
         for (;;) {
-            ResolvePlans(gen);
+            if (lead) {
+                ResolvePlans(gen);                // the images and predictions: the lead's alone
+                Lk l(g);
+                if (!Stale(gen)) {
+                    NoteNatives();                // finished natives a Restart kept may already be everything
+                    StartHelpers();               // the jobs exist now: the helpers have something to run
+                }
+            }
             RunJobs(gen);
             Lk l(g);
-            if (Stale(gen) || g->failures >= kMaxFailures || !HasQueued()) break;
+            if (Stale(gen) || g->failures >= kMaxFailures) break;
+            if (!HasQueued() && (!lead || !HasUnresolved())) break;
         }
     } catch (...) {
         WorkerFault("stopped by an exception", true);   // C++ unwinding released every Lk: a plain acquire is safe
@@ -646,58 +779,174 @@ void WorkerMain()
 
 // After an exception or a fault, which may have happened INSIDE a locked region: a try-lock, never a wait (an
 // orphaned lock would hang this thread, and the game thread at its next lookup).  Without the lock the running
-// job stays sRunning: a waiter times out (kWaitMs) and falls back; nothing hangs.
+// job stays sRunning: a waiter times out (kWaitMs) and falls back; nothing hangs.  The worker leaves the run; a
+// fault stops every worker (cancel: the others finish their job and pick no other).
 void WorkerFault(const char* what, bool lockFree)
 {
-    if (lockFree) AcquireSRWLockExclusive(&g->lock);
-    else if (!TryAcquireSRWLockExclusive(&g->lock)) { MarkDead(); return; }   // the game thread holds it, or we did: over
-    for (auto& e : g->entries) if (e->state == sRunning) { e->state = sFailed; ++g->nFailed; }
-    g->running = false;
+    if (lockFree) { AcquireSRWLockExclusive(&g->lock); Acquired(); }
+    else {
+        // the fault may have hit inside a locked region: then WE hold it for good -- over at once.  Otherwise another
+        // worker or the game thread may hold it for microseconds: a bounded retry, then over.
+        if (static_cast<DWORD>(g->holder) == GetCurrentThreadId()) { MarkDead(); return; }
+        const DWORD t0 = GetTickCount();
+        bool ok;
+        while (!(ok = TryAcquire()) && GetTickCount() - t0 < kGameLockMs) Sleep(1);
+        if (!ok) { MarkDead(); return; }
+    }
+    const int me = t_worker;
+    for (auto& e : g->entries)
+        if (e->state == sRunning && (e->runner == me || me < 0)) { e->state = sFailed; ++g->nFailed; }
+    if (me >= 0 && me < kMaxWorkers && g->live[me]) { g->live[me] = false; --g->nLive; }
     InterlockedExchange(&g->cancel, 1);       // a faulted worker is never followed by another
     Say("[uimod] portrait: prewarm worker %s (synchronous path from here)\n", what);
     Wake();
-    ReleaseSRWLockExclusive(&g->lock);
+    Unlock();
 }
 
-DWORD WINAPI WorkerThunk(LPVOID)
+DWORD WINAPI WorkerThunk(LPVOID p)
 {
+    t_worker = static_cast<int>(reinterpret_cast<INT_PTR>(p));
     __try { WorkerMain(); }
     __except (EXCEPTION_EXECUTE_HANDLER) { WorkerFault("faulted", false); }
     return 0;
 }
 
 // Under the lock: a worker that is gone without reporting (faulted while another thread held the lock) leaves
-// `running` set and its job sRunning forever -- every lookup of that key would wait out kWaitMs.  The thread
-// handle says whether it is alive.
+// itself live and its job sRunning forever -- every lookup of that key would wait out kWaitMs.  Its thread handle
+// says whether it is alive (a worker clears `live` before it exits).  One death stops every worker, as a fault does.
 void ReapThread()
 {
-    if (!g->running || !g->thread || WaitForSingleObject(g->thread, 0) != WAIT_OBJECT_0) return;
-    g->running = false;
-    InterlockedExchange(&g->cancel, 1);       // it died: never another one
-    for (auto& e : g->entries) if (e->state == sRunning) { e->state = sFailed; ++g->nFailed; }
-    Say("[uimod] portrait: prewarm worker ended without reporting (synchronous path from here)\n");
+    for (int i = 0; i < kMaxWorkers; ++i) {
+        if (!g->live[i] || !g->threads[i] || WaitForSingleObject(g->threads[i], 0) != WAIT_OBJECT_0) continue;
+        g->live[i] = false;
+        --g->nLive;
+        InterlockedExchange(&g->cancel, 1);   // it died: never another one
+        for (auto& e : g->entries) if (e->state == sRunning && e->runner == i) { e->state = sFailed; ++g->nFailed; }
+        Say("[uimod] portrait: prewarm worker ended without reporting (synchronous path from here)\n");
+    }
 }
 
-// Under the lock: start the worker thread, or, while one is still winding down, have it start the next one as it
-// exits (never two at once).  False if it could not be created.
+// Under the lock: start worker `i` (below normal: the intro movie decodes on the game thread meanwhile).
+bool SpawnWorker(int i)
+{
+    if (g->threads[i]) {                      // (a reusable id must not outlive its thread)
+        CloseHandle(g->threads[i]);
+        g->threads[i] = nullptr;
+        InterlockedExchange(&g->threadIds[i], 0);
+    }
+    DWORD tid = 0;
+    const HANDLE h = CreateThread(nullptr, 256 * 1024, WorkerThunk, reinterpret_cast<LPVOID>(static_cast<INT_PTR>(i)),
+                                  CREATE_SUSPENDED, &tid);
+    if (!h) {
+        Say(i == 0 ? "[uimod] portrait: prewarm: CreateThread failed (%lu) -> synchronous bakes only\n"
+                   : "[uimod] portrait: prewarm: a helper could not start (%lu) -> fewer workers\n", GetLastError());
+        return false;
+    }
+    SetThreadPriority(h, THREAD_PRIORITY_BELOW_NORMAL);
+    g->threads[i] = h;
+    InterlockedExchange(&g->threadIds[i], static_cast<LONG>(tid));
+    if (ResumeThread(h) == static_cast<DWORD>(-1)) {   // never ran: nothing of ours is in it
+        TerminateThread(h, 0);
+        CloseHandle(h);
+        g->threads[i] = nullptr;
+        InterlockedExchange(&g->threadIds[i], 0);
+        return false;
+    }
+    g->live[i] = true;
+    ++g->nLive;
+    if (g->nLive > g->maxLive) g->maxLive = g->nLive;
+    return true;
+}
+
+// Under the lock: start a run (the lead), or, while one is still winding down, have its last worker start the next
+// as it leaves (never two runs at once).  False if it could not be created.
 bool StartThread()
 {
     if (g->cancel) return false;
     ReapThread();
-    if (g->running) { g->restartPending = true; return true; }
-    if (g->thread) { CloseHandle(g->thread); g->thread = nullptr; InterlockedExchange(&g->threadId, 0); }   // (a reusable id must not outlive its thread)
-    DWORD tid = 0;
-    const HANDLE h = CreateThread(nullptr, 256 * 1024, WorkerThunk, nullptr, CREATE_SUSPENDED, &tid);
-    if (!h) {
-        Say("[uimod] portrait: prewarm: CreateThread failed (%lu) -> synchronous bakes only\n", GetLastError());
-        return false;
+    if (g->nLive > 0) { g->restartPending = true; return true; }
+    return SpawnWorker(0);
+}
+
+// Under the lock: the helpers, beside a live lead of this run, while there is work for them.
+void StartHelpers()
+{
+    if (g->cancel || !g->live[0] || g->failures >= kMaxFailures || !HasQueued()) return;
+    for (int i = 1; i < g->wantWorkers && i < kMaxWorkers; ++i)
+        if (!g->live[i] && !SpawnWorker(i)) break;
+}
+
+int BitCount(ULONG_PTR m) { int n = 0; for (; m; m &= m - 1) ++n; return n; }
+
+// The physical cores among `n` core masks (GetLogicalProcessorInformation's RelationProcessorCore records) that the
+// process mask `proc` reaches -- DISTINCT masks: a 32-bit process on a machine with more than 32 CPUs sees each core's
+// mask folded onto the low 32 bits (WOW64), so two cores report the same mask (measured: a 1-CPU pin counted 2
+// cores, a 0x3 pin -- one core's two threads -- counted 2).  Never more than the CPUs in `proc` (a safety net for
+// the same folding; `all` = no mask known).  Pure and allocation-free: the harness feeds it a folded table.
+int CountCores(const ULONG_PTR* masks, int n, ULONG_PTR proc, bool all)
+{
+    int distinct = 0;
+    for (int i = 0; i < n; ++i) {
+        if (!(masks[i] & proc)) continue;
+        bool dup = false;
+        for (int k = 0; k < i && !dup; ++k) dup = masks[k] == masks[i] && (masks[k] & proc);
+        if (!dup) ++distinct;
     }
-    SetThreadPriority(h, THREAD_PRIORITY_BELOW_NORMAL);       // the intro movie decodes on the game thread meanwhile
-    g->thread = h;
-    InterlockedExchange(&g->threadId, static_cast<LONG>(tid));
-    g->running = true;
-    ResumeThread(h);
-    return true;
+    const int cpus = all ? distinct : BitCount(proc);
+    return distinct < cpus ? distinct : cpus;
+}
+
+// The physical cores this PROCESS may run on (not hardware threads: a second worker on the game core's SMT sibling
+// takes from the game thread whatever its priority).  A thread can never leave its process's CPU set, and DDrawCompat
+// (the ddraw.dll of a GOG install) pins the game to ONE CPU by default ([default] CpuAffinity = 1, rotated): there,
+// one worker.  Measured 2026-11-08: three workers under that pin finished no sooner than one.  The current processor
+// group's cores only -- enough for a cap of 3.  0 if unknown.
+int UsableCores()
+{
+    DWORD_PTR proc = 0, sys = 0;
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys) || !proc) proc = ~static_cast<DWORD_PTR>(0);
+    DWORD len = 0;
+    GetLogicalProcessorInformation(nullptr, &len);
+    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && len >= sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION)) {
+        std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> info(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+        if (GetLogicalProcessorInformation(info.data(), &len)) {
+            std::vector<ULONG_PTR> cores;
+            for (const auto& i : info) if (i.Relationship == RelationProcessorCore) cores.push_back(i.ProcessorMask);
+            const int n = CountCores(cores.data(), static_cast<int>(cores.size()), proc, proc == ~static_cast<DWORD_PTR>(0));
+            if (n > 0) return n;
+        }
+    }
+    // unknown topology: the process's CPUs, assuming two hardware threads per core (a single CPU is one core)
+    const int cpus = proc == ~static_cast<DWORD_PTR>(0) ? 0 : BitCount(proc);
+    if (cpus > 0) return cpus == 1 ? 1 : cpus / 2;
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return static_cast<int>(si.dwNumberOfProcessors / 2);
+}
+
+// The worker count for `cores` usable physical cores: cores - 2 (the game thread's core; one for the update check,
+// the GPU device thread, audio and the driver), between 1 and kMaxWorkers.  Pure: the harness holds it to the rule.
+int WorkersFor(int cores) { return ClampInt(cores - 2, 1, kMaxWorkers); }
+
+int AutoWorkers()
+{
+    g->cores = UsableCores();
+    return WorkersFor(g->cores);
+}
+
+// The worker count for scale g: the machine's, and fewer above ~5K -- each worker's peak (the Lanczos buffers of a
+// 4K enlarge, ~19 MB) grows with g^2, in a 2 GB 32-bit process (audit 2026-11-08: ~60 MB per worker at 8K).
+int WorkerCount(int gScale)
+{
+    const int cap = gScale <= 48 ? 3 : gScale <= 72 ? 2 : 1;
+    const int w = g->testWorkers > 0 ? ClampInt(g->testWorkers, 1, kMaxWorkers) : AutoWorkers();
+    return w < cap ? w : cap;
+}
+
+bool HasUnresolved()
+{
+    for (auto& p : g->plans) if (!p->resolved) return true;
+    return false;
 }
 
 bool HasQueued()
@@ -719,8 +968,33 @@ bool Start(const Snapshot& s)
     g->palHash = Fnv(1469598103934665603ull, s.pal, sizeof s.pal);
     g->t0 = GetTickCount();
     for (int sl = 0; sl < kSlots; ++sl) if (g->hot[sl] < 0) g->hot[sl] = s.hot[sl];
+    g->wantWorkers = WorkerCount(s.g);
     g->started = true;
     return StartThread();
+}
+
+int Workers() { return g && g->started ? g->wantWorkers : 0; }
+int UsableCoreCount() { return g && g->started ? g->cores : 0; }
+
+void Expedite(const char* name)
+{
+    if (!name || !name[0] || !g || !g->started || g->dead) return;
+    TryLk l(g, kGameLockMs);
+    if (!l.ok) { LockFailed(); return; }
+    ReapThread();
+    Plan* p = FindPlan(name);
+    if (!p || !p->resolved) return;           // not resolved yet: the lead is on it; the game thread bakes as before
+    bool any = false;
+    for (auto& e : g->entries) e->urgent = false;   // only the faction loading NOW is urgent (an earlier mark is stale)
+    for (auto& e : g->entries)
+        if (e->plan == p->order && e->kind == kNative && e->scan == g->snap.scan && e->state == sQueued) {
+            e->urgent = true;
+            any = true;
+        }
+    if (!any) return;
+    if (g->nLive == 0) { if (g->failures < kMaxFailures) StartThread(); }
+    else StartHelpers();
+    Wake();
 }
 
 bool HotPhases(int out[kSlots])
@@ -770,7 +1044,7 @@ void ReportMeasured(const char* name, int slot, int bright, int ratio)
     if (p->resolved) BuildEntries(*p, slot);  // (a no-op without an image)
     // the worker may have finished already (a roster change long after start-up): run it again for the new jobs
     // (not after the failure stop: the next settings change resets that)
-    if (!g->running && g->failures < kMaxFailures && HasQueued()) StartThread();
+    if (g->nLive == 0 && g->failures < kMaxFailures && HasQueued()) StartThread();
 }
 
 void Restart(const Snapshot& s)
@@ -779,13 +1053,16 @@ void Restart(const Snapshot& s)
     TryLk l(g, kGameLockMs);
     if (!l.ok) { LockFailed(); return; }
     ReapThread();
+    const int want = WorkerCount(s.g);        // first: it may allocate (UsableCores), and must not throw mid-update
     g->failures = 0;
     const bool scanChanged = s.scan != g->snap.scan, scaleChanged = s.g != g->snap.g;
     for (int sl = 0; sl < kSlots; ++sl) if (scaleChanged || g->hot[sl] < 0) g->hot[sl] = s.hot[sl];
     g->snap = s;
+    g->wantWorkers = want;                    // a scale change changes the cap
     g->palHash = Fnv(1469598103934665603ull, s.pal, sizeof s.pal);
     ++g->gen;
     g->t0 = GetTickCount();
+    g->nativesMs = 0;
     for (auto& p : g->plans) {                // every image looked up again (the set may have changed)
         p->resolved = false; p->imgId = 0;
         for (int sl = 0; sl < kSlots; ++sl) p->built[sl] = false;
@@ -828,18 +1105,20 @@ bool GetFit(uint64_t imgId, portrait_law::Rect crop, int tw, int th, const uint8
             if (e->state == sRunning) ReapThread();   // a worker that died on it: failed, not waited for
             if (e->state == sRunning) {
                 ++g->nWait;
-                if (g->thread) SetThreadPriority(g->thread, THREAD_PRIORITY_NORMAL);   // we are waiting on it
+                // the worker on it runs at normal priority while we wait (its handle is read only under the lock:
+                // SpawnWorker may close and replace a slot's handle meanwhile)
+                const int runner = e->runner >= 0 && e->runner < kMaxWorkers ? e->runner : -1;
+                if (runner >= 0 && g->threads[runner]) SetThreadPriority(g->threads[runner], THREAD_PRIORITY_NORMAL);
                 const DWORD t0 = GetTickCount();
                 // The lock is released around each sleep and re-taken with a bounded try: a worker that dies inside a
                 // locked region while we wait can never hold this thread (SleepConditionVariableSRW would re-acquire
                 // unbounded).  `e` stays valid: entries are only ever appended.
-                // (g->thread is read only while the lock is held: StartThread may close and replace it meanwhile)
                 while (e->state == sRunning && !g->dead && GetTickCount() - t0 < kWaitMs) {
-                    ReleaseSRWLockExclusive(&g->lock);
+                    Unlock();
                     l.ok = false;
                     if (g->done) WaitForSingleObject(g->done, 20); else Sleep(5);
                     const DWORD t1 = GetTickCount();
-                    while (!(l.ok = TryAcquireSRWLockExclusive(&g->lock) != 0) && GetTickCount() - t1 < kGameLockMs) Sleep(1);
+                    while (!(l.ok = TryAcquire()) && GetTickCount() - t1 < kGameLockMs) Sleep(1);
                     if (!l.ok) {              // (no handle to restore without the lock: a dead or starved worker)
                         LockFailed();
                         if (why) *why = kRunningTimeout;
@@ -847,7 +1126,7 @@ bool GetFit(uint64_t imgId, portrait_law::Rect crop, int tw, int th, const uint8
                     }
                     ReapThread();             // died mid-job: the entry is failed now, not waited for
                 }
-                if (g->thread) SetThreadPriority(g->thread, THREAD_PRIORITY_BELOW_NORMAL);
+                if (runner >= 0 && g->threads[runner]) SetThreadPriority(g->threads[runner], THREAD_PRIORITY_BELOW_NORMAL);
             }
             switch (e->state) {
             case sDone:
@@ -856,7 +1135,7 @@ bool GetFit(uint64_t imgId, portrait_law::Rect crop, int tw, int th, const uint8
                 ++g->nHit;
                 ok = true; w = kHit;
                 break;
-            case sQueued: e->state = sTaken; ++g->nTaken; w = kQueuedTaken; break;
+            case sQueued: e->state = sTaken; ++g->nTaken; w = kQueuedTaken; NoteNatives(); break;
             case sRunning: w = kRunningTimeout; break;
             case sFailed: e->state = sTaken; w = kFailed; break;      // ours now: the worker never retries it
             case sDropped: e->state = sTaken; --g->nDropped; w = kDropped; break;
@@ -908,7 +1187,7 @@ bool TakeLog(char* out, size_t n)
 // ---- test / diagnostics ---------------------------------------------------------------------------------------
 
 void Cancel() { if (g) InterlockedExchange(&g->cancel, 1); }
-bool Finished() { if (!g || g->dead) return true; TryLk l(g, 200); if (!l.ok) return !WorkerAlive(); return !g->running && !g->restartPending; }
+bool Finished() { if (!g || g->dead) return true; TryLk l(g, 200); if (!l.ok) return !WorkerAlive(); return g->nLive == 0 && !g->restartPending; }
 void WaitIdle() { while (!Finished()) Sleep(5); }
 void TestFailEvery(int n) { if (Ensure()) { Lk l(g); g->testFailEvery = n; } }
 void TestThrowEvery(int n) { if (Ensure()) { Lk l(g); g->testThrowEvery = n; } }
@@ -916,8 +1195,10 @@ void TestFaultEvery(int n) { if (Ensure()) { Lk l(g); g->testFaultEvery = n; } }
 void TestDieLocked() { if (Ensure()) InterlockedExchange(&g->testDieLocked, 1); }
 void TestFaultOutsideJob() { if (Ensure()) InterlockedExchange(&g->testFaultOutside, 1); }
 void TestDieInJob(int n) { if (Ensure()) { Lk l(g); g->testDieInJob = n; } }
+void TestWorkers(int n) { if (Ensure()) { Lk l(g); g->testWorkers = n; } }
+void TestPause(bool on) { if (Ensure()) InterlockedExchange(&g->testPause, on ? 1 : 0); }
 bool Dead() { return g && g->dead; }
-bool Running() { if (!g || g->dead) return false; TryLk l(g, 200); if (!l.ok) return WorkerAlive(); return g->running || g->restartPending; }
+bool Running() { if (!g || g->dead) return false; TryLk l(g, 200); if (!l.ok) return WorkerAlive(); return g->nLive > 0 || g->restartPending; }
 
 void DebugEntries(std::vector<EntryInfo>* out)
 {
@@ -927,7 +1208,7 @@ void DebugEntries(std::vector<EntryInfo>* out)
     if (!l.ok) return;
     for (auto& e : g->entries)
         out->push_back({ e->imgId, e->palHash, e->crop, e->tw, e->th, e->scan, e->bright, e->ratio, e->y0, e->rows, e->slot,
-                         e->kind, e->state, e->fit.size() });
+                         e->kind, e->state, e->fit.size(), e->pickNo, e->urgent ? 1 : 0, e->phase, e->plan });
 }
 
 bool DebugSheetSlot(const char* name, int slot, const uint8_t* pal, int* bright, int* ratio, uint32_t* hash)

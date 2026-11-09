@@ -20,6 +20,20 @@
 //                                        die=2: THIS thread orphans the lock (a caught fault skipped the release):
 //                                        the next Find latches at once
 //   phases <text>                     -> ParseHotPhases / FormatHotPhases round trip
+//   order <g> <scan> <pal.bin> <hot> [name]
+//                                     -> workers paused until the lead has built the whole queue (hot = the ini's
+//                                        "a,b,c,d" draw phases), [name] expedited, then run: one line per entry
+//                                        "pick=<n> kind= scan= slot= phase= urgent= plan=" -- the order they were picked
+//   share <g> <scan> <pal.bin> <name> -> the queue built (paused), <name> expedited, the workers released, and THIS
+//                                        thread looks that file's four native bakes up from slot 3 down (taking over
+//                                        what is still queued, waiting on what runs): every result equals the law
+//   affinity <cpus> <g> <scan> <pal.bin>
+//                                     -> this process pinned to its first <cpus> CPUs (0 = left alone), the machine's
+//                                        own worker count (no override): "workers= cores=" + the run verified
+//   workersfor                        -> WorkersFor(0..8), the cores -> workers rule
+//   countcores <hexmask>...           -> CountCores over a WOW64-folded table (16 two-thread cores, each record twice:
+//                                        what a 32-bit process sees on a 64-thread machine), one count per mask
+//   env PREWARM_WORKERS=<n>           -> the worker count (default 1: the scenarios above assume one unless they say)
 //   rekey <g> <scan> <pal.bin>        -> the measured params of slot 2 differ from the prediction: old key misses,
 //                                        new key hits and verifies
 //   restartscan <g> <scan> <pal.bin>  -> Restart in another scan mode: natives of every mode kept, old-mode enlarges
@@ -42,6 +56,7 @@
 #include "../../src/uimod/src/prewarm.cpp"
 #include "../../src/uimod/src/portrait_files.cpp"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
@@ -166,9 +181,16 @@ void Counts(const std::vector<prewarm::EntryInfo>& es, int* done, int* failed, i
     }
 }
 
-void WaitWorkerGone()                         // the worker thread has exited (however it ended)
+// The thread holding the pre-bake lock has exited holding it (TestDieLocked).  With several workers the others
+// block on that lock for good (the orphan is the dead state's business, not theirs), so "every worker gone" would
+// never come: wait for the dead holder itself.
+void WaitHolderDead()
 {
-    while (prewarm::WorkerAlive()) Sleep(5);
+    for (;;) {
+        const DWORD h = static_cast<DWORD>(prewarm::g->holder);
+        if (h && !prewarm::ThreadAlive(h)) return;
+        Sleep(5);
+    }
 }
 
 } // namespace
@@ -221,19 +243,59 @@ int main(int argc, char** argv)
                     portrait_files::DebugLockDead() ? 1 : 0, contended ? 1 : 0, heldAtReturn ? 1 : 0);
         return 0;
     }
+    if (mode == "workersfor") {
+        for (int c = 0; c <= 8; ++c) std::printf("%d%s", prewarm::WorkersFor(c), c < 8 ? " " : "\n");
+        return 0;
+    }
+    if (mode == "countcores") {
+        ULONG_PTR table[32];
+        for (int i = 0; i < 32; ++i) table[i] = static_cast<ULONG_PTR>(3u) << (2 * (i % 16));   // cores 16..31 fold onto 0..15
+        for (int a = 2; a < argc; ++a) {
+            const ULONG_PTR proc = static_cast<ULONG_PTR>(std::strtoul(argv[a], nullptr, 16));
+            std::printf("%d%s", prewarm::CountCores(table, 32, proc, false), a + 1 < argc ? " " : "\n");
+        }
+        return 0;
+    }
     if (mode == "names") {
         char names[32][24];
         const size_t n = portrait_files::ListNames(names, 32);
         for (size_t i = 0; i < n; ++i) std::printf("%s\n", names[i]);
         return 0;
     }
+    {
+        const char* w = std::getenv("PREWARM_WORKERS");
+        prewarm::TestWorkers(w && *w ? std::atoi(w) : 1);
+    }
     int ai = 2, failEvery = 0, stressMs = 0, throwEvery = 0, faultEvery = 0;
     if (mode == "fail") { failEvery = std::atoi(argv[ai++]); }
     if (mode == "sehfault") { faultEvery = std::atoi(argv[ai++]); }
+    const char* orderHot = nullptr;
+    const char* expediteName = nullptr;
     if (mode == "stress") {
         if (argc < ai + 4) return 2;
         stressMs = std::atoi(argv[ai + 3]);
         if (argc > ai + 4) throwEvery = std::atoi(argv[ai + 4]);
+    } else if (mode == "order") {
+        if (argc < ai + 4) return 2;
+        orderHot = argv[ai + 3];
+        if (argc > ai + 4) expediteName = argv[ai + 4];
+    } else if (mode == "share") {
+        if (argc != ai + 4) return 2;
+        expediteName = argv[ai + 3];
+    } else if (mode == "affinity") {
+        if (argc != ai + 4) return 2;
+        const int cpus = std::atoi(argv[ai]);
+        ++ai;                                 // the rest: <g> <scan> <pal.bin>
+        if (cpus > 0) {
+            DWORD_PTR proc = 0, sys = 0;
+            if (!GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys)) return 8;
+            DWORD_PTR want = 0;
+            int n = 0;
+            for (int bit = 0; bit < static_cast<int>(sizeof(DWORD_PTR) * 8) && n < cpus; ++bit)
+                if (proc & (static_cast<DWORD_PTR>(1) << bit)) { want |= static_cast<DWORD_PTR>(1) << bit; ++n; }
+            if (!SetProcessAffinityMask(GetCurrentProcess(), want)) return 9;
+        }
+        prewarm::TestWorkers(0);              // the machine's (here: the pinned process's) own count
     } else if (argc != ai + 3) return 2;
     Ctx c;
     c.snap.g = std::atoi(argv[ai]);
@@ -246,6 +308,63 @@ int main(int argc, char** argv)
     if (faultEvery) prewarm::TestFaultEvery(faultEvery);
     const DWORD t0 = GetTickCount();
 
+    if (mode == "order" || mode == "share") {
+        if (orderHot) prewarm::ParseHotPhases(orderHot, c.snap.hot);
+        prewarm::TestPause(true);
+        if (!prewarm::Start(c.snap)) return 4;
+        char names[32][24];
+        const size_t nNames = portrait_files::ListNames(names, 32);
+        for (bool built = false; !built; ) {      // the lead has resolved every image: the whole queue exists
+            {
+                prewarm::Lk l(prewarm::g);
+                built = prewarm::g->plans.size() >= nNames && !prewarm::HasUnresolved();
+            }
+            if (!built) Sleep(1);
+        }
+        int plan = -1;
+        if (expediteName) {
+            prewarm::Expedite(expediteName);
+            prewarm::Lk l(prewarm::g);
+            if (prewarm::Plan* pl = prewarm::FindPlan(expediteName)) plan = pl->order;
+        }
+        prewarm::TestPause(false);
+        if (mode == "order") {
+            prewarm::WaitIdle();
+            std::vector<prewarm::EntryInfo> es; prewarm::DebugEntries(&es);
+            for (const auto& e : es)
+                std::printf("pick=%d kind=%d scan=%d slot=%d phase=%d urgent=%d plan=%d state=%d\n", e.pickNo, e.kind, e.scan,
+                            e.slot, e.phase, e.urgent, e.plan, e.state);
+            int maxLive = 0;
+            { prewarm::Lk l(prewarm::g); maxLive = prewarm::g->maxLive; }
+            std::printf("workers=%d expedited=%d maxlive=%d\n", prewarm::Workers(), plan, maxLive);
+            return 0;
+        }
+        // share: this thread is the game thread loading `plan`: its four current-mode natives, from slot 3 down
+        std::vector<prewarm::EntryInfo> es; prewarm::DebugEntries(&es);
+        int hits = 0, taken = 0, waits = 0, mismatch = 0, other = 0, seen = 0;
+        for (int s = 3; s >= 0; --s)
+            for (const auto& e : es) {
+                if (e.plan != plan || e.kind != 0 || e.scan != c.snap.scan || e.slot != s) continue;
+                ++seen;
+                std::vector<int> got, want;
+                int why = -1;
+                const DWORD t = GetTickCount();
+                const bool hit = c.Lookup(e, e.bright, e.ratio, &got, &why);
+                if (GetTickCount() - t > 20) ++waits;
+                if (!c.Direct(e, e.bright, e.ratio, &want)) { ++other; continue; }
+                if (hit) { ++hits; if (want != got) ++mismatch; }
+                else if (why == prewarm::kQueuedTaken) {
+                    ++taken;
+                    prewarm::PutFit(e.imgId, e.crop, e.tw, e.th, c.snap.pal, e.scan, e.bright, e.ratio, e.y0, e.rows, want);
+                } else ++other;
+            }
+        prewarm::WaitIdle();
+        int h2, m2, miss2;
+        const int n = Verify(c, &h2, &m2, &miss2);
+        std::printf("seen=%d hits=%d taken=%d waits=%d other=%d mismatch=%d entries=%d final_hits=%d final_mismatch=%d final_missing=%d workers=%d\n",
+                    seen, hits, taken, waits, other, mismatch, n, h2, m2, miss2, prewarm::Workers());
+        return 0;
+    }
     if (mode == "thunkfault") {
         prewarm::TestFaultOutsideJob();
         if (!prewarm::Start(c.snap)) return 4;
@@ -274,14 +393,18 @@ int main(int argc, char** argv)
         std::vector<int> f; int why = -1;
         const DWORD t1 = GetTickCount();
         const bool hit = c.Lookup(running, running.bright, running.ratio, &f, &why);
-        std::printf("found=1 hit=%d why=%d waitms=%lu running=%d\n", hit ? 1 : 0, why, static_cast<unsigned long>(GetTickCount() - t1),
+        const DWORD waited = GetTickCount() - t1;
+        // the dead worker was reaped (its job failed); any others finish the job they are on and leave (the death
+        // cancelled the run) -- a worker left live for good would hang here, and the probe's timeout fails the test
+        prewarm::WaitIdle();
+        std::printf("found=1 hit=%d why=%d waitms=%lu running=%d\n", hit ? 1 : 0, why, static_cast<unsigned long>(waited),
                     prewarm::Running() ? 1 : 0);
         return 0;
     }
     if (mode == "orphan") {
         if (!prewarm::Start(c.snap)) return 4;
         prewarm::TestDieLocked();
-        WaitWorkerGone();                     // the worker publishes its first job and dies holding the lock
+        WaitHolderDead();                     // a worker publishes its first job and dies holding the lock
         std::vector<int> f; int why = -1;
         uint8_t pal[1024]; memcpy(pal, c.snap.pal, 1024);
         portrait_law::Rect crop{ 0, 0, 10, 10 };
@@ -349,9 +472,22 @@ int main(int argc, char** argv)
         return 0;
     }
 
+    if (mode == "affinity") {
+        if (!prewarm::Start(c.snap)) return 4;
+        prewarm::WaitIdle();
+        int hits, mismatch, missing;
+        const int n = Verify(c, &hits, &mismatch, &missing);
+        std::printf("workers=%d cores=%d entries=%d hits=%d mismatch=%d missing=%d\n", prewarm::Workers(),
+                    prewarm::UsableCoreCount(), n, hits, mismatch, missing);
+        return 0;
+    }
     if (mode == "run" || mode == "fail" || mode == "sehfault") {
         if (!prewarm::Start(c.snap)) return 4;
         prewarm::WaitIdle();
+        const DWORD bakeMs = GetTickCount() - t0;     // the pre-bake alone (the verification below is serial)
+        // the last worker out writes the done line AFTER the run counts as finished: wait for every worker to exit
+        for (int i = 0; i < prewarm::kMaxWorkers; ++i)
+            if (prewarm::g->threads[i]) WaitForSingleObject(prewarm::g->threads[i], INFINITE);
         int hits, mismatch, missing;
         const int n = Verify(c, &hits, &mismatch, &missing);
         std::vector<prewarm::EntryInfo> es; prewarm::DebugEntries(&es);
@@ -363,9 +499,12 @@ int main(int argc, char** argv)
             if (e.state == 3) { std::vector<int> f; int why = -1; if (!c.Lookup(e, e.bright, e.ratio, &f, &why) && why == prewarm::kFailed) ++failedMiss; }
         int queued = 0;
         for (const auto& e : es) if (e.state == 0) ++queued;
-        std::printf("entries=%d done=%d failed=%d failedmiss=%d taken=%d dropped=%d queued=%d bytes=%u hits=%d mismatch=%d missing=%d ms=%lu\n",
+        int maxLive = 0;
+        { prewarm::Lk l(prewarm::g); maxLive = prewarm::g->maxLive; }
+        std::printf("entries=%d done=%d failed=%d failedmiss=%d taken=%d dropped=%d queued=%d bytes=%u hits=%d mismatch=%d missing=%d ms=%lu maxlive=%d resamples=%ld bakems=%lu\n",
                     n, done, failed, failedMiss, taken, dropped, queued, static_cast<unsigned>(bytes), hits, mismatch, missing,
-                    static_cast<unsigned long>(GetTickCount() - t0));
+                    static_cast<unsigned long>(GetTickCount() - t0), maxLive, static_cast<long>(prewarm::g->nResample),
+                    static_cast<unsigned long>(bakeMs));
         return 0;
     }
     if (mode == "race") {
@@ -408,9 +547,9 @@ int main(int argc, char** argv)
         Sleep(30);                            // let it get going (any progress will do: none at all is a valid case too)
         prewarm::Cancel();
         std::vector<prewarm::EntryInfo> es; prewarm::DebugEntries(&es);
-        // After Cancel the worker starts no further job (Stale is checked under the lock before every Pick), so the
-        // snapshot holds every job that will ever run: a lookup may wait on those (<= 1, one worker) and on nothing
-        // else -- each still-queued job comes back at once, taken over, never baked by the worker first.
+        // After Cancel no worker starts a further job (Stale is checked under the lock before every Pick), so the
+        // snapshot holds every job that will ever run: a lookup may wait on those (<= one per worker) and on nothing
+        // else -- each still-queued job comes back at once, taken over, never baked by a worker first.
         int runningAtCancel = 0;
         for (const auto& e : es) if (e.state == 1) ++runningAtCancel;
         const DWORD t = GetTickCount();

@@ -10,6 +10,7 @@ Three things are held to ground truth here:
 Needs the VS x86 toolchain and the game's sheets; the real pack image if installed (one faction is enough)."""
 from __future__ import annotations
 
+import os
 import pathlib
 import random
 import re
@@ -124,8 +125,11 @@ def game(tmp_path, exe, factions=("gaians",), images=True):
 # lookup took.  A loaded machine (several suites at once) starves the below-normal worker for whole seconds, and the
 # millisecond bounds these tests used to assert failed there while the code was right.  A hang is still caught: by
 # the probe's timeout, far beyond any load.
-def probe(d, *args, timeout=600):
-    r = subprocess.run([str(d / "probe.exe"), *map(str, args)], capture_output=True, text=True, timeout=timeout)
+def probe(d, *args, timeout=600, workers=1):
+    """`workers`: the harness's worker count (PREWARM_WORKERS); 1 unless a scenario says (the DLL picks physical
+    cores - 2, at most 3)."""
+    env = dict(os.environ, PREWARM_WORKERS=str(workers))
+    r = subprocess.run([str(d / "probe.exe"), *map(str, args)], capture_output=True, text=True, timeout=timeout, env=env)
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
     return r.stdout.strip(), r.stderr
 
@@ -345,3 +349,212 @@ def test_no_images_means_no_jobs(tmp_path, exe):
     d = game(tmp_path, exe, images=False)
     out, log = probe(d, "run", 40, 1, d / "pal.bin")
     assert kv(out)["entries"] == 0, (out, log)
+
+
+# ---------------------------------------------------------------------------------------------- 4. several workers
+# (2026-11-08) The DLL runs physical cores - 2 workers, at most 3: the lead resolves, the helpers join, one queue.
+
+TWO = ("gaians", "hive")
+
+
+def test_three_workers_bake_everything_equal_to_the_law(tmp_path, exe):
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "run", 40, 2, d / "pal.bin", workers=3)
+    c = kv(out)
+    phases = 2 * SL.art_scan_rows(40, 16)
+    # three threads really ran (the lead starts the helpers once the queue exists -- before its first pick)
+    assert c["maxlive"] == 3, (out, log)
+    assert c["entries"] == 2 * 4 * (2 + phases), (out, log)
+    assert c["done"] == c["entries"] and c["failed"] == 0 and c["dropped"] == 0, (out, log)
+    assert c["hits"] == c["entries"] and c["mismatch"] == 0 and c["missing"] == 0, (out, log)
+
+
+def test_three_workers_lookups_during_the_run_never_mismatch(tmp_path, exe):
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "race", 40, 1, d / "pal.bin", workers=3)
+    c = kv(out)
+    assert c["mismatch"] == 0 and c["final_mismatch"] == 0 and c["final_missing"] == 0, (out, log)
+    assert c["hits"] + c["taken"] == c["entries"] and c["other"] == 0, (out, log)
+    assert c["final_hits"] == c["entries"]
+
+
+def test_three_workers_cancel_waits_on_running_jobs_only(tmp_path, exe):
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "cancel", 40, 1, d / "pal.bin", workers=3)
+    c = kv(out)
+    assert c["running"] <= 3, (out, log)                                  # one running job per worker at most
+    assert c["queuedhit"] == 0 and c["queuedtaken"] == c["queued"], (out, log)
+    assert c["mismatch"] == 0
+
+
+def test_three_workers_under_restarts_and_exceptions(tmp_path, exe):
+    """The stress scenario (restarts every ~400 ms, palette changes, every 5th job throwing) with three workers: one
+    queue, several runners -- nothing may mismatch, hang, or stay running."""
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "stress", 25, 1, d / "pal.bin", 6000, 5, workers=3)
+    c = kv(out)
+    assert c["capped"] == 0 and c["restarts"] >= 8 and c["lookups"] >= 30, (out, log)
+    assert c["mismatch"] == 0 and c["final_mismatch"] == 0 and c["running"] == 0, (out, log)
+
+
+def test_three_workers_a_helper_dying_inside_the_lock_never_hangs_the_game_thread(tmp_path, exe):
+    """Whichever worker dies holding the lock: the recorded holder is gone, so the game thread latches the dead state
+    after one bounded wait (a live but slow holder would only cost a miss)."""
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "orphan", 25, 1, d / "pal.bin", workers=3)
+    c = kv(out)
+    assert c["dead"] == 1 and c["calls"] == 100 and c["deadafterfirst"] == 1, (out, log)
+
+
+def test_three_workers_a_death_mid_job_ends_the_wait_by_the_reaper(tmp_path, exe):
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "diewait", 25, 1, d / "pal.bin", workers=3)
+    c = kv(out)
+    assert c["found"] == 1 and c["hit"] == 0 and c["why"] == WHY_FAILED and c["running"] == 0, (out, log)
+
+
+def test_three_workers_a_fault_outside_any_job_stops_them_all(tmp_path, exe):
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "thunkfault", 25, 1, d / "pal.bin", workers=3)
+    c = kv(out)
+    assert c["running"] == 0 and c["dead"] == 0 and c["hits"] == 0 and c["misses"] == c["entries"], (out, log)
+    assert "faulted" in log
+
+
+def picks(out: str) -> tuple[list[dict], dict]:
+    rows = [kv(line) for line in out.splitlines() if line.startswith("pick=")]
+    tail = kv(out.splitlines()[-1])
+    return sorted((r for r in rows if r["pick"] > 0), key=lambda r: r["pick"]), tail
+
+
+@pytest.mark.parametrize("workers", [1, 3])
+def test_job_order_natives_first_then_the_known_phase(tmp_path, exe, workers):
+    """The queue, fully built before any pick (the workers paused), runs in this order whatever the worker count:
+    the expedited faction's current-mode natives; every other current-mode native; the enlarges at each slot's known
+    draw phase (the ini's "a,b,c,d"; -1 = unknown: no hot phase); the other phases; the other scan mode's natives.
+    (2026-11-08: the old order put every enlarge of the loaded factions -- three speculative phases per slot --
+    before the other factions' natives, so a save loaded early made the game thread bake them all.)"""
+    d = game(tmp_path, exe, TWO)
+    hot = [1, -1, 2, 0]
+    out, log = probe(d, "order", 40, 2, d / "pal.bin", ",".join(map(str, hot)), "hive", workers=workers)
+    rows, tail = picks(out)
+    assert tail["workers"] == workers and tail["maxlive"] == workers and tail["expedited"] >= 0, (out, log)
+    assert rows and all(r["state"] == 2 for r in rows), (out, log)                       # all baked
+    assert [r["pick"] for r in rows] == list(range(1, len(rows) + 1)), (out, log)       # every entry picked once
+
+    def tier(r):
+        if r["kind"] == 0:
+            return 4 if r["scan"] != 2 else (0 if r["urgent"] else 1)
+        return 2 if hot[r["slot"]] >= 0 and r["phase"] == hot[r["slot"]] else 3
+    tiers = [tier(r) for r in rows]
+    assert tiers == sorted(tiers), (tiers, out)
+    first = rows[:4]
+    assert all(r["urgent"] == 1 and r["plan"] == tail["expedited"] and r["kind"] == 0 and r["scan"] == 2 for r in first), out
+    assert [r["slot"] for r in first] == [0, 1, 2, 3], out                             # the workers' end: slot 0 up
+    assert sum(1 for t in tiers if t == 2) == 2 * 3, (tiers, out)                       # 2 factions x 3 slots with a known phase
+
+
+@pytest.mark.parametrize("workers", [1, 3])
+def test_a_loading_faction_is_shared_with_the_workers_and_stays_exact(tmp_path, exe, workers):
+    """The game thread loading a faction: its four native bakes are expedited, the workers released, and the game
+    thread looks them up from slot 3 down -- each one a hit (a worker finished it), a wait on a running one, or taken
+    over (still queued): never a wrong result, never left undone."""
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "share", 40, 2, d / "pal.bin", "hive", workers=workers)
+    c = kv(out)
+    assert c["workers"] == workers and c["seen"] == 4, (out, log)
+    assert c["hits"] + c["taken"] == 4 and c["other"] == 0 and c["mismatch"] == 0, (out, log)
+    assert c["final_mismatch"] == 0 and c["final_missing"] == 0, (out, log)
+
+
+def test_the_load_hook_measures_all_four_then_shares_then_bakes_from_the_last():
+    """portrait.cpp OnFactionArtLoadedInner: every slot's measured parameters reach the pre-bake (re-keying a wrong
+    prediction) BEFORE Expedite marks the faction's natives, and the game thread then bakes slot 3 down to 0 while
+    the workers take slot 0 up (Pick ranks an expedited faction's slots in index order)."""
+    src = (ROOT.parent / "src" / "uimod" / "src" / "portrait.cpp").read_text(encoding="utf-8")
+    body = src[src.index("void OnFactionArtLoadedInner(int f)"):src.index("void OnFactionArtLoaded(int f)")]
+    i_rep = body.index("prewarm::ReportMeasured(g_factionName[f], s, st.bright, st.ratio);")
+    i_exp = body.index("prewarm::Expedite(g_factionName[f]);")
+    i_bake = body.index("for (int s = 3; s >= 0; --s)")
+    assert i_rep < i_exp < i_bake < body.index("BakeSlot(f, s);")
+    assert body.count("BakeSlot(") == 1, "one bake loop, after the measuring loop"
+    pw = (ROOT.parent / "src" / "uimod" / "src" / "prewarm.cpp").read_text(encoding="utf-8")
+    assert "const long slotRank = tier == kTierUrgent ? e->slot : kSlotRank[e->slot];" in pw
+
+
+def test_workers_keep_one_lanczos_pass_per_enlarge(tmp_path, exe):
+    """The phases of one enlarge share a Lanczos pass (each worker's resample cache): a worker prefers the siblings
+    of its own last job and avoids those of a job another worker is running, so three workers run about as many
+    passes as one (audit 2026-11-08: +67% without this).  Slack for the interleavings the order cannot prevent."""
+    d = game(tmp_path, exe, TWO)
+    one = kv(probe(d, "run", 40, 2, d / "pal.bin", workers=1)[0])["resamples"]
+    three = kv(probe(d, "run", 40, 2, d / "pal.bin", workers=3)[0])["resamples"]
+    assert one > 0 and three <= one + 8, (one, three)
+
+
+# ---------------------------------------------------------------------------------------------- 5. the CPUs it may use
+# (2026-11-08) DDrawCompat, the ddraw.dll of a GOG install, pins the game process to ONE CPU by default (CpuAffinity
+# = 1): a thread cannot leave its process's CPU set, so three workers took turns on that core and finished no sooner
+# than one.  The worker count comes from the cores the PROCESS may use.
+
+def test_cores_to_workers_rule(exe):
+    r = subprocess.run([str(exe), "workersfor"], capture_output=True, text=True, check=True)
+    assert r.stdout.split() == ["1", "1", "1", "1", "2", "3", "3", "3", "3"], r.stdout   # cores - 2, in 1..3
+
+
+def test_a_process_pinned_to_one_cpu_gets_one_worker(tmp_path, exe):
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "affinity", 1, 40, 2, d / "pal.bin")
+    c = kv(out)
+    assert c["cores"] == 1 and c["workers"] == 1, (out, log)
+    assert c["hits"] == c["entries"] > 0 and c["mismatch"] == 0 and c["missing"] == 0, (out, log)
+
+
+def test_an_unpinned_process_counts_its_physical_cores(tmp_path, exe):
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "affinity", 0, 40, 2, d / "pal.bin")
+    c = kv(out)
+    assert c["cores"] >= 1 and c["workers"] == min(3, max(1, c["cores"] - 2)), (out, log)
+    if own_cpus() >= 10:                                # >= 5 cores even with SMT: an unpinned process gets all three
+        assert c["workers"] == 3, (out, log)
+    assert c["mismatch"] == 0 and c["missing"] == 0, (out, log)
+
+
+def test_a_process_pinned_to_two_cpus_gets_one_worker(tmp_path, exe):
+    """Two CPUs are at most two cores (one, if they are a core's two threads): one worker either way."""
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "affinity", 2, 40, 2, d / "pal.bin")
+    c = kv(out)
+    assert 1 <= c["cores"] <= 2 and c["workers"] == 1, (out, log)
+
+
+def test_the_run_logs_its_timing_itself(tmp_path, exe):
+    """The done line comes from the last worker out (no portrait draw may come to drain the ring: the main menu), with
+    the moment every native bake was ready -- what a save load needs."""
+    d = game(tmp_path, exe, TWO)
+    out, log = probe(d, "run", 40, 2, d / "pal.bin")
+    m = re.search(r"prewarm done in (\d+) ms \(every native bake ready at (\d+) ms; 1 worker\): (\d+) results", log)
+    assert m, log
+    total, natives, results = map(int, m.groups())
+    assert 0 < natives <= total and results == kv(out)["entries"], log
+
+
+def own_cpus() -> int:
+    """The CPUs THIS process may use (a test runner pinned to fewer than the machine's must not expect all three)."""
+    import ctypes
+    proc, system = ctypes.c_size_t(), ctypes.c_size_t()
+    k32 = ctypes.windll.kernel32
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    if not k32.GetProcessAffinityMask(ctypes.c_void_p(k32.GetCurrentProcess()), ctypes.byref(proc), ctypes.byref(system)):
+        return os.cpu_count() or 0
+    return bin(proc.value).count("1")
+
+
+@pytest.mark.parametrize("mask,cores", [("1", 1), ("3", 1), ("5", 2), ("F", 2), ("3C", 2), ("FF", 4),
+                                        ("FFFFFFFF", 16), ("0", 0)])
+def test_folded_core_masks_count_each_core_once(exe, mask, cores):
+    """A 32-bit process on a 64-thread machine sees each core's mask twice (WOW64 folds CPUs 32..63 onto 0..31): each
+    distinct mask is one core, and a pin of one core's two threads (0x3) is one core.  Machine-independent: the
+    harness feeds CountCores a synthetic folded table."""
+    r = subprocess.run([str(exe), "countcores", mask], capture_output=True, text=True, check=True)
+    assert int(r.stdout.split()[0]) == cores, r.stdout

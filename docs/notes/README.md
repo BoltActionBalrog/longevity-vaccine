@@ -18,7 +18,7 @@ own setup stay private.
 Addresses are for the PRACX-patched GOG binary the mod targets. `g` is the runtime
 scale (16 = the native 1024x768 layout); `s(v)` is `floor(v*g/16)`.
 
-## Lessons (92)
+## Lessons (93)
 
 A rule learned the hard way, with the failure that taught it.
 
@@ -31,6 +31,7 @@ A rule learned the hard way, with the failure that taught it.
 - [feedback-changelog-vanilla-baseline](feedback-changelog-vanilla-baseline.md): CHANGELOG baseline is VANILLA, not our last build — never log fixes to our own unreleased regressions, and don't itemize every element we scale
 - [feedback-copied-gate-needs-own-rationale](feedback-copied-gate-needs-own-rationale.md): A guard copied from a sibling thunk (count > 1, type ==, etc.) is a bug unless the NEW site has its own vanilla reason for it
 - [feedback-cut-thunk-flag-liveness](feedback-cut-thunk-flag-liveness.md): Cut/detour thunks must preserve EFLAGS — vanilla keeps flags live across flag-neutral instructions; a thunk replacing a neutral original must be pushfd/popfd flag-transparent
+- [feedback-ddrawcompat-affinity](feedback-ddrawcompat-affinity.md): DDrawCompat (the GOG install's ddraw.dll, v0.5.4) pins the game process to ONE CPU and swallows kernel32 SetProcessAffinityMask process-wide; children inherit the pin -- use NtSetInformationProcess and read the mask back
 - [feedback-device-write-contaminates-second-pass](feedback-device-write-contaminates-second-pass.md): A thunk that stores a DEVICE value in a field the engine re-reads in a later NATIVE-space pass corrupts that pass; key chrome on the content's own anchor instead of correcting the measure
 - [feedback-dither-no-resample-on-upscale](feedback-dither-no-resample-on-upscale.md): scaling a 1px-scanline dither sprite — NN AND bilinear both band on upscale; reproduce the pattern at native density instead
 - [feedback-dither-pair-ambiguity](feedback-dither-pair-ambiguity.md): a dither-pair INDEX can belong to multiple pairs (0x41 pairs with 0xC4, 0xC6, 0x54) or be a solid fill — key a pair-remap on the pair-MATE's presence in the SOURCE art (content-keyed per blit), never remap a shared index blanket

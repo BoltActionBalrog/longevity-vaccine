@@ -19,9 +19,9 @@ the real Controller, so these tests replay message sequences and check the windo
    user's own actions (a mode picked, leaving and coming back) end a wait for a vanished monitor;
 4. PRACX's own SetWindowed(false) still converges (once; a lost converge is re-posted when its latch expires);
 5. the backdrop follows the window's monitor; storms; the escape hotkey; a Windows scaling change; the model gaps
-   the audit listed (deactivation minimise, a hung thread under the watchdog, stale probes, a monitor list that
-   changes after its notice, a non-foreground boot);
-6. the watchdog's decision (release only on a real hang, stalls measured), the GPU device life (quiet gate, back-off),
+   the audit listed (deactivation minimise, a stalled game thread, the hotkey under one, stale probes, a monitor
+   list that changes after its notice, a non-foreground boot);
+6. the watchdog's decision (stalls measured, never a release on one), the GPU device life (quiet gate, back-off),
    the backdrop owner decided once, the hotkey parser;
 7. the source facts the DLL relies on.
 """
@@ -703,35 +703,72 @@ def test_escape_holds_everything_off_until_activated(exe):
     assert any(line.startswith("escape: hotkey") for line in logs)
 
 
-def test_hung_thread_under_the_watchdog_and_stale_probes(exe):
-    """A hung game thread: the watchdog releases the clip and the backdrop for real, but its leave-topmost request is
-    queued to that thread and waits (the documented limit). When it runs again, the stale probes it answers arm the
-    timer once and the state is re-stated; nothing storms."""
+def test_a_stalled_game_thread_keeps_everything_and_stale_probes_do_nothing(exe):
+    """A game thread busy for seconds (a late-game AI turn), as the WINDOW sees it: it keeps its band, its clip and
+    its backdrop through the stall, and the stale probes it answers afterwards arm no timer (nothing was released,
+    nothing to re-state); nothing storms. The script harness has no watchdog model, so that the watchdog itself
+    releases nothing is pinned by test_watchdog_never_releases_even_on_a_long_stall (its state machine) and
+    test_watchdog_probe_loop_only_logs (its loop). (2026-11-08: the old release on Windows' hung test dropped a
+    working game out of the topmost band at every 5 s AI turn.)"""
     d, _ = script(exe, f"""
         {G80}
         bb 1600 1200
         boot
+        dump before
         hang
-        hang-release
+        wait 10000
         dump hung
-        wait 1000
-        dump still_hung
         resume
         probe
         probe
         probe
         dump resumed
         wait 200
-        dump restated
+        dump after
+    """)
+    b = d["before"]
+    for k in ("hung", "resumed", "after"):
+        s = d[k]
+        assert (s["topmost"], s["clip"], s["bd"]) == (b["topmost"], b["clip"], b["bd"]) == (1, 1, 1), (k, s)
+    assert d["resumed"]["timer"] == 0 and d["resumed"]["queue"] == 0
+
+
+def test_escape_under_a_stalled_game_thread(exe):
+    """The user's way out of a game thread that truly hangs: the hotkey frees the pointer and the backdrop at once
+    (the watchdog thread's own work); the leave-topmost request waits for the game thread (the documented limit)."""
+    d, _ = script(exe, f"""
+        {G80}
+        bb 1600 1200
+        boot
+        hang
+        escape
+        dump hung
+        resume
+        dump resumed
+        probe
+        probe
+        probe
+        dump probed
+        wait 200
+        dump after
     """)
     h = d["hung"]
-    assert h["clip"] == 0 and h["bd"] == 0
-    assert h["topmost"] == 1, "a hung window keeps its band: SWP_ASYNCWINDOWPOS waits for the hung thread"
-    assert d["still_hung"]["topmost"] == 1
-    r = d["resumed"]
-    assert r["timer"] == 1 and r["queue"] == 0
-    s = d["restated"]
-    assert s["topmost"] == 1 and s["clip"] == 1 and s["bd"] == 1 and s["timer"] == 0
+    assert h["clip"] == 0 and h["bd"] == 0 and h["topmost"] == 1, h
+    assert d["resumed"]["topmost"] == 0
+    # the release set the re-state flag: the first answered probe arms the timer once, the stale ones nothing
+    p = d["probed"]
+    assert p["timer"] == 1 and p["queue"] == 0, p
+    a = d["after"]
+    assert a["timer"] == 0 and (a["topmost"], a["clip"], a["bd"]) == (0, 0, 0), a   # held off until re-activated
+
+
+def test_watchdog_probe_loop_only_logs():
+    """The probe loop in WatchThread touches nothing but the log: no Release, no clip / window call, no re-state flag."""
+    loop = WATCH[WATCH.index("vidsafety::Watch watch;"):]
+    loop = loop[:loop.index("if (g_hotVk) UnregisterHotKey")]
+    for banned in ("Release(", "ClipCursor", "ShowWindow", "SetWindowPos", "g_resync"):
+        assert banned not in loop, banned
+    assert "watch.Step(GetTickCount(), answered) == vidsafety::kWatchStall" in loop
 
 
 def test_scaling_change_on_the_game_monitor(exe):
@@ -827,39 +864,35 @@ def watch(exe, rows: list[str]) -> list[str]:
     return run(exe, "watch", "\n".join(rows) + "\n").strip().split("\n")
 
 
-def test_watchdog_releases_only_on_a_real_hang(exe):
-    # t danger answered hung -- a 4 s AI turn: no release, one stall line
-    rows = ["1000 1 1 0"] + [f"{1000 + 1000 * i} 1 0 0" for i in range(1, 5)] + ["6000 1 1 0"]
+def test_watchdog_measures_a_stall(exe):
+    # t answered -- a 4 s AI turn: one stall line, with its length
+    rows = ["1000 1"] + [f"{1000 + 1000 * i} 0" for i in range(1, 5)] + ["6000 1"]
     out = watch(exe, rows)
     assert all(line.startswith("nothing") for line in out[:5]), out
     assert out[5].startswith("stall") and "stall=4500" in out[5], out
 
 
-def test_watchdog_hang_after_five_seconds(exe):
-    rows = ["1000 1 1 0"] + [f"{1000 + 1000 * i} 1 0 0" for i in range(1, 8)] + ["9000 1 1 0"]
+def test_watchdog_never_releases_even_on_a_long_stall(exe):
+    """An 11.5 s AI turn (the 2026-11-08 save): measured once when it ends, nothing else -- the watchdog has no release
+    action any more. (Windows' own hung test is not an input: it says "not responding" at 5 s of a working turn.)"""
+    rows = ["1000 1"] + [f"{1000 + 1000 * i} 0" for i in range(1, 12)] + ["13000 1"]
     out = watch(exe, rows)
-    acts = [line.split()[0] for line in out]
-    assert acts[:6] == ["nothing"] * 6, out                 # missed since 1500 (the failed probe's send): 4500 at 6000
-    assert acts[6] == "release", out                       # 5500 at 7000
-    assert acts.count("release") == 1, "once per hang"
-    assert out[-1].startswith("resumed") and "stall=7500" in out[-1]
-
-
-def test_watchdog_windows_hung_test_is_enough(exe):
-    out = watch(exe, ["1000 1 1 0", "2000 1 0 1"])
-    assert out[1].startswith("release")
-
-
-def test_watchdog_never_releases_without_danger_but_measures(exe):
-    rows = ["1000 0 1 0"] + [f"{1000 + 1000 * i} 0 0 0" for i in range(1, 10)] + ["11000 0 1 0"]
-    out = watch(exe, rows)
-    assert not any(line.startswith("release") for line in out)
-    assert out[-1].startswith("stall")
+    assert [line.split()[0] for line in out] == ["nothing"] * 12 + ["stall"], out
+    assert "stall=11500" in out[-1]                         # missed since 1500 (the first failed probe's send)
 
 
 def test_watchdog_short_gaps_are_not_logged(exe):
-    out = watch(exe, ["1000 1 1 0", "2000 1 0 0", "2100 1 1 0"])
+    out = watch(exe, ["1000 1", "2000 0", "2100 1"])
     assert out[2].startswith("nothing"), "a 600 ms gap is below kWatchStallLogMs"
+
+
+def test_watchdog_releases_only_on_a_display_event_or_the_hotkey():
+    """Release has exactly two callers: the escape hotkey and a counted display event. Windows' hung test is not
+    consulted (it called every 5 s AI turn a hang), and a stall only logs."""
+    assert "IsHungAppWindow" not in WATCH and "g_isHung" not in WATCH
+    calls = re.findall(r"\bRelease\(([^;]*)\);", WATCH)
+    assert sorted(c.split(",")[0].strip() for c in calls) == ['"escape hotkey"', "vidsafety::EventName(msg"], calls
+    assert "kWatchRelease" not in SAFE and "kWatchHangMs" not in SAFE
 
 
 def gpu(exe, cmds: str) -> list[str]:
@@ -1032,6 +1065,18 @@ def test_watchdog_calls_no_engine_code_and_never_blocks_on_the_game_window():
     assert "queued to the game thread" in WATCH and "Ctrl+Alt+Del" in WATCH, "the hang limit is documented"
 
 
+def test_window_ghosting_is_off_before_any_window():
+    """Windows swaps a window it calls "not responding" (5 s without a message pump -- a late-game AI turn) for a
+    frozen ghost copy; the game turns that off, in PreInit (before PRACX makes a window) and again in Init for the
+    one-phase chain. Resolved at run time: no new static import."""
+    pre = _body(INIT, 'extern "C" void __stdcall PreInit(HMODULE prax)')
+    ini = _body(INIT, 'extern "C" void __stdcall Init(HMODULE self)')
+    assert pre.index("EnsureNoGhosting();") < pre.index("VidModePreInit(prax);")
+    assert "EnsureNoGhosting();" in ini
+    fn = _body(INIT, "void EnsureNoGhosting()")
+    assert 'GetProcAddress(user32, "DisableProcessWindowsGhosting")' in fn and "static bool done" in fn
+
+
 def test_legacy_switch_is_marked():
     inst = _body(VID, "void InstallVidMode(bool pracx)")
     assert "HookDisplaySwitch(px, &MarkedDisplaySwitch)" in inst
@@ -1048,7 +1093,7 @@ def test_log_lines_carry_time_and_pid_are_whole_and_bounded():
 
 def test_constants():
     assert "constexpr uint32_t kQuietMs = 3000;" in SAFE and "constexpr uint32_t kGpuQuietMs = 2000;" in SAFE
-    assert "constexpr uint32_t kConvergeLatchMs = 500;" in SAFE and "constexpr uint32_t kWatchHangMs = 5000;" in SAFE
+    assert "constexpr uint32_t kConvergeLatchMs = 500;" in SAFE
     assert "constexpr uint32_t kRecheckMs = 3000;" in SAFE and "constexpr uint32_t kWatchStallLogMs = 1000;" in SAFE
     assert 'constexpr const char* kDefaultHotkey = "Ctrl+Alt+Shift+End";' in SAFE
     assert "return n <= 1 ? 2000u : n == 2 ? 10000u : 60000u;" in SAFE

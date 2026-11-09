@@ -10,17 +10,18 @@
 //     them) and releases at once on a real topology change -- a device / work-area notice only when the monitor set
 //     changed, never PRACX's own display-mode switch;
 //   * probes the game thread every kWatchPeriodMs (a WM_NULL our subclass answers, never PRACX's or the engine's
-//     code), and acts only while it holds the clip, a topmost game window or a topmost backdrop. It logs every stall of
-//     kWatchStallLogMs or more with its length, and releases only on a real hang: Windows' own hung test, or
-//     kWatchHangMs without an answer (AI turns, map generation and loads stop the game thread for seconds);
-//   * owns the escape hotkey ([UIMod] EscapeHotkey, default Ctrl+Alt+Shift+End): release + minimise.
+//     code) and logs every stall of kWatchStallLogMs or more with its length. A stall releases NOTHING: AI turns, map
+//     generation and loads stop the game thread pumping for seconds while it keeps drawing, and Windows' own hung
+//     test calls a 5 s AI turn "not responding" (vidsafety.h, the watchdog section);
+//   * owns the escape hotkey ([UIMod] EscapeHotkey, default Ctrl+Alt+Shift+End): release + minimise -- the user's
+//     way out of a game thread that truly hangs.
 //
 // "Release" = ClipCursor(nullptr) when the clip is ours (works from any thread) and the backdrop hidden -- both for
 // real, at once. The game window is also asked to leave the topmost band and (hotkey) to minimise, but those
 // requests (SWP_ASYNCWINDOWPOS, ShowWindowAsync) are queued to the game thread: under a real hang they only happen
-// when it runs again. Against a hung topmost game window the user has Ctrl+Alt+Del -> Task Manager -> End task (and
-// Windows' own ghost window after ~5 s). The game thread re-states its own state when it answers again. Nothing here
-// calls engine or PRACX code.
+// when it runs again. Against a hung topmost game window the user has Ctrl+Alt+Del -> Task Manager -> End task
+// (Windows' ghost window is off for this process: init.cpp, so a busy game is never swapped for a frozen copy). The
+// game thread re-states its own state when it answers again. Nothing here calls engine or PRACX code.
 
 #include "vidwatch.h"
 #include "gpuscale.h"
@@ -48,9 +49,6 @@ char g_hotName[48] = {};
 constexpr int kHotkeyId = 0x5AFE;
 vidsafety::Monitor g_known[vidsafety::kMaxMonitors];   // the monitor set as this thread last accepted it
 int g_nKnown = -1;
-
-using FIsHung = BOOL(WINAPI*)(HWND);
-FIsHung g_isHung = nullptr;
 
 void Log(const char* fmt, ...)
 {
@@ -185,28 +183,15 @@ DWORD WINAPI WatchThread(LPVOID)
         lastProbe = now;
         const HWND game = g_game;
         if (!game || !IsWindow(game)) continue;
-        const bool danger = Danger();      // probed always (stalls are measured in every mode); released only with danger
         DWORD_PTR res = 0;
         // no SMTO_BLOCK: while it waits this thread still answers the game thread's calls on the backdrop. A probe
         // that timed out is still delivered when the game thread runs again (a stale probe): the subclass answers it
-        // without side effects beyond arming its own timer once.
+        // without side effects beyond arming its own timer once, and only after a release (hotkey / display event).
         const bool answered = SendMessageTimeoutA(game, WM_NULL, kWatchProbeW, kWatchProbeL, SMTO_ABORTIFHUNG,
                                                   vidsafety::kWatchProbeMs, &res) != 0;
-        const bool hung = g_isHung && g_isHung(game);
-        switch (watch.Step(GetTickCount(), danger, answered, hung)) {
-        case vidsafety::kWatchRelease:
-            Release(hung ? "the game window is hung (Windows' own test)" : "the game thread has not answered for 5 s", false);
-            break;
-        case vidsafety::kWatchResumed:
-            Log("the game thread answers again after %lu ms -> it re-states its own clip / topmost / backdrop",
-                static_cast<unsigned long>(watch.stallMs));
-            break;
-        case vidsafety::kWatchStall:
+        // measured only: a stall releases nothing (vidsafety.h, the watchdog section)
+        if (watch.Step(GetTickCount(), answered) == vidsafety::kWatchStall)
             Log("the game thread did not answer for %lu ms (nothing released)", static_cast<unsigned long>(watch.stallMs));
-            break;
-        default:
-            break;
-        }
     }
     if (g_hotVk) UnregisterHotKey(g_ctl, kHotkeyId);
     if (mine && g_backdrop) {
@@ -290,7 +275,6 @@ bool VidWatchStart(HWND game, volatile LONG* clipped, volatile LONG* resyncOwed,
         const bool off = !hotkey || !hotkey[0] || !_stricmp(hotkey, "off") || !_stricmp(hotkey, "none") || !strcmp(hotkey, "0");
         if (!off) Log("[UIMod] EscapeHotkey=%s not understood (e.g. Ctrl+Alt+Shift+End; a key needs a modifier) -> off", hotkey);
     }
-    if (const HMODULE u = GetModuleHandleA("user32.dll")) g_isHung = reinterpret_cast<FIsHung>(GetProcAddress(u, "IsHungAppWindow"));
     g_stop = CreateEventA(nullptr, TRUE, FALSE, nullptr);
     g_ready = CreateEventA(nullptr, TRUE, FALSE, nullptr);
     const HANDLE th = g_stop && g_ready ? CreateThread(nullptr, 64 * 1024, WatchThread, nullptr, 0, nullptr) : nullptr;
@@ -309,8 +293,8 @@ bool VidWatchStart(HWND game, volatile LONG* clipped, volatile LONG* resyncOwed,
         Log("did not come up in 2 s -> the backdrop stays on the game thread");
         return false;
     }
-    Log("up (probes the game thread every %u ms while it holds the pointer or a topmost window; releases after %u s "
-        "without an answer)", static_cast<unsigned>(vidsafety::kWatchPeriodMs), static_cast<unsigned>(vidsafety::kWatchHangMs / 1000));
+    Log("up (releases on a display change or the escape hotkey; probes the game thread every %u ms and logs its "
+        "stalls, releasing nothing on one)", static_cast<unsigned>(vidsafety::kWatchPeriodMs));
     return true;
 }
 

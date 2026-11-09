@@ -1,7 +1,7 @@
 // Background pre-bake of the replacement leader portraits (see prewarm.cpp).
 //
 // The game thread snapshots everything a bake reads (palette, scale, scan mode) at the first faction load and
-// starts ONE worker.  The worker decodes every replacement image, predicts each faction's scanline parameters
+// starts the workers (the physical cores the process may use - 2, at most 3; 1 under DDrawCompat's one-CPU pin).  The lead decodes every replacement image, predicts each faction's scanline parameters
 // from its vanilla sheet (<faction>.pcx, cut exactly as load_faction_art cuts it) and fills a cache of FINISHED
 // portrait_law::FromRgb results -- the native bakes and the enlarges at every stripe phase of the current scale.
 // The game thread's own law calls look the cache up through ResampleCache::GetFit: a hit is the law's own output
@@ -67,10 +67,17 @@ inline void FormatHotPhases(const int hot[kSlots], char* out, size_t n)
     }
 }
 
-// Start the worker (game thread, once; later calls are ignored).  False if it could not be started.
+// Start the workers (game thread, once; later calls are ignored).  False if they could not be started.
 bool Start(const Snapshot& s);
 bool Started();
 int  SnapshotG();
+int  Workers();                               // the worker count this machine got (0 before Start)
+int  UsableCoreCount();                       // the physical cores the process may use (0 before Start / not measured)
+
+// The game is loading this faction file now and needs its native bakes at once (game thread, after ReportMeasured
+// for its slots): they go to the front of the queue and idle workers are woken, so the game thread's own lookups
+// (which take over whatever is still queued) and the workers share the four bakes.
+void Expedite(const char* name);
 
 // The hook's MEASURED scanline parameters of a faction file's slot (game thread).  They replace the prediction:
 // queued jobs are re-keyed, finished results under a wrong prediction are dropped.
@@ -107,10 +114,13 @@ void TestFaultEvery(int n);                   // every n-th job raises an access
 void TestDieLocked();                         // the worker exits inside its next locked region: the lock is orphaned
 void TestFaultOutsideJob();                   // the worker raises an access violation outside any job guard (thunk level)
 void TestDieInJob(int n);                     // the n-th job: the worker exits mid-job, holding nothing (a death during a wait)
+void TestWorkers(int n);                      // before Start: use n workers instead of the machine's count
+void TestPause(bool on);                      // workers wait before every pick (the queue can be inspected / expedited first)
 bool Dead();                                  // the game-thread entries have given the worker up (synchronous path)
 struct EntryInfo {
     uint64_t imgId, palHash; portrait_law::Rect crop; int tw, th, scan, bright, ratio, y0, rows, slot, kind, state;
     size_t bytes;
+    int pickNo, urgent, phase, plan;           // the order a worker picked it in (0 = never), Expedite's mark, its phase / faction
 };
 void DebugEntries(std::vector<EntryInfo>* out);
 // The sheet reader on its own: (bright, ratio) of slot `slot` of <game>\<name>.pcx cut the engine's way, and the

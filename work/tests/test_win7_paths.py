@@ -75,8 +75,57 @@ def test_desktop_folders_come_from_shell32_not_powershell(monkeypatch):
     assert "SHGetFolderPathW" in body and "_ps(" not in body, "no PowerShell for the lookup (its prose may mention it)"
 
 
+def _code(src: str) -> str:
+    """C++ with every comment removed (// and /* */): a comment can never satisfy a source test."""
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return "\n".join(ln.split("//", 1)[0] for ln in src.splitlines())
+
+
 def test_update_check_logs_a_failed_job_assignment():
-    src = (SRC / "update.cpp").read_text(encoding="utf-8", errors="replace")
+    """The worker records the failure (it never logs, and the child must be resumed whatever happens); LogResult says
+    it once, with the error."""
+    raw = (SRC / "update.cpp").read_text(encoding="utf-8", errors="replace")
+    src = _code(raw)
     i = src.index("AssignProcessToJobObject(job, pi.hProcess)")
-    block = src[i:i + 700]
-    assert 'Log("kill-on-close job not available' in block and "Windows 7" in block
+    block = src[i:src.index("ResumeThread(pi.hThread)", i)]
+    assert "r->jobErr = GetLastError();" in block
+    assert "Windows 7" in raw[raw.index("AssignProcessToJobObject(job, pi.hProcess)"):][:1200]
+    log = src[src.index("void LogResult(const Result& r)"):]
+    log = log[:log.index("\n}\n")]
+    assert 'Log("kill-on-close job not available (error %lu' in log and "r.jobErr" in log
+
+
+def test_update_children_run_on_every_cpu_not_the_games_pin():
+    """DDrawCompat pins the game process to one CPU by default and children inherit the mask: the update check took
+    24-32 s at a cold launch and hit its 30 s deadline 3 times in 11 (2026-11-08).  Both children (the check and the
+    updater hand-off) are created SUSPENDED, widened to the system's CPUs, and only then resumed -- the check after it
+    is in its kill-on-close job.  A missing resume would leave every check a 30 s timeout, so the order is pinned."""
+    src = (SRC / "update.cpp").read_text(encoding="utf-8", errors="replace")
+    code = _code(src)                                                           # code only: a comment cannot satisfy it
+    widen = code[code.index("void WidenAffinity(HANDLE process"):]
+    widen = widen[:widen.index("\n}\n")]
+    # DDrawCompat hooks kernel32's SetProcessAffinityMask process-wide and no-ops it while its pin is on (audit
+    # 2026-11-08, probed with the game's ddraw.dll): the widen goes through ntdll, and the mask is read back
+    assert "SetProcessAffinityMask" not in code, "DDrawCompat swallows it: use NtSetInformationProcess"
+    assert '"NtSetInformationProcess"' in widen and "kProcessAffinityMask = 21" in widen
+    assert "setInfo(process, kProcessAffinityMask, &want, sizeof want);" in widen
+    assert "DWORD_PTR want = proc;" in widen, "the system set (GetProcessAffinityMask's 2nd slot), not the pinned one"
+    assert widen.count("GetProcessAffinityMask(process, &child, &sys)") == 2, "read back before and after"
+    body = code[code.index("void WorkerBody(Job* j, Result* r)"):]
+    body = body[:body.index("\nvoid LogResult(")]
+    assert "CREATE_SUSPENDED" in body[:body.index("CreateProcessW(")]
+    i_widen, i_job = body.index("WidenAffinity(pi.hProcess,"), body.index("AssignProcessToJobObject(job, pi.hProcess)")
+    i_resume = body.index("ResumeThread(pi.hThread)")
+    assert body.index("CreateProcessW(") < i_widen < i_job < i_resume
+    assert "return" not in body[i_widen:i_resume]
+    # the resume is unconditional: the statement before it ends a statement or a block, never an `if (`
+    before = body[:i_resume].rstrip()
+    assert not re.search(r"\bif\s*\([^;{}]*$", before.splitlines()[-1]) or "== static_cast<DWORD>(-1)" in body[i_resume - 40:i_resume + 60]
+    assert body.count("ResumeThread(pi.hThread)") == 1
+    assert "Log(" not in body, "the worker never logs (LogResult says it): nothing may delay the resume"
+    log = code[code.index("void LogResult(const Result& r)"):]
+    assert "check ran on CPUs 0x%llx" in log[:log.index("\n}\n")]
+    hand = code[code.index("bool SpawnUpdater("):]
+    hand = hand[:hand.index("\n}\n")]
+    assert "CREATE_NEW_CONSOLE | CREATE_SUSPENDED" in hand
+    assert hand.index("WidenAffinity(pi.hProcess,") < hand.index("ResumeThread(pi.hThread)") < hand.index("CloseHandle(pi.hThread);")

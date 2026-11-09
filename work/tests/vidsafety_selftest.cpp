@@ -2,7 +2,7 @@
 //
 //   t script            stdin = a scenario (below); stdout = one "dump" line per `dump`, plus every controller log line
 //   t hotkey <text>     -> "ok mods=<n> vk=<n> name=<formatted>" | "off"
-//   t watch             stdin = lines "<t> <danger> <answered> <hung>"; stdout = one action per line
+//   t watch             stdin = lines "<t> <answered>"; stdout = one action per line
 //   t gpu               stdin = GpuLife commands; stdout = the state after each
 //   t owner <claims>    claims = a sequence of "watchdog" / "game" (who claims the backdrop, in order) -> the owner after each
 //
@@ -25,9 +25,8 @@
 //                                          the minimise on leaving Fullscreen and the restore on coming back)
 //   iconic 0|1    movie 0|1
 //   escape                                 the escape hotkey (watchdog thread: clip off, backdrop hidden, queued leave-topmost)
-//   hang                                   the game thread stops running (it handles no message until `resume`)
-//   hang-release                           the watchdog releases a HUNG game thread: clip off, backdrop hidden; the
-//                                          leave-topmost request stays queued (not applied) until `resume`
+//   hang                                   the game thread stops running (it handles no message until `resume`); the
+//                                          watchdog only measures it (vidsafety.h): no command of its own
 //   resume                                 the game thread runs again: the queued requests apply
 //   probe                                  a watchdog probe (possibly a stale one) reaches the subclass
 //   drag <l> <t> <r> <b>                   the user drags the window there (WM_EXITSIZEMOVE -> NoteHome)
@@ -403,9 +402,6 @@ struct Fake final : Effects {
             else { topmost = false; Placement(); }                   // its queued leave-topmost arriving
         } else if (c == "hang") {
             hung = true;
-        } else if (c == "hang-release") {
-            clipOn = false; bdVisible = false; resyncOwed = true;
-            queuedNoTopmost = true;                                  // SWP_ASYNCWINDOWPOS: waits for the hung thread
         } else if (c == "resume") {
             hung = false;
             if (queuedNoTopmost) { queuedNoTopmost = false; topmost = false; Placement(); }
@@ -469,12 +465,15 @@ int Watchdog()
 {
     Watch w;
     unsigned t;
-    int d, a, h;
-    while (std::scanf("%u %d %d %d", &t, &d, &a, &h) == 4) {
-        const WatchAction act = w.Step(t, d != 0, a != 0, h != 0);
-        std::printf("%s released=%d missing=%d stall=%u\n",
-                    act == kWatchRelease ? "release" : act == kWatchResumed ? "resumed" : act == kWatchStall ? "stall" : "nothing",
-                    w.released ? 1 : 0, w.missing ? 1 : 0, act == kWatchResumed || act == kWatchStall ? w.stallMs : 0u);
+    int a;
+    while (std::scanf("%u %d", &t, &a) == 2) {
+        const WatchAction act = w.Step(t, a != 0);
+        // any other action (a release reintroduced) prints as "act=<n>": the watch tests see it
+        if (act == kWatchStall || act == kWatchNothing)
+            std::printf("%s missing=%d stall=%u\n", act == kWatchStall ? "stall" : "nothing", w.missing ? 1 : 0,
+                        act == kWatchStall ? w.stallMs : 0u);
+        else
+            std::printf("act=%d missing=%d stall=%u\n", static_cast<int>(act), w.missing ? 1 : 0, w.stallMs);
     }
     return 0;
 }
