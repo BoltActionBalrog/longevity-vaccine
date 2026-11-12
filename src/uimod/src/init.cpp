@@ -35,6 +35,9 @@
 #include "pssphere.h"
 #include "musicfix.h"
 #include "riotfix.h"
+#include "basehd.h"
+#include "objecthd.h"
+#include "menuhd.h"
 #include "blinkfix.h"
 #include "cursorscale.h"
 #include "hudmovesfix.h"
@@ -392,6 +395,24 @@ extern "C" void __stdcall Init(HMODULE self)
     // Base-game bug: the selected unit's blink regenerated only its own tile, leaving a sliver of any sprite
     // wider than the tile drawn solid. Both exes. See blinkfix.cpp.
     InstallBlinkFix();
+
+    // Drop-in HD base sprites: <game>\bases\<faction>_x8.pcx (the base block of <faction>.pcx at 8x) replaces that
+    // faction's base icons wherever a base is drawn. Nothing is patched without a pack on disk; "HD Base Sprites" in
+    // Longevity Mod Preferences ([UIMod] BaseHD) switches it live. Two byte-checked E8 retargets, cave-free, both
+    // exes. See basehd.cpp.
+    InstallBaseHd();
+
+    // Drop-in HD map objects: <game>\terrain\ter1_x8.pcx / ter1wreck_x8.pcx / units_x8.pcx (TER1, TER1WRECK and
+    // UNITS.PCX at 8x) replace the monolith, pods, resources, terraforming, the Unity wreck and the native life /
+    // artifact sprites on the map. Nothing is patched without a pack; "HD Map Objects" in Longevity Mod Preferences
+    // ([UIMod] ObjectHD) switches it live. 22 byte-checked E8 retargets (21 in MapWin_gen_terrain_poly + the
+    // native-unit draw), cave-free, both exes. See objecthd.cpp.
+    InstallObjectHd();
+
+    // The HD main menu and planet setup: <game>\menu\hd\ (panorama + custom_planet strips + moons) composed at any
+    // resolution by one uniform scale. Nothing is patched without menu\hd\space_x3.pcx; "HD Main Menu" in Longevity
+    // Mod Preferences ([UIMod] MenuHD) switches it. 13 byte-checked E8 retargets, cave-free, both exes. See menuhd.cpp.
+    InstallMenuHd();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.
     InstallCursorScale();
