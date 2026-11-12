@@ -6,6 +6,7 @@ UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
 ### HD art
 - HD base sprites: an art pack can replace each faction's bases with sharp versions, drawn at exactly the size of the originals at every zoom and on every screen that shows a base. Switch them on and off in the new HD art page of Longevity Mod Preferences (the More button).
+- HD map objects: an art pack can replace the monolith, supply pods, resource specials, terraforming improvements, the Unity wreck and native life (mind worms, sea lurks, spore launchers, fungal towers, alien artifacts) with sharp versions, drawn at exactly the size of the originals at every zoom. "HD Map Objects" on the same HD art page switches them.
 
 ## 1.0.0 -- 2026-11-08
 

@@ -140,6 +140,7 @@
     <ClInclude Include="src\thinkerversion.h" />
     <ClInclude Include="src\basehd.h" />
     <ClInclude Include="src\basehd_law.h" />
+    <ClInclude Include="src\objecthd.h" />
     <ClInclude Include="src\version.h" />
     <ClInclude Include="src\vidsafety.h" />
     <ClInclude Include="src\vidwatch.h" />

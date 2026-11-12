@@ -54,6 +54,7 @@
 #include "modernctl.h"
 #include "update.h"
 #include "basehd.h"
+#include "objecthd.h"
 
 void UimodLog(const char* msg);   // init.cpp: uimod.log + debugger
 void UimodDbg(const char* msg);   // init.cpp: only with [UIMod] DebugLog=1 (developer geometry dumps)
@@ -219,6 +220,7 @@ struct ArtRow { const char* text; bool (*avail)(); int (*get)(); void (*set)(int
 // One line per art pack, in page order; row i has id kArtChkId0 + i. Each setting applies live and is saved with OK.
 const ArtRow kArtRows[] = {
     { "HD Base Sprites", &BaseHdAvailable, &BaseHdGet, &BaseHdSet, &BaseHdSave, kBaseHdDefault },   // basehd.cpp, [UIMod] BaseHD
+    { "HD Map Objects", &ObjectHdAvailable, &ObjectHdGet, &ObjectHdSet, &ObjectHdSave, kObjectHdDefault },   // objecthd.cpp, [UIMod] ObjectHD
 };
 constexpr int  kArtRows_n = static_cast<int>(sizeof kArtRows / sizeof kArtRows[0]);
 static_assert(kArtRows_n <= kArtRowMax, "art row ids 0x7A..0x7F");
