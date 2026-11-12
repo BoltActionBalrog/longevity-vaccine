@@ -42,19 +42,26 @@ def main():
     pimg = pal_image(pal)
     rgb = stock.convert("RGB")
 
-    # panorama: stock columns 0..620 enlarged, then a starfield to 2400 units
-    W, H = 2400 * K, 768 * K
-    pano = Image.new("RGB", (W, H), (0, 0, 0))
-    pano.paste(rgb.crop((0, 0, 620, 768)).resize((620 * K, H), Image.LANCZOS), (0, 0))
-    px = pano.load()
+    # panorama: the stock columns 0..620, then a starfield to 2400 units made at 1x like the stock sky (its star
+    # density, and star colours taken from its own stars), and the whole enlarged the same way, so the seam vanishes
+    src = np.array(rgb).astype(np.uint8)
+    lum = src.astype(int).mean(2)
+    # clean sky only (no suns' glow, no logo): right of the glow, left of the logo, under it
+    patches = [(460, 0, 620, 330), (0, 330, 90, 690), (0, 700, 620, 740)]
+    star_px = np.concatenate([src[y0:y1, x0:x1][lum[y0:y1, x0:x1] > 35] for x0, y0, x1, y1 in patches])
+    density = sum((lum[y0:y1, x0:x1] > 35).sum() for x0, y0, x1, y1 in patches) / \
+        sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in patches)
+    W1, H1 = 2400, 768
+    one = np.zeros((H1, W1, 3), np.uint8)
+    one[:, :620] = src[:, :620]
     rnd = random.Random(1)
-    for _ in range(2600):
-        x, y = rnd.randrange(620 * K, W), rnd.randrange(H)
-        v = rnd.choice((90, 140, 200, 255))
-        for dx in range(rnd.choice((1, 1, 2))):
-            for dy in range(rnd.choice((1, 1, 2))):
-                if x + dx < W and y + dy < H:
-                    px[x + dx, y + dy] = (v, v, v)
+    n = int(density * (W1 - 620) * H1)
+    for _ in range(n):
+        x, y = rnd.randrange(620, W1), rnd.randrange(H1)
+        one[y, x] = star_px[rnd.randrange(len(star_px))]
+        if rnd.random() < 0.12 and x + 1 < W1:           # a few stars are two pixels wide, as in the stock sky
+            one[y, x + 1] = one[y, x] // 2
+    pano = Image.fromarray(one).resize((W1 * K, H1 * K), Image.LANCZOS)
     save(quant(pano, pimg), pal, out / "space_x3.pcx")
 
     for s in (1, 2, 3):
