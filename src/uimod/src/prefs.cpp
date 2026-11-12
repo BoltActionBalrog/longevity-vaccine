@@ -53,6 +53,7 @@
 #include "dragdelay.h"
 #include "modernctl.h"
 #include "update.h"
+#include "basehd.h"
 
 void UimodLog(const char* msg);   // init.cpp: uimod.log + debugger
 void UimodDbg(const char* msg);   // init.cpp: only with [UIMod] DebugLog=1 (developer geometry dumps)
@@ -203,7 +204,22 @@ constexpr int  kSliderFrameH  = kSliderFrameRows * kAudioRowPitch + 4;     // 48
 constexpr int  kClickViewChkId = 0x76;   // "Left Click Doesn't Recenter the Map" ([UIMod] ClickKeepsView)
 constexpr int  kBaseViewChkId  = 0x77;   // "Closing a Base Never Recenters Map" ([UIMod] BaseCloseKeepsView)
 constexpr int  kClipChkId      = 0x78;   // "Constrain Mouse to Window" nested under the display-mode row ([UIMod] ConstrainMouse,
-                                         // vidmode.cpp); dimmed and inert outside Fullscreen; next free 0x7A
+                                         // vidmode.cpp); dimmed and inert outside Fullscreen
+// The page's second page, "HD art" (one row per drop-in art pack whose hook is installed), behind the STOCK "More"
+// button (PrefWin_btn_more, id 0x5E: PrefWin_on_command 0x4914B0 flips tab 2 <-> 6 with it, and the show/hide
+// switches 0x48FFB0 / 0x490140 show it on those two tabs only). On our tab we show it ourselves and take its click
+// (WrapCommand); its own case never runs there. Row ids 0x7A..0x7F are the art rows (kArtRows); next free 0x80
+constexpr int  kMoreBtnId   = 0x5E;
+constexpr uintptr_t kVA_MoreBtn = 0x00872140;   // PrefWin_btn_more (PrefWin +0x1A868)
+constexpr int  kArtChkId0   = 0x7A;
+constexpr int  kArtRowMax   = 6;
+struct ArtRow { const char* text; bool (*avail)(); int (*get)(); void (*set)(int); void (*save)(); int def; };
+// One line per art pack, in page order; row i has id kArtChkId0 + i. Each setting applies live and is saved with OK.
+const ArtRow kArtRows[] = {
+    { "HD Base Sprites", &BaseHdAvailable, &BaseHdGet, &BaseHdSet, &BaseHdSave, kBaseHdDefault },   // basehd.cpp, [UIMod] BaseHD
+};
+constexpr int  kArtRows_n = static_cast<int>(sizeof kArtRows / sizeof kArtRows[0]);
+static_assert(kArtRows_n <= kArtRowMax, "art row ids 0x7A..0x7F");
 constexpr uintptr_t kVA_ScrollBarVtbl = 0x00669D58;   // ScrollBar vtable (+0x30 draw = thunk_pref_sbzoom on the patched exe)
 constexpr int  kSbVtblBytes = 0x170;     // its extent: 0x168 GraphicWin + 2 ScrollBar virtuals; FileDlg_vtbl starts at 0x669EC8
 constexpr int  kSbValueOfs = 0xA2C;      // ScrollBar raw position; +0xA20/+0xA24 range, +0xA28 inverted flag
@@ -367,6 +383,7 @@ struct alignas(16) Widgets {
     BYTE scancheck[0xC00];   // the "Add Scanlines" row, nested under "Enable Custom Portraits": ditto
     BYTE airdropcheck[0xC00]; // the "Air Drops Divert Around Unseen Defenders" row (top-level, after the cloak rows): ditto
     BYTE modecheck[kModeCells][0xC00];   // Fullscreen / Borderless / Windowed, side by side on one line: ditto
+    BYTE artcheck[kArtRowMax][0xC00];    // the "HD art" page's rows (kArtRows), built only for an installed pack: ditto
     BYTE slider[0x2200];
     BYTE holdlabel[0xC00];   // "Drag Hold Time": inert FlatButton label, the audio page's row 1
     BYTE holdslider[0x2200]; // its ScrollBar, with a PRIVATE vtable copy (see HoldSliderDraw)
@@ -396,6 +413,10 @@ const char kSubBtnText[] = "Reset Skipped Updates";          // clears every "Do
 const char kCustomChkText[] = "Enable Custom Portraits";        // user wording 2026-11-07, was "Enable User Portraits" ([UIMod] CustomPortraits)
 const char kHdChkText[] = "Use Turovetsky's HD Portrait Pack";   // user wording 2026-10-03, pack renamed 2026-11-06 ([UIMod] HdPortraits)
 bool g_hdRow = false;                                           // the HD row exists (the pack is installed)
+bool g_artRow[kArtRowMax] = {};        // art row i exists (its pack's hook installed; latched at the first build)
+bool g_anyArtRow = false;              // the "HD art" page exists: the More button shows on our tab
+int  g_page = 0;                       // our tab's page: 0 the settings, 1 "HD art" (More flips it; leaving the tab resets it)
+bool g_moreShown = false;              // we showed the stock More button on our tab (we hide it again when leaving)
 const char kScanChkText[] = "Add Scanlines";                    // user wording 2026-09-30 ([UIMod] PortraitScanlines)
 const char kAirdropChkText[] = "Air Drops Divert Around Unseen Defenders";   // [UIMod] AirdropDiversion (aivis.cpp)
 const char* const kModeText[kModeCells] = { "Fullscreen", "Borderless", "Windowed" };   // index = VidMode
@@ -731,7 +752,11 @@ void __fastcall CheckContentDraw(void* self, void* /*edx*/)
     int modeCell = -1;                   // the display-mode cells show the mode the game is RUNNING in, read live
     for (int i = 0; i < kModeCells; ++i)
         if (self == static_cast<void*>(g_w.modecheck[i])) modeCell = i;
-    const bool on = modeCell >= 0 ? VidModeDetect() == modeCell
+    int artRow = -1;                     // the "HD art" page's rows
+    for (int i = 0; i < kArtRows_n; ++i)
+        if (self == static_cast<void*>(g_w.artcheck[i])) artRow = i;
+    const bool on = artRow >= 0 ? kArtRows[artRow].get() != 0
+                  : modeCell >= 0 ? VidModeDetect() == modeCell
                   : aiRow ? AiVisGetLocal() != 0 : cargoRow ? AiVisGetCargoOne() != 0 : markRow ? AiVisGetMark() != 0
                   : modernRow ? ModernControlsGet() != 0 : rcRow ? RightClickDragGet() != 0
                   : dragCell >= 0 ? (MapDragButtonGet() == kDragCellValue[dragCell] && (dragCell != 1 || MapDragRightAllowed()))
@@ -739,7 +764,8 @@ void __fastcall CheckContentDraw(void* self, void* /*edx*/)
                   : updRow ? UpdateCheckGet() != 0
                   : customRow ? PortraitCustomGet() != 0 : hdRow ? PortraitHdGet() != 0
                   : scanRow ? PortraitScanGet() != 0 : airdropRow ? AiVisGetAirdrop() != 0 : VidModeClipGet() != 0;
-    const char* text = modeCell >= 0 ? kModeText[modeCell]
+    const char* text = artRow >= 0 ? kArtRows[artRow].text
+                     : modeCell >= 0 ? kModeText[modeCell]
                      : aiRow ? kAiChkText : cargoRow ? kCargoChkText : markRow ? kMarkChkText
                      : modernRow ? kModernChkText : rcRow ? kRcMoveChkText
                      : dragCell >= 0 ? kDragCellText[dragCell]
@@ -834,6 +860,44 @@ int RowLabelY(int g, const BYTE* rowFont, uintptr_t sprVA)
     return ty;
 }
 
+// Hide every row of our first page (the settings) / of the "HD art" page. An optional row is never touched unbuilt
+// (zeroed vtable = AV).
+void HideMainRows()
+{
+    WinHide(g_w.label);
+    if (g_modeRow) WinHide(g_w.clipcheck);
+    WinHide(g_w.aicheck);
+    WinHide(g_w.cargocheck);
+    WinHide(g_w.markcheck);
+    if (g_modernRow) { WinHide(g_w.moderncheck); WinHide(g_w.rcmovecheck); }
+    if (g_dragRow) for (auto& c : g_w.dragcell) WinHide(c);
+    if (g_cameraRow) { WinHide(g_w.clickview); WinHide(g_w.baseview); }
+    WinHide(g_w.updcheck);
+    WinHide(g_w.subbtn);
+    WinHide(g_w.customcheck);
+    if (g_hdRow) WinHide(g_w.hdcheck);
+    WinHide(g_w.scancheck);
+    WinHide(g_w.airdropcheck);
+    if (g_modeRow) for (auto& c : g_w.modecheck) WinHide(c);
+    WinHide(g_w.slider);
+    if (g_holdRow) { WinHide(g_w.holdlabel); WinHide(g_w.holdslider); }
+    SliderBubbleClear();
+    SliderTipClear();
+}
+
+void HideArtRows()
+{
+    for (int i = 0; i < kArtRows_n; ++i)
+        if (g_artRow[i]) WinHide(g_w.artcheck[i]);
+}
+
+// Repaint the whole Preferences page through vtbl+0x30, so WrapRefresh re-issues our rows too.
+void RefreshPrefWin()
+{
+    void** vtbl = *reinterpret_cast<void***>(At(kVA_PrefWinInst));
+    reinterpret_cast<void(__fastcall*)(void*, void*)>(vtbl[kSlotRefresh / 4])(At(kVA_PrefWinInst), nullptr);
+}
+
 // vtbl+0x30 on_redraw: chain, then show/hide our row by tab and draw its frame.
 void __fastcall WrapRefresh(void* self, void* edx)
 {
@@ -854,7 +918,27 @@ void __fastcall WrapRefresh(void* self, void* edx)
     }
     WinRedraw(g_w.tab);
 
-    if (OurTabActive()) {
+    if (!OurTabActive()) g_page = 0;      // a tab switch: our tab opens on its first page again
+    // the stock More button: ours to show on our tab (when there is an "HD art" page), ours to hide again when the
+    // player leaves for a tab that does not have it (the engine's own switches handle tabs 2 and 6)
+    if (g_anyArtRow) {
+        const int tab = Rd<int>(kVA_PrefWin + kTabIdOfs);
+        if (OurTabActive()) {
+            WinShow(At(kVA_MoreBtn));
+            WinRedraw(At(kVA_MoreBtn));
+            g_moreShown = true;
+        } else if (g_moreShown) {
+            if (tab != 2 && tab != 6) WinHide(At(kVA_MoreBtn));
+            g_moreShown = false;
+        }
+    }
+
+    if (OurTabActive() && g_page == 1) {  // the "HD art" page: its rows only
+        HideMainRows();
+        for (int i = 0; i < kArtRows_n; ++i)
+            if (g_artRow[i]) { WinShow(g_w.artcheck[i]); WinRedraw(g_w.artcheck[i]); }
+    } else if (OurTabActive()) {
+        HideArtRows();
         WinShow(g_w.label);
         if (g_modeRow) WinShow(g_w.clipcheck);
         WinShow(g_w.aicheck);
@@ -901,25 +985,8 @@ void __fastcall WrapRefresh(void* self, void* edx)
         WinRedraw(g_w.slider);
         if (g_holdRow) { WinRedraw(g_w.holdlabel); WinRedraw(g_w.holdslider); }
     } else {
-        WinHide(g_w.label);
-        if (g_modeRow) WinHide(g_w.clipcheck);
-        WinHide(g_w.aicheck);
-        WinHide(g_w.cargocheck);
-        WinHide(g_w.markcheck);
-        if (g_modernRow) { WinHide(g_w.moderncheck); WinHide(g_w.rcmovecheck); }
-        if (g_dragRow) for (auto& c : g_w.dragcell) WinHide(c);
-        if (g_cameraRow) { WinHide(g_w.clickview); WinHide(g_w.baseview); }
-        WinHide(g_w.updcheck);
-        WinHide(g_w.subbtn);
-        WinHide(g_w.customcheck);
-        if (g_hdRow) WinHide(g_w.hdcheck);   // an optional row: never touch it unbuilt (zeroed vtable = AV)
-        WinHide(g_w.scancheck);
-        WinHide(g_w.airdropcheck);
-        if (g_modeRow) for (auto& c : g_w.modecheck) WinHide(c);
-        WinHide(g_w.slider);
-        if (g_holdRow) { WinHide(g_w.holdlabel); WinHide(g_w.holdslider); }
-        SliderBubbleClear();
-        SliderTipClear();
+        HideMainRows();
+        HideArtRows();
     }
 }
 
@@ -940,6 +1007,8 @@ void CommitAll()
     AiVisSaveAirdrop();
     if (g_modeRow) { VidModeSave(VidModeDetect()); VidModeClipSave(); }   // the mode the game is running in, however it got there
     HoldCommit();
+    for (int i = 0; i < kArtRows_n; ++i)
+        if (g_artRow[i]) kArtRows[i].save();
 }
 
 // vtbl+0xB0 command: persist on OK, reset on Restore Defaults, chain everything.
@@ -947,6 +1016,18 @@ void __fastcall WrapCommand(void* self, void* edx, int id)
 {
     if (g_built) {
         if (id == kLabelId || id == kHoldLabelId) return;   // the "Base Font Size" / "Drag Hold Time" labels are inert
+        if (id == kMoreBtnId && g_anyArtRow && OurTabActive()) {   // the stock More button on OUR tab: flip our pages
+            g_page = g_page ? 0 : 1;                                // (never its own case: that would jump to tab 2 / 6)
+            RefreshPrefWin();
+            return;
+        }
+        for (int i = 0; i < kArtRows_n; ++i) {
+            if (g_artRow[i] && id == kArtChkId0 + i) {              // live (the hook repaints the map); saved with OK / Enter
+                kArtRows[i].set(kArtRows[i].get() ? 0 : 1);
+                WinRedraw(g_w.artcheck[i]);
+                return;
+            }
+        }
         if (g_modeRow && id == kClipChkId) {   // live (SyncClip); persisted on OK / Enter; inert outside Fullscreen
             if (!VidModeFullscreenRunning()) return;
             VidModeClipSet(VidModeClipGet() ? 0 : 1);
@@ -1060,10 +1141,7 @@ void __fastcall WrapCommand(void* self, void* edx, int id)
             UpdateSubscribeAll();         // on Yes: DeclinedUpdates cleared, the checkbox turns on
             WinRedraw(g_w.updcheck);
             WinRedraw(g_w.subbtn);
-            {   // the page repaints after the nested popup -- through vtbl+0x30, so WrapRefresh re-issues our rows too
-                void** vtbl = *reinterpret_cast<void***>(At(kVA_PrefWinInst));
-                reinterpret_cast<void(__fastcall*)(void*, void*)>(vtbl[kSlotRefresh / 4])(At(kVA_PrefWinInst), nullptr);
-            }
+            RefreshPrefWin();             // the page repaints after the nested popup
             return;
         }
         if (id == 0x5C) {                 // OK -> commit (engine writes volumes the same way)
@@ -1116,6 +1194,11 @@ void __fastcall WrapCommand(void* self, void* edx, int id)
             if (g_holdRow) {               // vanilla 333 ms
                 DragDelaySet(kDragDelayDefault);
                 set(g_w.holdslider, nullptr, DragDelayPosFromMs(kDragDelayDefault));
+            }
+            for (int i = 0; i < kArtRows_n; ++i) {
+                if (!g_artRow[i]) continue;
+                kArtRows[i].set(kArtRows[i].def);
+                WinRedraw(g_w.artcheck[i]);
             }
         }
     }
@@ -1392,6 +1475,24 @@ void BuildWidgets()
             else UimodDbg(msg);
         }
 
+        // the "HD art" page behind the More button: one row per installed art pack (kArtRows), from the page's first
+        // row down, the option rows' geometry and painter. Latched at the first build like the other optional rows.
+        if (first)
+            for (int i = 0; i < kArtRows_n; ++i) {
+                g_artRow[i] = kArtRows[i].avail();
+                g_anyArtRow = g_anyArtRow || g_artRow[i];
+            }
+        for (int i = 0, a = 0; i < kArtRows_n; ++i) {
+            if (!g_artRow[i]) continue;
+            const int lw = labelW(kArtRows[i].text, 160);
+            ctor(g_w.artcheck[i], nullptr);
+            *reinterpret_cast<void**>(g_w.artcheck[i]) = g_chkVtbl;
+            binit(g_w.artcheck[i], nullptr, "", kArtChkId0 + i, fx, Rd<int>(kVA_TabY0) + kChkRowDy + (a++) * kChkRowPitch,
+                  RowW(fx, kChkTextDx + lw + 4), boxH + kChkTextDy, prefwin, 0);
+        }
+        g_page = 0;
+        g_moreShown = false;
+
         // the display-mode row: three cells on ONE line over the frame span, native x by
         // scaling_laws.pref_mode_cell_x (cum(): half_down(i*frameW, 3), never i*(frameW/3)); the gate
         // scales each cell's own x once. Only with PRACX's window code bound (vidmode.cpp).
@@ -1517,6 +1618,7 @@ void BuildWidgets()
     if (g_modeRow) for (auto& c : g_w.modecheck) WinHide(c);
     WinHide(g_w.slider);
     if (g_holdRow) { WinHide(g_w.holdlabel); WinHide(g_w.holdslider); }
+    HideArtRows();
 
     if (!first) {
         Dbg("[uimod] prefs: Longevity tab rebuilt (PrefWin_build ran again)\n");

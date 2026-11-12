@@ -1,33 +1,38 @@
-// basehd.cpp -- drop-in HD base sprites (GitHub issue #1, after the terrain: faction cities at the zoomed-in map).
+// basehd.cpp -- drop-in HD base sprites: the faction cities on the map, every faction.
 //
 // A pack is <game>\bases\<faction>_x8.pcx: the base block of <faction>.pcx -- its top-left 404x456 pixels, 6 rows
 // (land, land defence 1/2, water, water defence 1/2) x 4 sizes of 100x75 sprites on a 101x76 grid -- redrawn at 8x
-// (3232x3648), 8-bit, in the faction file's own palette indices.
+// (3232x3648), 8-bit, in the faction file's own palette indices. A pack may cover any subset of the factions; a
+// faction without one keeps its stock sprites.
 //
-// Engine (PRACX 2d0b1438 and the vanilla exe alike):
-//  * load_faction_art 0x453710 loads "<faction>.pcx" (name built at 0x9B86A0) into the loading canvas 0x798668 with
-//    Buffer_load_pcx(name, 0, 10, 236) and cuts the 24 base sprites with ONE Sprite_extract_2 0x5E39A0 call
-//    (@0x453836, 100x75, key 9) into g_faction_sprites 0x78E978 (+faction*0x65C, index water*12 + size*3 + defence).
-//  * base_draw 0x55AF20 sets SCALE_NUM_G / SCALE_DEN_G (0x696D18 / 0x696D1C) to the map zoom ((size+16)/16, or
-//    g_map_zoom_num/den) and draws the base with ONE Sprite_draw_dest 0x5E5833 call (@0x55B32B) through the
-//    pointer table 0x76E590, top-left at (x, y). Sprite_draw_dest scales width, height and the sprite's crop offsets
-//    (+0x20 / +0x24) by num/den with nearest-neighbour SKIPPING (run table 0x9B3AD8): shrinking a big sprite by a
-//    non-integer factor drops whole rows and columns -- in game, an 8x sprite drawn at 1.5x looked jagged.
+// Engine (PRACX 2d0b1438 and the vanilla exe alike; symbols in work/symbols/terranx.h):
+//  * load_faction_art 0x453710 loads "<MFactions[f].filename>.pcx" with Buffer_load_pcx(name, 0, 10, 236) and cuts
+//    the 24 base sprites with ONE Sprite_extract_2 0x5E39A0 call (@0x453836, 100x75, key 9) into g_faction_sprites
+//    0x78E978 (+f*0x65C, index water*12 + size*3 + defence).
+//  * base_draw 0x55AF20 sets SCALE_NUM_G / SCALE_DEN_G (0x696D18 / 0x696D1C) and draws the base with ONE
+//    Sprite_draw_dest 0x5E5833 call (@0x55B32B). Every caller of base_draw goes through that one call -- the map,
+//    the HUD, the base screen, the F-reports, the tutorial -- so the HD art shows wherever the game draws a base,
+//    the way a drop-in pack does. Sprite_draw_dest truncates the scaled size (_ftol(w * num/den)) and shrinks by
+//    SKIPPING rows and columns: an 8x sprite drawn at 1.5x looked jagged in game.
 //
-// So the HD art is never shrunk by the engine. For each scale actually drawn, each base sprite is made at exactly its
-// on-screen size (100*num/den x 75*num/den) from the 8x master: every pixel takes the most frequent index of the master
-// pixels it covers (DownscaleModeTo -- never blends, so the palette and the shading bands stay exact, and the key
-// wins where the master is mostly see-through), cut through the engine's own Sprite_extract_2, and drawn 1:1
-// (SCALE_NUM_G = SCALE_DEN_G for that one draw), top-left at the same (x, y). Each base sprite keeps its last 4 sizes.
+// So the engine never resizes the HD art. For each scale actually drawn, each base sprite is made at exactly the size
+// the engine gives the stock sprite (basehd_law::SpriteSize) from the 8x master with basehd_law::PaletteBoxShrink
+// (never leaves the palette; keys stay keys), cut through the engine's own Sprite_extract_2 and drawn with
+// SCALE_NUM_G = SCALE_DEN_G (Sprite_draw_dest's unscaled branch; SCALE_DEN_G itself is left alone), top-left at the
+// same (x, y). Above 8x the same law enlarges the master, so the look never switches back to stock.
+// Memory: a master is loaded only to cut sprites -- every base sprite of that faction at the size asked for, in one
+// pass -- and freed at once (~12 MB for ~40 ms). What stays is the cut sprites, kSlots sizes per sprite.
 //
-// Levers, both byte-checked E8 retargets, cave-free:
-//  * @0x453836 -> ExtractRecorder: records each base sprite, its rect and its faction file. The stock sprites are
-//    never changed; everything else that reads them (sizes, other screens) keeps reading stock. Sprites cut before
-//    this module was installed are placed by their slot in g_faction_sprites at their first draw (Adopt).
+// Levers, both byte-checked E8 retargets, cave-free (work/tests/test_basehd_sites.py pins them):
+//  * @0x453836 -> ExtractRecorder: records each base sprite and its rect. The faction comes from the sprite's slot in
+//    g_faction_sprites, its file from MFactions[f].filename -- never a scratch string. Sprites cut before this module
+//    was installed are placed by their slot at their first draw (Adopt).
 //  * @0x55B32B -> DrawHook: a recorded sprite whose faction has a pack is drawn from its exact-size HD copy.
-// Nothing changes without a pack on disk; [UIMod] BaseHD=0 turns it off with one.
+// Nothing is patched without a pack on disk. "HD Base Sprites" in Longevity Mod Preferences ([UIMod] BaseHD) switches
+// it live; off draws stock and frees every HD sprite.
 
 #include "basehd.h"
+#include "basehd_law.h"
 
 #include <windows.h>
 #include <cstdarg>
@@ -40,25 +45,30 @@ void UimodLog(const char* msg);
 
 namespace {
 
-constexpr uintptr_t kVA_Extract2       = 0x5E39A0;   // thiscall (Sprite*, Buffer* src, key, x, y, w, h, a8) RET 0x1C
-constexpr uintptr_t kVA_DrawDest       = 0x5E5833;   // thiscall (Sprite*, Buffer* dst, key, x, y, table) RET 0x14
-constexpr uintptr_t kVA_SpriteClose    = 0x5E3820;   // thiscall (Sprite*): frees +0x04 when +0x28 == 0
+// work/symbols/terranx.h
+constexpr uintptr_t kVA_Extract2       = 0x5E39A0;   // Sprite_extract_2: thiscall (Sprite*, Buffer* src, key, x, y, w, h, a8) RET 0x1C
+constexpr uintptr_t kVA_DrawDest       = 0x5E5833;   // Sprite_draw_dest: thiscall (Sprite*, Buffer* dst, key, x, y, table) RET 0x14
+constexpr uintptr_t kVA_SpriteClose    = 0x5E3820;   // Sprite_close: thiscall (Sprite*): frees +0x04 when +0x28 == 0
 constexpr uintptr_t kVA_BufferCtor     = 0x5D7210;
 constexpr uintptr_t kVA_BufferDtor     = 0x5D7410;
 constexpr uintptr_t kVA_BufferResize   = 0x5D7670;
-constexpr uintptr_t kVA_LoadPcx        = 0x5D7DE0;
-constexpr uintptr_t kVA_FactionPcxName = 0x9B86A0;   // "<faction>.pcx", built by load_faction_art before the load
+constexpr uintptr_t kVA_LoadPcx        = 0x5D7DE0;   // Buffer_load_pcx
 constexpr uintptr_t kVA_FactionSprites = 0x78E978;   // g_faction_sprites: 8 x 0x65C, 37 Sprites of 0x2C each
-constexpr uintptr_t kVA_FactionFile    = 0x946A54;   // MFactions[f].filename (stem), stride 0x59C (load_faction_art)
+constexpr uintptr_t kVA_MFactions      = 0x946A50;   // MFactions[8], stride 0x59C
+constexpr int       kMFactionFilename  = 0x04;       // MFaction +0x04 char filename[24] (the .pcx stem)
 constexpr uintptr_t kVA_ScaleNum       = 0x696D18;   // SCALE_NUM_G
 constexpr uintptr_t kVA_ScaleDen       = 0x696D1C;   // SCALE_DEN_G
+constexpr uintptr_t kVA_MainPalette    = 0x94C590;   // g_main_palette: PALETTEENTRY[256] (fallback colours)
+constexpr uintptr_t kVA_DrawMap        = 0x46B190;   // draw_map: cdecl(int) -- full map repaint
 constexpr uint32_t kSiteExtract = 0x453836;
 constexpr uint32_t kSiteDraw    = 0x55B32B;
-constexpr int kFactionStride = 0x65C, kFactionFileStride = 0x59C, kSpriteSize = 0x2C;
+constexpr int kFactionStride = 0x65C, kMFactionStride = 0x59C, kSpriteSize = 0x2C;
 
-constexpr int kBufData = 0x50, kBufBits = 0x54, kBufW = 0x80, kBufH = 0x84, kBufPitch = 0x4A8, kBufSize = 0x588;
+constexpr int kBufData = 0x50, kBufBits = 0x54, kBufW = 0x80, kBufH = 0x84, kBufColors = 0xA4, kBufPitch = 0x4A8;
+constexpr int kBufSize = 0x588;
 constexpr int kBlockW = 404, kBlockH = 456;          // the base block of a faction pcx (6 rows x 4 sizes)
 constexpr int kMaster = 8;
+constexpr int kMaxScale = 32;                         // sanity cap: never cut a sprite above 32x its stock size
 constexpr int kKey = 9;                               // load_faction_art's key (file 255 -> loaded 9)
 constexpr int kSlots = 4;                             // sizes kept per base sprite
 
@@ -68,15 +78,14 @@ struct Slot { int w, h; unsigned used; Sprite spr; };
 
 struct Entry {
     void* stock;
-    char name[40];                                    // the faction file it was cut from, e.g. "univ.pcx"
+    char name[32];                                    // the faction file stem it was cut from, e.g. "UNIV"
     int x, y, w, h;                                   // stock rect in the faction pcx
     Slot slots[kSlots];
 };
 
 struct Pack {
-    char name[40];
-    int state;                                        // 0 = not tried, 1 = master loaded, -1 = no / bad file
-    uint8_t* master;                                  // a Buffer (kBufSize) holding <faction>_x8.pcx
+    char name[32];
+    int state;                                        // 0 = not looked for, 1 = a valid pack file, -1 = none / bad
 };
 
 typedef int (__thiscall* FExtract2)(void*, void*, int, int, int, int, int, void*);
@@ -93,6 +102,8 @@ std::vector<Entry*> g_entries;
 std::vector<Pack*> g_packs;
 alignas(16) uint8_t g_scratch[kBufSize + 0x80];
 bool g_scratchReady = false;
+bool g_installed = false;
+int g_on = kBaseHdDefault;
 unsigned g_clock = 0;
 char g_dir[MAX_PATH];
 
@@ -136,36 +147,31 @@ uint8_t* Pixels(void* buf)
 
 int Field(void* buf, int off) { return *reinterpret_cast<int*>(static_cast<uint8_t*>(buf) + off); }
 
-// Shrink (or enlarge) an index image to any size: each destination pixel takes the most frequent index of the source
-// pixels its footprint covers; a tie goes to the index met first (row-major). Never blends. dst is dw x dh.
-void DownscaleModeTo(const uint8_t* src, int sw, int sh, int spitch, uint8_t* dst, int dw, int dh, int dpitch)
+// The faction slot a sprite pointer lies in (0..7, its index 0..36 in *idx), or -1.
+int FactionOf(const void* spr, int* idx)
 {
-    unsigned count[256] = {};
-    uint8_t seen[256];
-    for (int ty = 0; ty < dh; ++ty) {
-        const int y0 = ty * sh / dh, y1 = (ty + 1) * sh / dh > y0 ? (ty + 1) * sh / dh : y0 + 1;
-        for (int tx = 0; tx < dw; ++tx) {
-            const int x0 = tx * sw / dw, x1 = (tx + 1) * sw / dw > x0 ? (tx + 1) * sw / dw : x0 + 1;
-            int nseen = 0, best = 0;
-            unsigned bestCount = 0;
-            for (int y = y0; y < y1; ++y) {
-                const uint8_t* row = src + y * spitch;
-                for (int x = x0; x < x1; ++x) if (count[row[x]]++ == 0) seen[nseen++] = row[x];
-            }
-            for (int i = 0; i < nseen; ++i) if (count[seen[i]] > bestCount) { bestCount = count[seen[i]]; best = seen[i]; }
-            for (int i = 0; i < nseen; ++i) count[seen[i]] = 0;
-            dst[ty * dpitch + tx] = static_cast<uint8_t>(best);
-        }
-    }
+    const uintptr_t lo = reinterpret_cast<uintptr_t>(At(kVA_FactionSprites));
+    const uintptr_t p = reinterpret_cast<uintptr_t>(spr);
+    if (p < lo || p >= lo + 8 * kFactionStride) return -1;
+    const int off = static_cast<int>((p - lo) % kFactionStride);
+    if (off % kSpriteSize != 0) return -1;
+    *idx = off / kSpriteSize;
+    return static_cast<int>((p - lo) / kFactionStride);
 }
 
-// "univ.pcx" -> "<game>\bases\univ_x8.pcx"
-bool PackPath(const char* name, char* out, size_t n)
+const char* FactionFile(int f)
 {
-    char stem[40];
-    strncpy_s(stem, name, _TRUNCATE);
-    if (char* dot = strrchr(stem, '.')) *dot = 0;
-    return _snprintf_s(out, n, _TRUNCATE, "%sbases\\%s_x%d.pcx", g_dir, stem, kMaster) > 0;
+    return reinterpret_cast<const char*>(At(kVA_MFactions + f * kMFactionStride + kMFactionFilename));
+}
+
+// "UNIV" -> "bases\UNIV_x8.pcx" (relative to the game folder: how the log names it)
+void PackRel(const char* stem, char* out, size_t n) { _snprintf_s(out, n, _TRUNCATE, "bases\\%s_x%d.pcx", stem, kMaster); }
+
+bool PackPath(const char* stem, char* out, size_t n)
+{
+    char rel[64];
+    PackRel(stem, rel, sizeof rel);
+    return _snprintf_s(out, n, _TRUNCATE, "%s%s", g_dir, rel) > 0;
 }
 
 bool PcxSize(const char* path, int* w, int* h)
@@ -181,45 +187,27 @@ bool PcxSize(const char* path, int* w, int* h)
     return true;
 }
 
-Pack* PackFor(const char* name)
+// Whether <stem> has a usable pack (checked once per stem; the file is opened only to read its header).
+bool HasPack(const char* stem)
 {
-    for (Pack* p : g_packs) if (_stricmp(p->name, name) == 0) return p;
-    Pack* p = new Pack{};
-    strncpy_s(p->name, name, _TRUNCATE);
-    g_packs.push_back(p);
-    return p;
-}
-
-// Load the faction's 8x master once; it stays, as every new size is made from it.
-bool LoadPack(Pack* pack)
-{
-    char path[MAX_PATH];
-    int w = 0, h = 0;
-    pack->state = -1;
-    if (!PackPath(pack->name, path, sizeof path) || GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) return false;
-    if (!PcxSize(path, &w, &h) || w != kBlockW * kMaster || h != kBlockH * kMaster) {
-        Log("[basehd] %s is %dx%d, not an 8-bit %dx%d PCX -> ignored\n", path, w, h, kBlockW * kMaster, kBlockH * kMaster);
-        return false;
+    Pack* p = nullptr;
+    for (Pack* it : g_packs) if (_stricmp(it->name, stem) == 0) { p = it; break; }
+    if (!p) {
+        p = new Pack{};
+        strncpy_s(p->name, stem, _TRUNCATE);
+        g_packs.push_back(p);
     }
-    const DWORD t0 = GetTickCount();
-    pack->master = static_cast<uint8_t*>(_aligned_malloc(kBufSize + 0x80, 16));
-    if (!pack->master) return false;
-    memset(pack->master, 0, kBufSize + 0x80);
-    reinterpret_cast<FBufferCtor>(At(kVA_BufferCtor))(pack->master);
-    reinterpret_cast<FLoadPcx>(At(kVA_LoadPcx))(pack->master, path, nullptr, 10, 0xEC);   // load_faction_art's arguments
-    const int bh = Field(pack->master, kBufH);
-    if (Field(pack->master, kBufW) != kBlockW * kMaster || (bh != kBlockH * kMaster && bh != -kBlockH * kMaster) ||
-        !Pixels(pack->master)) {
-        Log("[basehd] %s did not load as %dx%d -> HD bases off for %s\n", path, kBlockW * kMaster, kBlockH * kMaster,
-            pack->name);
-        reinterpret_cast<FBufferDtor>(At(kVA_BufferDtor))(pack->master);
-        _aligned_free(pack->master);
-        pack->master = nullptr;
-        return false;
+    if (p->state == 0) {
+        char path[MAX_PATH], rel[64];
+        int w = 0, h = 0;
+        p->state = -1;
+        PackRel(stem, rel, sizeof rel);
+        if (PackPath(stem, path, sizeof path) && GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+            if (PcxSize(path, &w, &h) && w == kBlockW * kMaster && h == kBlockH * kMaster) p->state = 1;
+            else Log("[basehd] %s is %dx%d, not an 8-bit %dx%d PCX -> ignored\n", rel, w, h, kBlockW * kMaster, kBlockH * kMaster);
+        }
     }
-    pack->state = 1;
-    Log("[basehd] loaded %s in %lu ms\n", path, GetTickCount() - t0);
-    return true;
+    return p->state == 1;
 }
 
 void Release(Entry* e)
@@ -230,12 +218,19 @@ void Release(Entry* e)
     }
 }
 
-// The sprite at w x h from the master, cut by the engine into the least recently used slot. Null if it could not be.
-Sprite* SpriteAt(Entry* e, Pack* pack, int w, int h)
+Slot* Find(Entry* e, int w, int h)
 {
-    for (Slot& s : e->slots) if (s.w == w && s.h == h) { s.used = ++g_clock; return &s.spr; }
+    for (Slot& s : e->slots) if (s.w == w && s.h == h && *reinterpret_cast<void**>(s.spr.raw + 4)) return &s;
+    return nullptr;
+}
+
+// Cut entry e at w x h from the loaded master into its least recently used slot.
+bool Cut(Entry* e, void* master, int w, int h, const uint8_t* rgbq)
+{
     Slot* s = &e->slots[0];
     for (Slot& it : e->slots) if (it.used < s->used) s = &it;
+    if (*reinterpret_cast<void**>(s->spr.raw + 4)) reinterpret_cast<FSpriteClose>(At(kVA_SpriteClose))(&s->spr);
+    *s = Slot{};
     if (!g_scratchReady) {
         reinterpret_cast<FBufferCtor>(At(kVA_BufferCtor))(g_scratch);
         g_scratchReady = true;
@@ -243,58 +238,62 @@ Sprite* SpriteAt(Entry* e, Pack* pack, int w, int h)
     reinterpret_cast<FBufferResize>(At(kVA_BufferResize))(g_scratch, w, h, 0, 0);
     uint8_t* d = Pixels(g_scratch);
     const int pitch = Field(g_scratch, kBufPitch);
-    if (!d || Field(g_scratch, kBufW) != w || pitch < w) return nullptr;
-    const int mpitch = Field(pack->master, kBufPitch);
-    DownscaleModeTo(Pixels(pack->master) + e->y * kMaster * mpitch + e->x * kMaster, e->w * kMaster, e->h * kMaster,
-                    mpitch, d, w, h, pitch);
-    s->w = s->h = 0;
-    if (g_extract(&s->spr, g_scratch, kKey, 0, 0, w, h, nullptr) != 0) return nullptr;
+    if (!d || Field(g_scratch, kBufW) != w || pitch < w) return false;
+    const int mpitch = Field(master, kBufPitch);
+    basehd_law::PaletteBoxShrink(Pixels(master) + e->y * kMaster * mpitch + e->x * kMaster, e->w * kMaster,
+                                 e->h * kMaster, mpitch, d, w, h, pitch, rgbq);
+    if (g_extract(&s->spr, g_scratch, kKey, 0, 0, w, h, nullptr) != 0) return false;
     s->w = w;
     s->h = h;
     s->used = ++g_clock;
-    return &s->spr;
+    return true;
 }
 
-// --- hooks ------------------------------------------------------------------------------------------------------
-
-// Stands in for Sprite_extract_2 at load_faction_art's base-sprite site: same contract (thiscall, RET 0x1C).
-int __fastcall ExtractRecorder(void* spr, void* /*edx*/, void* src, int key, int x, int y, int w, int h, void* a8)
+// Load <stem>'s master once, cut every recorded base sprite of that faction at w x h (the size every base of it is
+// drawn at for this scale), free the master. One load per faction per new scale.
+void CutFaction(const char* stem, int w, int h, const uint8_t* rgbq)
 {
-    const int rc = g_extract(spr, src, key, x, y, w, h, a8);
-    if (rc != 0 || x < 0 || y < 0 || x + w > kBlockW || y + h > kBlockH) return rc;
-    const char* name = reinterpret_cast<const char*>(At(kVA_FactionPcxName));
-    Entry* e = nullptr;
-    for (Entry* it : g_entries) if (it->stock == spr) { e = it; break; }
-    if (!e) {
-        e = new Entry{};
-        e->stock = spr;
-        g_entries.push_back(e);
+    char path[MAX_PATH], rel[64];
+    if (!PackPath(stem, path, sizeof path)) return;
+    PackRel(stem, rel, sizeof rel);
+    const DWORD t0 = GetTickCount();
+    uint8_t* master = static_cast<uint8_t*>(_aligned_malloc(kBufSize + 0x80, 16));
+    if (!master) return;
+    memset(master, 0, kBufSize + 0x80);
+    reinterpret_cast<FBufferCtor>(At(kVA_BufferCtor))(master);
+    reinterpret_cast<FLoadPcx>(At(kVA_LoadPcx))(master, path, nullptr, 10, 236);   // load_faction_art's arguments
+    const int bh = Field(master, kBufH);
+    int cut = 0;
+    if (Field(master, kBufW) == kBlockW * kMaster && (bh == kBlockH * kMaster || bh == -kBlockH * kMaster) &&
+        Pixels(master)) {
+        for (Entry* e : g_entries)
+            if (_stricmp(e->name, stem) == 0 && !Find(e, w, h) && Cut(e, master, w, h, rgbq)) ++cut;
+    } else {
+        Log("[basehd] %s did not load as %dx%d -> stock bases for %s\n", rel, kBlockW * kMaster, kBlockH * kMaster, stem);
+        for (Pack* p : g_packs) if (_stricmp(p->name, stem) == 0) p->state = -1;
     }
-    if (_stricmp(e->name, name) != 0 || e->x != x || e->y != y || e->w != w || e->h != h) {
-        Release(e);                                    // another faction in this slot (a new game)
-        strncpy_s(e->name, name, _TRUNCATE);
-        e->x = x; e->y = y; e->w = w; e->h = h;
-    }
-    return rc;
+    reinterpret_cast<FBufferDtor>(At(kVA_BufferDtor))(master);
+    _aligned_free(master);
+    Log("[basehd] %s: %d sprites cut at %dx%d in %lu ms\n", rel, cut, w, h, GetTickCount() - t0);
+}
+
+void ReleaseAll()
+{
+    for (Entry* e : g_entries) Release(e);
 }
 
 // A base sprite load_faction_art cut BEFORE this module was installed (the first game_init can run before uimod's
-// Init): placed by its slot in g_faction_sprites -- load_faction_art's own layout (index water*12 + size*3 + defence,
-// rect (1 + size*101, 1 + row*76, 100, 75)) -- and its faction's file name from the table load_faction_art reads.
+// Init): placed by its slot -- load_faction_art's own layout (index water*12 + size*3 + defence, rect
+// (1 + size*101, 1 + row*76, 100, 75)).
 Entry* Adopt(void* spr)
 {
-    const uintptr_t lo = reinterpret_cast<uintptr_t>(At(kVA_FactionSprites));
-    const uintptr_t p = reinterpret_cast<uintptr_t>(spr);
-    if (p < lo || p >= lo + 8 * kFactionStride) return nullptr;
-    const int f = static_cast<int>((p - lo) / kFactionStride), off = static_cast<int>((p - lo) % kFactionStride);
-    const int idx = off / kSpriteSize;
-    if (off % kSpriteSize != 0 || idx >= 24) return nullptr;
+    int idx = 0;
+    const int f = FactionOf(spr, &idx);
+    if (f < 0 || idx >= 24 || !FactionFile(f)[0]) return nullptr;
     const int water = idx / 12, size = idx % 12 / 3, def = idx % 3;
-    const char* stem = reinterpret_cast<const char*>(At(kVA_FactionFile + f * kFactionFileStride));
-    if (!stem[0]) return nullptr;
     Entry* e = new Entry{};
     e->stock = spr;
-    _snprintf_s(e->name, sizeof e->name, _TRUNCATE, "%.30s.pcx", stem);
+    strncpy_s(e->name, FactionFile(f), _TRUNCATE);
     e->x = 1 + size * 101;
     e->y = 1 + (water * 3 + def) * 76;
     e->w = 100;
@@ -303,29 +302,67 @@ Entry* Adopt(void* spr)
     return e;
 }
 
+// --- hooks ------------------------------------------------------------------------------------------------------
+
+// Stands in for Sprite_extract_2 at load_faction_art's base-sprite site: same contract (thiscall, RET 0x1C).
+int __fastcall ExtractRecorder(void* spr, void* /*edx*/, void* src, int key, int x, int y, int w, int h, void* a8)
+{
+    const int rc = g_extract(spr, src, key, x, y, w, h, a8);
+    int idx = 0;
+    const int f = FactionOf(spr, &idx);
+    if (rc != 0 || f < 0 || x < 0 || y < 0 || x + w > kBlockW || y + h > kBlockH) return rc;
+    const char* stem = FactionFile(f);
+    Entry* e = nullptr;
+    for (Entry* it : g_entries) if (it->stock == spr) { e = it; break; }
+    if (!e) {
+        e = new Entry{};
+        e->stock = spr;
+        g_entries.push_back(e);
+    }
+    if (_stricmp(e->name, stem) != 0 || e->x != x || e->y != y || e->w != w || e->h != h) {
+        Release(e);                                    // another faction in this slot (a new game)
+        strncpy_s(e->name, stem, _TRUNCATE);
+        e->x = x; e->y = y; e->w = w; e->h = h;
+    }
+    return rc;
+}
+
 // Stands in for Sprite_draw_dest at base_draw's site: same contract (thiscall, RET 0x14).
 int __fastcall DrawHook(void* spr, void* /*edx*/, void* dst, int key, int x, int y, void* table)
 {
+    if (!g_on) return g_draw(spr, dst, key, x, y, table);
     Entry* e = nullptr;
     for (Entry* it : g_entries) if (it->stock == spr) { e = it; break; }
     if (!e) e = Adopt(spr);
-    if (e) {
-        Pack* pack = PackFor(e->name);
-        if (pack->state == 0) LoadPack(pack);
-        int32_t* num = reinterpret_cast<int32_t*>(At(kVA_ScaleNum));
-        int32_t* den = reinterpret_cast<int32_t*>(At(kVA_ScaleDen));
-        const int32_t n = *num, d = *den;
-        if (pack->state == 1 && n > 0 && d > 0) {
-            const int w = static_cast<int>((static_cast<long long>(e->w) * n + d / 2) / d);
-            const int h = static_cast<int>((static_cast<long long>(e->h) * n + d / 2) / d);
-            if (w >= 1 && h >= 1 && w <= e->w * kMaster && h <= e->h * kMaster) {
-                if (Sprite* hd = SpriteAt(e, pack, w, h)) {
-                    *num = *den = 1;                   // 1:1 -- the sprite is already at its on-screen size
-                    const int rc = g_draw(hd, dst, key, x, y, table);
-                    *num = n;
-                    *den = d;
-                    return rc;
+    int32_t* num = reinterpret_cast<int32_t*>(At(kVA_ScaleNum));
+    const int32_t n = *num, d = *reinterpret_cast<int32_t*>(At(kVA_ScaleDen));
+    if (e && n > 0 && d > 0 && HasPack(e->name)) {
+        int w = 0, h = 0;
+        basehd_law::SpriteSize(e->w, e->h, n, d, &w, &h);
+        if (w >= 1 && h >= 1 && w <= e->w * kMaxScale && h <= e->h * kMaxScale) {
+            Slot* s = Find(e, w, h);
+            if (!s) {
+                // the colours the art is shown with: the destination's synced table, else the main palette
+                uint8_t rgbq[1024];
+                const uint8_t* dc = dst ? static_cast<const uint8_t*>(dst) + kBufColors : nullptr;
+                bool ok = false;
+                if (dc) for (int i = 0; i < 1024 && !ok; ++i) ok = dc[i] != 0;
+                if (ok) memcpy(rgbq, dc, sizeof rgbq);
+                else {
+                    const uint8_t* pe = At(kVA_MainPalette);   // PALETTEENTRY (r,g,b,f) -> RGBQUAD (b,g,r,0)
+                    for (int i = 0; i < 256; ++i) {
+                        rgbq[i * 4] = pe[i * 4 + 2]; rgbq[i * 4 + 1] = pe[i * 4 + 1]; rgbq[i * 4 + 2] = pe[i * 4]; rgbq[i * 4 + 3] = 0;
+                    }
                 }
+                CutFaction(e->name, w, h, rgbq);
+                s = Find(e, w, h);
+            }
+            if (s) {
+                s->used = ++g_clock;
+                *num = d;                              // Sprite_draw_dest's unscaled branch (num == den): drawn 1:1
+                const int rc = g_draw(&s->spr, dst, key, x, y, table);
+                *num = n;
+                return rc;
             }
         }
     }
@@ -342,22 +379,41 @@ bool GameDir(char* out, size_t n)
     return true;
 }
 
+void IniPath(char* out, size_t n) { _snprintf_s(out, n, _TRUNCATE, "%sAlpha Centauri.ini", g_dir); }
+
 } // namespace
+
+bool BaseHdAvailable() { return g_installed; }
+int  BaseHdGet() { return g_on; }
+
+void BaseHdSet(int on)
+{
+    on = on ? 1 : 0;
+    if (!g_installed || on == g_on) return;
+    g_on = on;
+    if (!on) ReleaseAll();                             // stock again: the HD sprites are not needed
+    reinterpret_cast<void(__cdecl*)(int)>(At(kVA_DrawMap))(1);
+}
+
+void BaseHdSave()
+{
+    if (!g_installed) return;
+    char ini[MAX_PATH];
+    IniPath(ini, sizeof ini);
+    WritePrivateProfileStringA("UIMod", "BaseHD", g_on ? "1" : "0", ini);
+}
 
 void InstallBaseHd()
 {
     if (!GameDir(g_dir, sizeof g_dir)) return;
     char ini[MAX_PATH];
-    if (_snprintf_s(ini, sizeof ini, _TRUNCATE, "%sAlpha Centauri.ini", g_dir) > 0 &&
-        GetPrivateProfileIntA("UIMod", "BaseHD", 1, ini) == 0) {
-        UimodLog("[basehd] off ([UIMod] BaseHD=0)\n");
-        return;
-    }
+    IniPath(ini, sizeof ini);
+    g_on = GetPrivateProfileIntA("UIMod", "BaseHD", kBaseHdDefault, ini) != 0 ? 1 : 0;
     char pattern[MAX_PATH];
     WIN32_FIND_DATAA fd;
     if (_snprintf_s(pattern, sizeof pattern, _TRUNCATE, "%sbases\\*_x%d.pcx", g_dir, kMaster) <= 0) return;
     const HANDLE h = FindFirstFileA(pattern, &fd);
-    if (h == INVALID_HANDLE_VALUE) return;             // no pack: nothing patched
+    if (h == INVALID_HANDLE_VALUE) return;             // no pack: nothing patched, no Preferences row
     FindClose(h);
 
     if (!CallsTo(kSiteExtract, kVA_Extract2)) {
@@ -373,5 +429,7 @@ void InstallBaseHd()
     g_entries.reserve(8 * 24);
     Retarget(kSiteExtract, reinterpret_cast<const void*>(&ExtractRecorder));
     Retarget(kSiteDraw, reinterpret_cast<const void*>(&DrawHook));
-    Log("[basehd] installed: base sprites from bases\\*_x%d.pcx (extract + draw sites)\n", kMaster);
+    g_installed = true;
+    Log("[basehd] installed: base sprites from bases\\*_x%d.pcx (extract + draw sites), %s\n", kMaster,
+        g_on ? "on" : "off ([UIMod] BaseHD=0)");
 }

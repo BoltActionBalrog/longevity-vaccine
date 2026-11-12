@@ -15022,3 +15022,61 @@ def popup_title_ring_clear(g: int, ornate: bool = False) -> int:
         popup_title_band_rows(0, g)[1] if not ornate else 37)
     return popup_scale_floor(header, g) - popup_pad(3, g) - band_end
 
+
+
+# ---- HD base sprites (src/uimod/src/basehd_law.h is the port) ----------------------------------------------------
+
+BASE_HD_COLOUR_LO, BASE_HD_COLOUR_HI = 10, 245   # Buffer_load_pcx(name, 0, 10, 236): the loaded art's colour indices
+
+
+def base_hd_sprite_size(w: int, h: int, num: int, den: int) -> Tuple[int, int]:
+    """LAW (PROPORTIONATE) -- the size an HD base sprite is made at: exactly the size Sprite_draw_dest gives the stock
+    w x h sprite at SCALE_NUM_G/SCALE_DEN_G = num/den, which truncates (_ftol of w * num/den). Floor in integers.
+    Identity at num == den."""
+    return (w * num // den, h * num // den)
+
+
+def palette_box_shrink(src: List[List[int]], dw: int, dh: int, rgb: List[Tuple[int, int, int]]) -> List[List[int]]:
+    """LAW -- resize an index image to dw x dh without leaving its palette (basehd's HD master -> on-screen size).
+    Footprint of destination (tx, ty): x0 = tx*sw//dw, x1 = max((tx+1)*sw//dw, x0+1), likewise y.
+    The special index (outside BASE_HD_COLOUR_LO..HI: the key, shadow and marker indices) met most often wins when it
+    covers more pixels than all colour pixels together (a tie goes to the colours); otherwise the colour index present
+    in the footprint nearest (squared distance) to the mean colour of the colour pixels, ties to the one met first in
+    row-major order. Never blends and never invents an index. rgb[i] = the colour index i is shown with."""
+    sh, sw = len(src), len(src[0])
+    out = []
+    for ty in range(dh):
+        y0 = ty * sh // dh
+        y1 = max((ty + 1) * sh // dh, y0 + 1)
+        row = []
+        for tx in range(dw):
+            x0 = tx * sw // dw
+            x1 = max((tx + 1) * sw // dw, x0 + 1)
+            order, count = [], {}
+            for y in range(y0, y1):
+                for x in range(x0, x1):
+                    v = src[y][x]
+                    if v not in count:
+                        order.append(v)
+                        count[v] = 0
+                    count[v] += 1
+            special, special_n, colour_n, s = -1, 0, 0, [0, 0, 0]
+            for v in order:
+                if v < BASE_HD_COLOUR_LO or v > BASE_HD_COLOUR_HI:
+                    if count[v] > special_n:
+                        special, special_n = v, count[v]
+                else:
+                    colour_n += count[v]
+                    for ch in range(3):
+                        s[ch] += count[v] * rgb[v][ch]
+            best = special
+            if colour_n and colour_n >= special_n:
+                best_d = None
+                for v in order:
+                    if BASE_HD_COLOUR_LO <= v <= BASE_HD_COLOUR_HI:
+                        d = sum((s[ch] - colour_n * rgb[v][ch]) ** 2 for ch in range(3))
+                        if best_d is None or d < best_d:
+                            best, best_d = v, d
+            row.append(best)
+        out.append(row)
+    return out

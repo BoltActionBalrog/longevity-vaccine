@@ -395,8 +395,9 @@ extern "C" void __stdcall Init(HMODULE self)
     InstallBlinkFix();
 
     // Drop-in HD base sprites: <game>\bases\<faction>_x8.pcx (the base block of <faction>.pcx at 8x) replaces that
-    // faction's base icons on the map. Nothing is patched without a pack on disk; [UIMod] BaseHD=0 turns it off.
-    // Two byte-checked E8 retargets, cave-free, both exes. See basehd.cpp.
+    // faction's base icons wherever a base is drawn. Nothing is patched without a pack on disk; "HD Base Sprites" in
+    // Longevity Mod Preferences ([UIMod] BaseHD) switches it live. Two byte-checked E8 retargets, cave-free, both
+    // exes. See basehd.cpp.
     InstallBaseHd();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.
