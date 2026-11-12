@@ -1,5 +1,6 @@
 #pragma once
-// menuhd_law.h -- the HD main menu's layout law, ported from work/scripts/scaling_laws.py (menu_hd_layout).
+// menuhd_law.h -- the HD main menu's layout law, ported from work/scripts/scaling_laws.py (menu_hd_layout, with the
+// stock opening's 1024 x 768 and the 404-wide planet strip as its picture arguments).
 // tests/test_menuhd_law.py pins the port against the Python at many screen sizes.
 
 namespace menuhd_law {
