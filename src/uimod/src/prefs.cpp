@@ -1492,6 +1492,13 @@ void BuildWidgets()
         }
         g_page = 0;
         g_moreShown = false;
+        if (first) {
+            char msg[96];
+            int n = 0;
+            for (int i = 0; i < kArtRows_n; ++i) n += g_artRow[i] ? 1 : 0;
+            _snprintf_s(msg, sizeof msg, _TRUNCATE, "[uimod] prefs: HD art page: %d row(s)%s\n", n, n ? "" : " -> no More button");
+            Dbg(msg);
+        }
 
         // the display-mode row: three cells on ONE line over the frame span, native x by
         // scaling_laws.pref_mode_cell_x (cum(): half_down(i*frameW, 3), never i*(frameW/3)); the gate

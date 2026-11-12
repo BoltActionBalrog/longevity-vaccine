@@ -20,8 +20,11 @@
 // (never leaves the palette; keys stay keys), cut through the engine's own Sprite_extract_2 and drawn with
 // SCALE_NUM_G = SCALE_DEN_G (Sprite_draw_dest's unscaled branch; SCALE_DEN_G itself is left alone), top-left at the
 // same (x, y). Above 8x the same law enlarges the master, so the look never switches back to stock.
-// Memory: a master is loaded only to cut sprites -- every base sprite of that faction at the size asked for, in one
-// pass -- and freed at once (~12 MB for ~40 ms). What stays is the cut sprites, kSlots sizes per sprite.
+// Memory: ONE master buffer for all factions (~12 MB), reloaded only to cut sprites -- every base sprite of that
+// faction at the size asked for, in one pass. It is never destroyed: Buffer_dtor -> Buffer_close DeleteObject's the
+// GDI objects the buffer holds, and a buffer Buffer_load_pcx filled with no Palette of its own is not known to own
+// them; load_faction_art likewise reuses one loading canvas and never destroys it. What else stays is the cut
+// sprites, kSlots sizes per sprite.
 //
 // Levers, both byte-checked E8 retargets, cave-free (work/tests/test_basehd_sites.py pins them):
 //  * @0x453836 -> ExtractRecorder: records each base sprite and its rect. The faction comes from the sprite's slot in
@@ -50,7 +53,6 @@ constexpr uintptr_t kVA_Extract2       = 0x5E39A0;   // Sprite_extract_2: thisca
 constexpr uintptr_t kVA_DrawDest       = 0x5E5833;   // Sprite_draw_dest: thiscall (Sprite*, Buffer* dst, key, x, y, table) RET 0x14
 constexpr uintptr_t kVA_SpriteClose    = 0x5E3820;   // Sprite_close: thiscall (Sprite*): frees +0x04 when +0x28 == 0
 constexpr uintptr_t kVA_BufferCtor     = 0x5D7210;
-constexpr uintptr_t kVA_BufferDtor     = 0x5D7410;
 constexpr uintptr_t kVA_BufferResize   = 0x5D7670;
 constexpr uintptr_t kVA_LoadPcx        = 0x5D7DE0;   // Buffer_load_pcx
 constexpr uintptr_t kVA_FactionSprites = 0x78E978;   // g_faction_sprites: 8 x 0x65C, 37 Sprites of 0x2C each
@@ -94,7 +96,6 @@ typedef void (__thiscall* FSpriteClose)(void*);
 typedef void (__thiscall* FBufferCtor)(void*);
 typedef int (__thiscall* FBufferResize)(void*, int, int, int, int);
 typedef int (__thiscall* FLoadPcx)(void*, const char*, void*, int, int);
-typedef void (__thiscall* FBufferDtor)(void*);
 
 FExtract2 g_extract = nullptr;
 FDraw g_draw = nullptr;
@@ -102,6 +103,9 @@ std::vector<Entry*> g_entries;
 std::vector<Pack*> g_packs;
 alignas(16) uint8_t g_scratch[kBufSize + 0x80];
 bool g_scratchReady = false;
+alignas(16) uint8_t g_master[kBufSize + 0x80];      // the one master buffer: constructed once, reloaded, never destroyed
+bool g_masterReady = false;
+char g_masterStem[32];                                // the faction whose pack g_master holds ("" = none)
 bool g_installed = false;
 int g_on = kBaseHdDefault;
 unsigned g_clock = 0;
@@ -249,31 +253,34 @@ bool Cut(Entry* e, void* master, int w, int h, const uint8_t* rgbq)
     return true;
 }
 
-// Load <stem>'s master once, cut every recorded base sprite of that faction at w x h (the size every base of it is
-// drawn at for this scale), free the master. One load per faction per new scale.
+// Cut every recorded base sprite of <stem> at w x h (the size every base of it is drawn at for this scale) from its
+// master, loading the pack into g_master first unless it already holds it. One load per faction switch.
 void CutFaction(const char* stem, int w, int h, const uint8_t* rgbq)
 {
     char path[MAX_PATH], rel[64];
     if (!PackPath(stem, path, sizeof path)) return;
     PackRel(stem, rel, sizeof rel);
     const DWORD t0 = GetTickCount();
-    uint8_t* master = static_cast<uint8_t*>(_aligned_malloc(kBufSize + 0x80, 16));
-    if (!master) return;
-    memset(master, 0, kBufSize + 0x80);
-    reinterpret_cast<FBufferCtor>(At(kVA_BufferCtor))(master);
-    reinterpret_cast<FLoadPcx>(At(kVA_LoadPcx))(master, path, nullptr, 10, 236);   // load_faction_art's arguments
-    const int bh = Field(master, kBufH);
-    int cut = 0;
-    if (Field(master, kBufW) == kBlockW * kMaster && (bh == kBlockH * kMaster || bh == -kBlockH * kMaster) &&
-        Pixels(master)) {
-        for (Entry* e : g_entries)
-            if (_stricmp(e->name, stem) == 0 && !Find(e, w, h) && Cut(e, master, w, h, rgbq)) ++cut;
-    } else {
-        Log("[basehd] %s did not load as %dx%d -> stock bases for %s\n", rel, kBlockW * kMaster, kBlockH * kMaster, stem);
-        for (Pack* p : g_packs) if (_stricmp(p->name, stem) == 0) p->state = -1;
+    if (!g_masterReady) {
+        reinterpret_cast<FBufferCtor>(At(kVA_BufferCtor))(g_master);
+        g_masterReady = true;
     }
-    reinterpret_cast<FBufferDtor>(At(kVA_BufferDtor))(master);
-    _aligned_free(master);
+    if (_stricmp(g_masterStem, stem) != 0) {
+        g_masterStem[0] = 0;
+        Log("[basehd] loading %s for %dx%d\n", rel, w, h);
+        reinterpret_cast<FLoadPcx>(At(kVA_LoadPcx))(g_master, path, nullptr, 10, 236);   // load_faction_art's arguments
+        const int bh = Field(g_master, kBufH);
+        if (Field(g_master, kBufW) != kBlockW * kMaster || (bh != kBlockH * kMaster && bh != -kBlockH * kMaster) ||
+            !Pixels(g_master)) {
+            Log("[basehd] %s did not load as %dx%d -> stock bases for %s\n", rel, kBlockW * kMaster, kBlockH * kMaster, stem);
+            for (Pack* p : g_packs) if (_stricmp(p->name, stem) == 0) p->state = -1;
+            return;
+        }
+        strncpy_s(g_masterStem, stem, _TRUNCATE);
+    }
+    int cut = 0;
+    for (Entry* e : g_entries)
+        if (_stricmp(e->name, stem) == 0 && !Find(e, w, h) && Cut(e, g_master, w, h, rgbq)) ++cut;
     Log("[basehd] %s: %d sprites cut at %dx%d in %lu ms\n", rel, cut, w, h, GetTickCount() - t0);
 }
 
@@ -331,6 +338,11 @@ int __fastcall ExtractRecorder(void* spr, void* /*edx*/, void* src, int key, int
 int __fastcall DrawHook(void* spr, void* /*edx*/, void* dst, int key, int x, int y, void* table)
 {
     if (!g_on) return g_draw(spr, dst, key, x, y, table);
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        Log("[basehd] first base draw (%zu sprites recorded)\n", g_entries.size());
+    }
     Entry* e = nullptr;
     for (Entry* it : g_entries) if (it->stock == spr) { e = it; break; }
     if (!e) e = Adopt(spr);

@@ -89,7 +89,15 @@ def test_load_faction_art_reads_the_filename_field_and_loads_with_10_236(pe):
     calls = [LOAD_FACTION_ART + k for k in range(i, i + 24)
              if body[k] == 0xE8 and LOAD_FACTION_ART + k + 5 + struct.unpack("<i", body[k + 1:k + 5])[0] == LOAD_PCX]
     assert calls
-    assert re.search(r"kVA_LoadPcx\)\)\(master, path, nullptr, 10, 236\)", HD)
+    assert re.search(r"kVA_LoadPcx\)\)\(g_master, path, nullptr, 10, 236\)", HD)
+
+
+def test_the_master_buffer_is_never_destroyed():
+    """Buffer_dtor 0x5D7410 -> Buffer_close DeleteObject's the GDI objects a buffer holds. Destroying the master after
+    each cut broke the game's palette in game (a dark Planetfall box, then an access violation in Texture_draw on the
+    first map draw): basehd keeps ONE master, constructed once and reloaded, like load_faction_art's loading canvas."""
+    assert "0x5D7410" not in HD.upper().replace("0X", "0x") and "Dtor" not in HD
+    assert re.search(r"alignas\(16\) uint8_t g_master\[", HD)
 
 
 def test_draw_dest_takes_the_unscaled_branch_when_num_equals_den(pe):
