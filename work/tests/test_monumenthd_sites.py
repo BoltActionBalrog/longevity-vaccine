@@ -112,3 +112,12 @@ def test_movie_frame_safeguards():
     assert "catch (const std::bad_alloc&)" in FRAME
     assert "return &g_frame;" in FRAME                                            # decoded once, kept
     assert re.search(r'"HD Monument", &MonumentHdAvailable', PREFS) and re.search(r'"Movie Frame", &MovieFrameAvailable', PREFS)
+
+
+def test_mirror_wins_over_the_key_outside_the_picture():
+    """photo_resample.h: past the picture's edge, Edge::Mirror must be tested before the key -- else a keyed picture
+    (the Monument's screen is its key) read as see-through there and the game's black bars and chrome showed in the
+    gap (in game, 2026-11-12: a dark frame round the whole Monument)."""
+    src = (SRC_DIR / "photo_resample.h").read_text(encoding="utf-8")
+    block = src[src.index("if (px < 0 || py < 0 || px >= sw || py >= sh) {"):]
+    assert block.index("Edge::Mirror") < block.index("key >= 0")

@@ -50,8 +50,8 @@ inline int Reflect(int v, int n)
 
 // Source rect from (sx, sy), f source px per destination px on both axes, into dst (dw x dh, row pitch dp).
 // src: sw x sh index pixels (row pitch spitch), pal: its 768-byte palette. key >= 0: that source index is see-through;
-// a destination pixel more than half see-through becomes keyOut. Outside the picture reads as see-through (key >= 0),
-// else black or the mirrored picture (edge).
+// a destination pixel more than half see-through becomes keyOut. Outside the picture reads as the mirrored picture
+// (Edge::Mirror), else as see-through (key >= 0) or black.
 inline void Resample(const uint8_t* src, int sw, int sh, int spitch, const uint8_t* pal, int key, double sx, double sy,
                      double f, uint8_t* dst, int dw, int dh, int dp, const Target& t, uint8_t keyOut,
                      Edge edge = Edge::Black)
@@ -73,10 +73,16 @@ inline void Resample(const uint8_t* src, int sw, int sh, int spitch, const uint8
                     const double wgt = wx * wy;
                     int px = xx, py = yy;
                     if (px < 0 || py < 0 || px >= sw || py >= sh) {
-                        if (key >= 0) { keyw += wgt; continue; }
-                        if (edge == Edge::Black) { wsum += wgt; continue; }
-                        px = Reflect(px, sw);
-                        py = Reflect(py, sh);
+                        if (edge == Edge::Mirror) {          // mirroring wins: the picture continues past its edge
+                            px = Reflect(px, sw);
+                            py = Reflect(py, sh);
+                        } else if (key >= 0) {
+                            keyw += wgt;
+                            continue;
+                        } else {
+                            wsum += wgt;                     // black
+                            continue;
+                        }
                     }
                     const int v = src[static_cast<size_t>(py) * spitch + px];
                     if (v == key) { keyw += wgt; continue; }
