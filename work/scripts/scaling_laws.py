@@ -15080,3 +15080,22 @@ def palette_box_shrink(src: List[List[int]], dw: int, dh: int, rgb: List[Tuple[i
             row.append(best)
         out.append(row)
     return out
+
+
+# ---- HD main menu (src/uimod/src/menuhd_law.h is the port) -------------------------------------------------------
+
+MENU_W, MENU_H = 1024, 768          # the stock opening picture
+MENU_STRIP_W = 404                  # custom_planet's S#L#C#.PCX planet strips: right-aligned, 404 x 768
+
+
+def menu_hd_layout(w: int, h: int) -> Tuple[int, int, int, int, int, int]:
+    """LAW (PROPORTIONATE, UNIFORM) -- the HD main menu on a w x h screen: one scale num/den for everything,
+    the stock layout's own anchors kept. Wide screens (w/h >= 4:3) scale by height (num/den = h/768): the left part
+    (logo, suns, moons) stays left-aligned, the planet strip right-aligned, the starfield fills between. Narrower ones
+    scale by width (w/1024) and centre the 4:3 core vertically (black bands). Returns
+    (num, den, core_h, y0, strip_w, strip_x): core_h = fl(768 num/den), y0 = (h - core_h) // 2,
+    strip_w = fl(404 num/den), strip_x = w - strip_w. Identity at 1024x768: (1, 1, 768, 0, 404, 620)."""
+    num, den = (h, MENU_H) if w * MENU_H >= h * MENU_W else (w, MENU_W)
+    core_h = MENU_H * num // den
+    strip_w = MENU_STRIP_W * num // den
+    return (num, den, core_h, (h - core_h) // 2, strip_w, w - strip_w)

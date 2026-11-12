@@ -37,6 +37,7 @@
 #include "riotfix.h"
 #include "basehd.h"
 #include "objecthd.h"
+#include "menuhd.h"
 #include "blinkfix.h"
 #include "cursorscale.h"
 #include "hudmovesfix.h"
@@ -407,6 +408,11 @@ extern "C" void __stdcall Init(HMODULE self)
     // ([UIMod] ObjectHD) switches it live. 22 byte-checked E8 retargets (21 in MapWin_gen_terrain_poly + the
     // native-unit draw), cave-free, both exes. See objecthd.cpp.
     InstallObjectHd();
+
+    // The HD main menu and planet setup: <game>\menu\hd\ (panorama + custom_planet strips + moons) composed at any
+    // resolution by one uniform scale. Nothing is patched without menu\hd\space_x3.pcx; "HD Main Menu" in Longevity
+    // Mod Preferences ([UIMod] MenuHD) switches it. 13 byte-checked E8 retargets, cave-free, both exes. See menuhd.cpp.
+    InstallMenuHd();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.
     InstallCursorScale();

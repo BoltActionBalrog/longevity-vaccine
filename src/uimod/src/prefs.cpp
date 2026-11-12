@@ -55,6 +55,7 @@
 #include "update.h"
 #include "basehd.h"
 #include "objecthd.h"
+#include "menuhd.h"
 
 void UimodLog(const char* msg);   // init.cpp: uimod.log + debugger
 void UimodDbg(const char* msg);   // init.cpp: only with [UIMod] DebugLog=1 (developer geometry dumps)
@@ -221,6 +222,7 @@ struct ArtRow { const char* text; bool (*avail)(); int (*get)(); void (*set)(int
 const ArtRow kArtRows[] = {
     { "HD Base Sprites", &BaseHdAvailable, &BaseHdGet, &BaseHdSet, &BaseHdSave, kBaseHdDefault },   // basehd.cpp, [UIMod] BaseHD
     { "HD Map Objects", &ObjectHdAvailable, &ObjectHdGet, &ObjectHdSet, &ObjectHdSave, kObjectHdDefault },   // objecthd.cpp, [UIMod] ObjectHD
+    { "HD Main Menu", &MenuHdAvailable, &MenuHdGet, &MenuHdSet, &MenuHdSave, kMenuHdDefault },   // menuhd.cpp, [UIMod] MenuHD
 };
 constexpr int  kArtRows_n = static_cast<int>(sizeof kArtRows / sizeof kArtRows[0]);
 static_assert(kArtRows_n <= kArtRowMax, "art row ids 0x7A..0x7F");

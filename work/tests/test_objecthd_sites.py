@@ -116,7 +116,7 @@ def test_masters_never_go_through_the_engine_loader():
     itself and frees them, so it calls neither Buffer_load_pcx nor Buffer_dtor."""
     upper = HD.upper()
     assert "0X5D7DE0" not in upper and "0X5D7410" not in upper
-    assert "DecodePcx(" in HD and "free(m);" in HD
+    assert "pcx::Decode(" in HD and "free(m);" in HD
 
 
 def test_draws_unscaled_with_den_untouched():

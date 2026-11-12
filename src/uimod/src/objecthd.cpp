@@ -26,7 +26,7 @@
 // PaletteBoxShrink, cut through the engine's own Sprite_extract_2 with the stock key, and drawn with SCALE_NUM_G =
 // SCALE_DEN_G (SCALE_DEN_G untouched), top-left at the same (x, y). Each object keeps its last kSlots sizes.
 // The master is NOT loaded through Buffer_load_pcx: a pcx-loaded Buffer must never be destroyed (basehd.cpp), and
-// three 8x sheets kept for the session would be ~150 MB in a 32-bit process. So a sheet's pack is decoded here into
+// three 8x sheets kept for the session would be ~150 MB in a 32-bit process. So a sheet's pack is decoded (pcx_decode.h) into
 // plain memory with load_terrain's own index map (+10 mod 256, then 7 and 6 -> 9), every object of that sheet is cut
 // at the size asked for in one pass, and the memory is freed. One decode per sheet per new size.
 // Levers: the 21 draw calls in MapWin_gen_terrain_poly and the native-unit draw, byte-checked E8 retargets,
@@ -37,6 +37,7 @@
 
 #include "objecthd.h"
 #include "basehd_law.h"
+#include "pcx_decode.h"
 
 #include <windows.h>
 #include <cstdarg>
@@ -218,43 +219,6 @@ bool PackPath(int sheet, char* out, size_t n)
     return _snprintf_s(out, n, _TRUNCATE, "%s%s", g_dir, rel) > 0;
 }
 
-// Decode an 8-bit one-plane PCX into a malloc'd w x h index image (free() it). Null on any mismatch.
-uint8_t* DecodePcx(const char* path, int wantW, int wantH)
-{
-    FILE* f = nullptr;
-    if (fopen_s(&f, path, "rb") != 0 || !f) return nullptr;
-    uint8_t hdr[128];
-    uint8_t* img = nullptr;
-    if (fread(hdr, 1, sizeof hdr, f) == sizeof hdr && hdr[0] == 10 && hdr[2] == 1 && hdr[3] == 8 && hdr[65] == 1) {
-        const int w = (hdr[8] | hdr[9] << 8) - (hdr[4] | hdr[5] << 8) + 1;
-        const int h = (hdr[10] | hdr[11] << 8) - (hdr[6] | hdr[7] << 8) + 1;
-        const int bpl = hdr[66] | hdr[67] << 8;
-        if (w == wantW && h == wantH && bpl >= w) {
-            img = static_cast<uint8_t*>(malloc(static_cast<size_t>(w) * h));
-            uint8_t* line = static_cast<uint8_t*>(malloc(bpl));
-            bool ok = img && line;
-            for (int y = 0; ok && y < h; ++y) {
-                for (int x = 0; ok && x < bpl;) {
-                    int c = fgetc(f);
-                    if (c == EOF) { ok = false; break; }
-                    int run = 1;
-                    if ((c & 0xC0) == 0xC0) {
-                        run = c & 0x3F;
-                        c = fgetc(f);
-                        if (c == EOF) { ok = false; break; }
-                    }
-                    for (; run > 0 && x < bpl; --run) line[x++] = static_cast<uint8_t>(c);
-                }
-                if (ok) memcpy(img + static_cast<size_t>(y) * w, line, w);
-            }
-            free(line);
-            if (!ok) { free(img); img = nullptr; }
-        }
-    }
-    fclose(f);
-    return img;
-}
-
 // Whether a sheet has a usable pack (checked once; only the header is read).
 bool HasPack(int sheet)
 {
@@ -326,7 +290,8 @@ void CutSheet(int sheet, int w, int h, const uint8_t* rgbq)
     if (!PackPath(sheet, path, sizeof path)) return;
     PackRel(sheet, rel, sizeof rel);
     const DWORD t0 = GetTickCount();
-    uint8_t* m = DecodePcx(path, kSheetW * kMaster, kSheetH * kMaster);
+    int mw = 0, mh = 0;
+    uint8_t* m = pcx::Decode(path, &mw, &mh, nullptr, kSheetW * kMaster, kSheetH * kMaster);
     if (!m) {
         Log("[objecthd] %s could not be decoded (or no memory) -> stock objects for it\n", rel);
         g_state[sheet] = -1;
