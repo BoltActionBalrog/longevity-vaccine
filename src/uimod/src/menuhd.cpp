@@ -21,8 +21,8 @@
 // So the menu is composed, not stretched: the panorama left-aligned and the strip right-aligned, both at one scale
 // num/den (menuhd_law::MenuLayout: height-bound on screens at least 4:3 wide, else width-bound with the 4:3 core
 // centred, black bands). The main menu shows S3L2C2; custom_planet's previews are drawn at the same place by the same
-// law, so every step lines up at any size. Resampling is photographic: each pixel the area-weighted average colour
-// of the source pixels it covers, Floyd-Steinberg-dithered into the opening's own colours (loaded indices 10..245);
+// law, so every step lines up at any size. Resampling is photographic (photo_resample.h): each pixel the
+// area-weighted average colour of the source pixels it covers, Floyd-Steinberg-dithered into the opening's own colours (loaded indices 10..245);
 // a moon pixel stays see-through when more than half its footprint is the key.
 // Levers, all byte-checked E8 retargets, cave-free (work/tests/test_menuhd_sites.py pins them):
 //  * @0x589AA1 -> LoadHook: records which opening is loading, then the stock load.
@@ -38,6 +38,7 @@
 #include "menuhd.h"
 #include "menuhd_law.h"
 #include "pcx_decode.h"
+#include "photo_resample.h"
 
 #include <windows.h>
 #include <cstdarg>
@@ -95,9 +96,8 @@ struct Loaded { void* buf; char stem[16]; };        // custom_planet's preview B
 Loaded g_loaded[12];
 int g_loadedNext = 0;
 
-uint8_t g_rgb[256][3];                               // canvas index -> colour (the opening's palette, loaded)
+photo::Target g_target;                              // the opening's colours (loaded), for the dither
 char g_rgbFrom[MAX_PATH];
-std::vector<uint8_t> g_lut;                          // 5-bit RGB -> nearest canvas index in 10..245
 uint8_t g_black = kRemapBase;
 
 std::vector<uint8_t> g_menu;                         // the composed main menu (canvas indices), for g_menuW x g_menuH
@@ -175,92 +175,16 @@ bool LoadColours()
 {
     char path[MAX_PATH];
     _snprintf_s(path, sizeof path, _TRUNCATE, "%s%s", g_dir, "xopeninga.pcx");
-    if (!g_lut.empty() && strcmp(g_rgbFrom, path) == 0) return true;
+    if (!g_target.lut.empty() && strcmp(g_rgbFrom, path) == 0) return true;
     int w = 0, h = 0;
     uint8_t pal[768];
     uint8_t* px = pcx::Decode(path, &w, &h, pal);
     if (!px) return false;
     free(px);
-    memset(g_rgb, 0, sizeof g_rgb);
-    for (int i = 0; i < kRemapCount; ++i)
-        for (int c = 0; c < 3; ++c) g_rgb[kRemapBase + i][c] = pal[i * 3 + c];
-    g_lut.assign(32 * 32 * 32, 0);
-    for (int i = 0; i < 32 * 32 * 32; ++i) {
-        const int r = (i >> 10) * 255 / 31, g = (i >> 5 & 31) * 255 / 31, b = (i & 31) * 255 / 31;
-        int best = kRemapBase, bestD = 1 << 30;
-        for (int v = kRemapBase; v < kRemapBase + kRemapCount; ++v) {
-            const int dr = r - g_rgb[v][0], dg = g - g_rgb[v][1], db = b - g_rgb[v][2];
-            const int d = 2 * dr * dr + 4 * dg * dg + 3 * db * db;
-            if (d < bestD) { bestD = d; best = v; }
-        }
-        g_lut[i] = static_cast<uint8_t>(best);
-    }
-    g_black = g_lut[0];
+    photo::Build(g_target, pal, kRemapBase, kRemapCount);
+    g_black = g_target.lut[0];
     strncpy_s(g_rgbFrom, path, _TRUNCATE);
     return true;
-}
-
-// Resample the source rect starting at (sx, sy) -- f source pixels per destination pixel on both axes (uniform) --
-// into dst (dw x dh, row pitch dp, canvas indices): area-weighted average colour + Floyd-Steinberg into the canvas
-// colours. key >= 0: source pixels of that index are see-through; a destination pixel more than half see-through
-// becomes kKeyLoaded. Source pixels outside the image count as see-through when key >= 0, else as black.
-void Resample(const uint8_t* src, int sw, int sh, const uint8_t* pal, int key, double sx, double sy, double f,
-              uint8_t* dst, int dw, int dh, int dp)
-{
-    std::vector<float> err(static_cast<size_t>(dw + 2) * 3 * 2, 0.0f);
-    float* cur = err.data();
-    float* nxt = cur + (dw + 2) * 3;
-    for (int y = 0; y < dh; ++y) {
-        const double y0 = sy + y * f, y1 = y0 + f;
-        for (int x = 0; x < dw; ++x) {
-            const double x0 = sx + x * f, x1 = x0 + f;
-            double acc[3] = {0, 0, 0}, wsum = 0, keyw = 0;
-            for (int yy = static_cast<int>(y0); yy < y1; ++yy) {
-                const double wy = (yy + 1 < y1 ? yy + 1 : y1) - (yy > y0 ? yy : y0);
-                if (wy <= 0) continue;
-                for (int xx = static_cast<int>(x0); xx < x1; ++xx) {
-                    const double wx = (xx + 1 < x1 ? xx + 1 : x1) - (xx > x0 ? xx : x0);
-                    if (wx <= 0) continue;
-                    const double wgt = wx * wy;
-                    if (xx < 0 || yy < 0 || xx >= sw || yy >= sh) {
-                        if (key >= 0) keyw += wgt;
-                        else wsum += wgt;                         // black
-                        continue;
-                    }
-                    const int v = src[static_cast<size_t>(yy) * sw + xx];
-                    if (v == key) { keyw += wgt; continue; }
-                    acc[0] += wgt * pal[v * 3];
-                    acc[1] += wgt * pal[v * 3 + 1];
-                    acc[2] += wgt * pal[v * 3 + 2];
-                    wsum += wgt;
-                }
-            }
-            uint8_t& out = dst[static_cast<size_t>(y) * dp + x];
-            if (key >= 0 && keyw > wsum) {
-                out = kKeyLoaded;
-                continue;
-            }
-            float c[3];
-            for (int i = 0; i < 3; ++i) {
-                float v = static_cast<float>(wsum > 0 ? acc[i] / wsum : 0) + cur[(x + 1) * 3 + i];
-                c[i] = v < 0 ? 0 : v > 255 ? 255 : v;
-            }
-            const int r = static_cast<int>(c[0] + 0.5f), g = static_cast<int>(c[1] + 0.5f), b = static_cast<int>(c[2] + 0.5f);
-            const uint8_t idx = g_lut[(r >> 3) << 10 | (g >> 3) << 5 | (b >> 3)];
-            out = idx;
-            for (int i = 0; i < 3; ++i) {
-                const float e = c[i] - g_rgb[idx][i];
-                cur[(x + 2) * 3 + i] += e * 7 / 16;
-                nxt[x * 3 + i] += e * 3 / 16;
-                nxt[(x + 1) * 3 + i] += e * 5 / 16;
-                nxt[(x + 2) * 3 + i] += e * 1 / 16;
-            }
-        }
-        float* t = cur;
-        cur = nxt;
-        nxt = t;
-        memset(nxt, 0, sizeof(float) * (dw + 2) * 3);
-    }
 }
 
 // A preview (S#L#C# strip or MOON#) at dw x dh into dst: the HD file at 3x, else the stock file at 1x, by the law's
@@ -280,7 +204,8 @@ bool DrawPreview(const char* stem, int num, int den, uint8_t* dst, int dw, int d
     uint8_t pal[768];
     uint8_t* px = pcx::Decode(path, &w, &h, pal);
     if (!px) return false;
-    Resample(px, w, h, pal, moon ? 255 : -1, 0, 0, static_cast<double>(scale) * den / num, dst, dw, dh, dp);
+    photo::Resample(px, w, h, w, pal, moon ? 255 : -1, 0, 0, static_cast<double>(scale) * den / num, dst, dw, dh, dp,
+                    g_target, kKeyLoaded);
     free(px);
     return true;
 }
@@ -302,7 +227,8 @@ bool ComposeMenu(int w, int h)
     }
     g_menu.assign(static_cast<size_t>(w) * h, g_black);
     uint8_t* core = g_menu.data() + static_cast<size_t>(L.y0) * w;
-    Resample(pano, pw, ph, pal, -1, 0, 0, static_cast<double>(kArt) * L.den / L.num, core, L.stripX, L.coreH, w);
+    photo::Resample(pano, pw, ph, pw, pal, -1, 0, 0, static_cast<double>(kArt) * L.den / L.num, core, L.stripX, L.coreH, w,
+                    g_target, kKeyLoaded);
     free(pano);
     if (!DrawPreview("S3L2C2", L.num, L.den, core + L.stripX, L.stripW, L.coreH, w))
         Log("[menuhd] no planet strip S3L2C2 -> the menu shows the panorama only\n");

@@ -415,9 +415,10 @@ extern "C" void __stdcall Init(HMODULE self)
     // Mod Preferences ([UIMod] MenuHD) switches it. 13 byte-checked E8 retargets, cave-free, both exes. See menuhd.cpp.
     InstallMenuHd();
 
-    // Planetary Monument near view across the whole screen: <game>\monument\monzoomN_<W>x<H>.pcx painted over the whole
-    // canvas, lined up on the screen of the 4:3 backdrop drawn first. Nothing is patched without a file in monument\;
-    // [UIMod] MonumentHD=0 turns it off. Two byte-checked E8 retargets, cave-free, both exes. See monumenthd.cpp.
+    // The Planetary Monument across the whole screen: <game>\monument\ (near + far backdrops) painted over the canvas by
+    // the mod's own Monument laws, above native scale only. Nothing is patched without a file in monument\; "HD
+    // Monument" in Longevity Mod Preferences ([UIMod] MonumentHD) switches it. Three byte-checked E8 retargets,
+    // cave-free. See monumenthd.cpp.
     InstallMonumentHd();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.

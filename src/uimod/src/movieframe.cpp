@@ -1,14 +1,16 @@
 // Movie frame: the cinematics play inside a picture instead of filling the screen with black bars.
 //
-// The movies are small (400x192 project clips, 320x240 faction clips, 592x288 opening); fitted to a modern
-// screen they are blown up 4-5x. A frame picture -- e.g. the Planetary Monument's near view with the movie on its
-// screen -- keeps them near 2x and gives the rest of the screen something to show. The picture marks its screen with
-// pure magenta; the movie is fitted into that area (movie.cpp), and the post-movie caption follows it (its layout is
-// relative to the movie's rectangle).
+// The movies are small (400x192 project clips, 320x240 faction clips, 592x288 opening); a frame picture -- e.g. the
+// Planetary Monument's near view with the movie on its screen -- gives the rest of the screen something to show. The
+// picture marks its screen with pure magenta; the movie is fitted into that area (movie.cpp), and the post-movie
+// caption follows it (its layout is relative to the movie's rectangle). The movie's size therefore comes from the
+// frame picture, not from the screen: a player who installs a frame chooses that look, and "Movie Frame" in
+// Longevity Mod Preferences switches it back to the full-screen fit.
 //
 // Files: <game>\movies\frame\*.png / *.jpg / *.bmp, any size. The one closest to the screen's shape is used, scaled
-// to cover the screen (centred crop) with WIC's high-quality scaler. True colour: the movie player composes 32-bit,
-// so the frame is not bound to the game's palette. [UIMod] MovieFrame=0 turns it off.
+// to cover the screen (centred crop of at most kMaxCrop; a shape further off is fitted whole, black around) with
+// WIC's high-quality scaler. True colour: the movie player composes 32-bit, so the frame is not bound to the game's
+// palette. Decoded once per screen size and kept (w * h * 4 bytes) so later movies start without the decode.
 
 #include "movieframe.h"
 
@@ -16,23 +18,30 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <new>
 
 void UimodLog(const char* msg);
 
 namespace {
 
-bool FrameEnabled(const char* dir)
-{
-    char ini[MAX_PATH];
-    _snprintf_s(ini, sizeof ini, _TRUNCATE, "%sAlpha Centauri.ini", dir);
-    return GetPrivateProfileIntA("UIMod", "MovieFrame", 1, ini) != 0;
-}
+constexpr double kMaxCrop = 0.12;              // the most of the picture's width or height cut away to cover
+
+int g_on = -1;                                 // -1: not read from the ini yet
+MovieFrame g_frame;                            // the kept frame, for g_frame.w x g_frame.h (empty: none yet)
+bool g_failed = false;                         // the last attempt at this size failed: don't retry every movie
+int g_failW = 0, g_failH = 0;
 
 void GameDir(char* out, size_t n)
 {
     GetModuleFileNameA(nullptr, out, static_cast<DWORD>(n));
     char* slash = strrchr(out, '\\');
     if (slash) slash[1] = '\0';
+}
+
+void IniPath(char* out, size_t n)
+{
+    GameDir(out, n);
+    strcat_s(out, n, "Alpha Centauri.ini");
 }
 
 struct ComInit {
@@ -48,6 +57,14 @@ template <class T> struct Com {
     T* operator->() const { return p; }
 };
 
+// WIC's factory: the current one, else the Windows 7 one (CLSID_WICImagingFactory names the Windows 8 factory when
+// built for Windows 8+; Windows 7 SP1 without the platform update has only the first).
+bool Factory(Com<IWICImagingFactory>& f)
+{
+    return SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) ||
+           SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory1, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f)));
+}
+
 // The image file's size (frame 0), or false.
 bool ImageSize(IWICImagingFactory* f, const wchar_t* path, UINT* w, UINT* h)
 {
@@ -57,9 +74,11 @@ bool ImageSize(IWICImagingFactory* f, const wchar_t* path, UINT* w, UINT* h)
            SUCCEEDED(dec->GetFrame(0, &fr)) && SUCCEEDED(fr->GetSize(w, h)) && *w > 0 && *h > 0;
 }
 
-// movies\frame\* closest to w:h in shape (ties: the larger).
-bool PickFrame(IWICImagingFactory* f, const char* dir, int w, int h, wchar_t* out, size_t n)
+// movies\frame\* closest to w:h in shape (ties: the larger). name: the file name alone, for the log.
+bool PickFrame(IWICImagingFactory* f, int w, int h, wchar_t* out, size_t n, wchar_t* name, size_t nn)
 {
+    char dir[MAX_PATH];
+    GameDir(dir, sizeof dir);
     wchar_t wdir[MAX_PATH];
     MultiByteToWideChar(CP_ACP, 0, dir, -1, wdir, MAX_PATH);
     bool found = false;
@@ -82,6 +101,7 @@ bool PickFrame(IWICImagingFactory* f, const char* dir, int w, int h, wchar_t* ou
                 best = d;
                 bestArea = area;
                 wcsncpy_s(out, n, path, _TRUNCATE);
+                wcsncpy_s(name, nn, fd.cFileName, _TRUNCATE);
                 found = true;
             }
         } while (FindNextFileW(hf, &fd));
@@ -123,18 +143,23 @@ bool FindScreen(std::vector<uint32_t>& px, int w, int h, RECT* r)
     return true;
 }
 
-} // namespace
-
-bool LoadMovieFrame(int w, int h, MovieFrame* out)
+void Fail(const char* why, int w, int h)
 {
-    char dir[MAX_PATH];
-    GameDir(dir, sizeof dir);
-    if (w <= 0 || h <= 0 || !FrameEnabled(dir)) return false;
+    char line[256];
+    _snprintf_s(line, sizeof line, _TRUNCATE, "[uimod] movie frame: %s -> black bars\n", why);
+    UimodLog(line);
+    g_failed = true;
+    g_failW = w;
+    g_failH = h;
+}
+
+bool Decode(int w, int h)
+{
     ComInit com;
     Com<IWICImagingFactory> f;
-    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f)))) return false;
-    wchar_t path[MAX_PATH];
-    if (!PickFrame(f.p, dir, w, h, path, MAX_PATH)) return false;
+    if (!Factory(f)) { Fail("no WIC imaging factory", w, h); return false; }
+    wchar_t path[MAX_PATH], name[MAX_PATH];
+    if (!PickFrame(f.p, w, h, path, MAX_PATH, name, MAX_PATH)) return false;
 
     const DWORD t0 = GetTickCount();
     Com<IWICBitmapDecoder> dec;
@@ -147,40 +172,102 @@ bool LoadMovieFrame(int w, int h, MovieFrame* out)
         FAILED(f->CreateFormatConverter(&conv)) ||
         FAILED(conv->Initialize(fr.p, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0,
                                 WICBitmapPaletteTypeCustom))) {
-        UimodLog("[uimod] movie frame: could not decode the picture -> black bars\n");
+        Fail("could not decode the picture", w, h);
         return false;
     }
-    // Cover the screen: scale so both sides reach it, then copy the centred w x h out of the scaled picture.
-    const double s = static_cast<double>(w) / iw > static_cast<double>(h) / ih ? static_cast<double>(w) / iw
-                                                                                : static_cast<double>(h) / ih;
-    const UINT sw = static_cast<UINT>(iw * s + 0.5) < static_cast<UINT>(w) ? w : static_cast<UINT>(iw * s + 0.5);
-    const UINT sh = static_cast<UINT>(ih * s + 0.5) < static_cast<UINT>(h) ? h : static_cast<UINT>(ih * s + 0.5);
-    // Nearest-neighbour keeps the magenta edge exact; the frame pictures are made at screen sizes, so any scale is mild.
-    if (FAILED(f->CreateBitmapScaler(&sc)) ||
+    // Cover the screen (centred crop) when that cuts at most kMaxCrop of the picture; else fit it whole, black around.
+    const double cover = static_cast<double>(w) / iw > static_cast<double>(h) / ih ? static_cast<double>(w) / iw
+                                                                                   : static_cast<double>(h) / ih;
+    const double fit = static_cast<double>(w) / iw < static_cast<double>(h) / ih ? static_cast<double>(w) / iw
+                                                                                 : static_cast<double>(h) / ih;
+    const double cropShare = 1.0 - fit / cover;
+    const double s = cropShare <= kMaxCrop ? cover : fit;
+    const UINT sw = static_cast<UINT>(iw * s + 0.5), sh = static_cast<UINT>(ih * s + 0.5);
+    if (sw == 0 || sh == 0 || FAILED(f->CreateBitmapScaler(&sc)) ||
         FAILED(sc->Initialize(conv.p, sw, sh, (sw == iw && sh == ih) ? WICBitmapInterpolationModeNearestNeighbor
                                                                        : WICBitmapInterpolationModeFant))) {
-        UimodLog("[uimod] movie frame: could not scale the picture -> black bars\n");
+        Fail("could not scale the picture", w, h);
         return false;
     }
-    out->w = w;
-    out->h = h;
-    out->px.assign(static_cast<size_t>(w) * h, 0);
-    const WICRect crop{ static_cast<INT>((sw - w) / 2), static_cast<INT>((sh - h) / 2), w, h };
-    if (FAILED(sc->CopyPixels(&crop, static_cast<UINT>(w) * 4, static_cast<UINT>(out->px.size() * 4),
-                              reinterpret_cast<BYTE*>(out->px.data())))) {
-        UimodLog("[uimod] movie frame: could not read the picture -> black bars\n");
+    MovieFrame fresh;
+    try {
+        fresh.px.assign(static_cast<size_t>(w) * h, 0xFF000000);
+    } catch (const std::bad_alloc&) {               // the movie player's crash guard covers delay-load errors only
+        Fail("not enough memory for the frame", w, h);
         return false;
     }
-    if (!FindScreen(out->px, w, h, &out->screen)) {
-        UimodLog("[uimod] movie frame: the picture has no magenta (255,0,255) screen area -> black bars\n");
+    fresh.w = w;
+    fresh.h = h;
+    // the scaled picture's overlap with the screen, centred both ways
+    const int cw = static_cast<int>(sw) < w ? static_cast<int>(sw) : w;
+    const int ch = static_cast<int>(sh) < h ? static_cast<int>(sh) : h;
+    const WICRect crop{ static_cast<INT>((static_cast<int>(sw) - cw) / 2), static_cast<INT>((static_cast<int>(sh) - ch) / 2), cw, ch };
+    uint32_t* dstTopLeft = fresh.px.data() + static_cast<size_t>((h - ch) / 2) * w + (w - cw) / 2;
+    if (FAILED(sc->CopyPixels(&crop, static_cast<UINT>(w) * 4,
+                              static_cast<UINT>((fresh.px.size() - (dstTopLeft - fresh.px.data())) * 4),
+                              reinterpret_cast<BYTE*>(dstTopLeft)))) {
+        Fail("could not read the picture", w, h);
         return false;
     }
-    char line[MAX_PATH + 128];
-    _snprintf_s(line, sizeof line, _TRUNCATE, "[uimod] movie frame: %ls at %dx%d, screen %ldx%ld at (%ld,%ld), %lu ms\n",
-                path, w, h, out->screen.right - out->screen.left, out->screen.bottom - out->screen.top,
-                out->screen.left, out->screen.top, GetTickCount() - t0);
+    if (!FindScreen(fresh.px, w, h, &fresh.screen)) {
+        Fail("the picture has no magenta (255,0,255) screen area", w, h);
+        return false;
+    }
+    g_frame = std::move(fresh);
+    char line[MAX_PATH + 160];
+    _snprintf_s(line, sizeof line, _TRUNCATE,
+                "[uimod] movie frame: movies\\frame\\%ls at %dx%d (%s), screen %ldx%ld at (%ld,%ld), %lu ms\n", name, w, h,
+                s == cover ? "cover" : "fit", g_frame.screen.right - g_frame.screen.left,
+                g_frame.screen.bottom - g_frame.screen.top, g_frame.screen.left, g_frame.screen.top, GetTickCount() - t0);
     UimodLog(line);
     return true;
+}
+
+} // namespace
+
+bool MovieFrameAvailable()
+{
+    char dir[MAX_PATH], pattern[MAX_PATH];
+    GameDir(dir, sizeof dir);
+    for (const char* ext : { "png", "jpg", "bmp" }) {
+        _snprintf_s(pattern, sizeof pattern, _TRUNCATE, "%smovies\\frame\\*.%s", dir, ext);
+        WIN32_FIND_DATAA fd;
+        const HANDLE h = FindFirstFileA(pattern, &fd);
+        if (h != INVALID_HANDLE_VALUE) { FindClose(h); return true; }
+    }
+    return false;
+}
+
+int MovieFrameGet()
+{
+    if (g_on < 0) {
+        char ini[MAX_PATH];
+        IniPath(ini, sizeof ini);
+        g_on = GetPrivateProfileIntA("UIMod", "MovieFrame", kMovieFrameDefault, ini) != 0 ? 1 : 0;
+    }
+    return g_on;
+}
+
+void MovieFrameSet(int on)
+{
+    g_on = on ? 1 : 0;
+    if (!g_on) { g_frame = MovieFrame{}; g_failed = false; }   // the kept frame is not needed
+}
+
+void MovieFrameSave()
+{
+    char ini[MAX_PATH];
+    IniPath(ini, sizeof ini);
+    WritePrivateProfileStringA("UIMod", "MovieFrame", MovieFrameGet() ? "1" : "0", ini);
+}
+
+const MovieFrame* LoadMovieFrame(int w, int h)
+{
+    if (w <= 0 || h <= 0 || !MovieFrameGet()) return nullptr;
+    if (g_frame.w == w && g_frame.h == h && !g_frame.px.empty()) return &g_frame;
+    if (g_failed && g_failW == w && g_failH == h) return nullptr;
+    g_frame = MovieFrame{};
+    return Decode(w, h) ? &g_frame : nullptr;
 }
 
 RECT MovieFrameFit(const MovieFrame& f, int clipW, int clipH)

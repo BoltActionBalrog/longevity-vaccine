@@ -147,6 +147,9 @@
     <ClInclude Include="src\menuhd.h" />
     <ClInclude Include="src\menuhd_law.h" />
     <ClInclude Include="src\pcx_decode.h" />
+    <ClInclude Include="src\photo_resample.h" />
+    <ClInclude Include="src\monumenthd.h" />
+    <ClInclude Include="src\movieframe.h" />
     <ClInclude Include="src\version.h" />
     <ClInclude Include="src\vidsafety.h" />
     <ClInclude Include="src\vidwatch.h" />

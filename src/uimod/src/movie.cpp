@@ -392,11 +392,11 @@ void DecodeAndPlay(const char* name, const char* path, HWND hwnd, int scrW, int 
     HGDIOBJ oldbm = (hbb && memDC) ? SelectObject(memDC, hbb) : nullptr;
     const int bbStride = scrW * 4;
     // The frame picture around the movie (movieframe.cpp), else black bars.
-    MovieFrame frame;
-    const bool framed = LoadMovieFrame(scrW, scrH, &frame);
+    const MovieFrame* frame = LoadMovieFrame(scrW, scrH);   // kept between movies (movieframe.cpp)
+    const bool framed = frame != nullptr;
     auto paintBackground = [&]() {
         if (!bb) return;
-        if (framed) memcpy(bb, frame.px.data(), static_cast<size_t>(bbStride) * scrH);
+        if (framed) memcpy(bb, frame->px.data(), static_cast<size_t>(bbStride) * scrH);
         else memset(bb, 0, static_cast<size_t>(bbStride) * scrH);
     };
     paintBackground();
@@ -439,7 +439,7 @@ void DecodeAndPlay(const char* name, const char* path, HWND hwnd, int scrW, int 
             while (!skip && avcodec_receive_frame(ctx, frm) == 0) {
                 if (!sws || frm->width != curW || frm->height != curH || frm->format != curFmt) {
                     curW = frm->width; curH = frm->height; curFmt = frm->format;
-                    dst = framed ? MovieFrameFit(frame, curW, curH) : FitRect(curW, curH, scrW, scrH);
+                    dst = framed ? MovieFrameFit(*frame, curW, curH) : FitRect(curW, curH, scrW, scrH);
                     if (sws) sws_freeContext(sws);
                     sws = sws_getContext(curW, curH, static_cast<AVPixelFormat>(curFmt),
                                          dst.right - dst.left, dst.bottom - dst.top, AV_PIX_FMT_BGRA,
