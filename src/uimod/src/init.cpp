@@ -36,6 +36,7 @@
 #include "musicfix.h"
 #include "riotfix.h"
 #include "basehd.h"
+#include "objecthd.h"
 #include "blinkfix.h"
 #include "cursorscale.h"
 #include "hudmovesfix.h"
@@ -399,6 +400,12 @@ extern "C" void __stdcall Init(HMODULE self)
     // pack on disk is usable; "HD Base Sprites" there ([UIMod] BaseHD) switches it live, and off holds no memory.
     // Two byte-checked E8 retargets. See basehd.cpp.
     InstallBaseHd();
+
+    // Drop-in HD map objects: <game>\terrain\ter1_x8.pcx / ter1wreck_x8.pcx / units_x8.pcx (TER1, TER1WRECK and
+    // UNITS.PCX at 8x) replace the monolith, pods, resources, terraforming, the Unity wreck and the native life /
+    // artifact sprites on the map. Nothing is patched without a pack; [UIMod] ObjectHD=0 turns it off.
+    // 21 byte-checked E8 retargets in MapWin_gen_terrain_poly + the native-unit draw, cave-free. See objecthd.cpp.
+    InstallObjectHd();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.
     InstallCursorScale();
