@@ -120,7 +120,7 @@ def test_more_button_is_id_0x5E_and_its_own_case_flips_tab_2_and_6(pe):
     assert case.startswith(bytes.fromhex("8B8E140A0000" "B802000000" "3BC8"))   # tab == 2 ?
     assert bytes.fromhex("C786140A000006000000") in case                      # -> tab 6 (else -> 2)
     # our tab takes the click before the engine's case could jump to tab 2 / 6
-    assert re.search(r"id == kMoreBtnId && g_anyArtRow && OurTabActive\(\)", PREFS)
+    assert re.search(r"id == kMoreBtnId && OurTabActive\(\)", PREFS)
 
 
 def test_art_row_ids_are_unique_and_free():
