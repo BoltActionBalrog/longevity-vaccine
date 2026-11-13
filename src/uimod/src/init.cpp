@@ -401,11 +401,11 @@ extern "C" void __stdcall Init(HMODULE self)
     // Two byte-checked E8 retargets. See basehd.cpp.
     InstallBaseHd();
 
-    // Drop-in HD map objects: <game>\terrain\ter1_x8.pcx / ter1wreck_x8.pcx / units_x8.pcx (TER1, TER1WRECK and
-    // UNITS.PCX at 8x) replace the monolith, pods, resources, terraforming, the Unity wreck and the native life /
-    // artifact sprites on the map. Nothing is patched without a pack; "HD Map Objects" in Longevity Mod Preferences
-    // ([UIMod] ObjectHD) switches it live. 22 byte-checked E8 retargets (21 in MapWin_gen_terrain_poly + the
-    // native-unit draw), cave-free, both exes. See objecthd.cpp.
+    // Drop-in HD map objects: <game>\terrain\ter1_x8.pcx / ter1wreck_x8.pcx (TER1 and TER1WRECK.PCX at 8x) replace
+    // the monolith, pods, resources, terraforming, landmarks and the Unity wreck wherever the game draws them (the
+    // terrain pass, the Datalinks terraforming page, the tutorial popups). Nothing is patched without a usable pack
+    // or without the Longevity tab; "HD Map Objects" in Longevity Mod Preferences ([UIMod] ObjectHD) switches it
+    // live. 36 byte-checked E8 retargets, cave-free, both exes. See objecthd.cpp.
     InstallObjectHd();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.
