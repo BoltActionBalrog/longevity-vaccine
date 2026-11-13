@@ -1,14 +1,15 @@
 #pragma once
 
-// Drop-in HD map objects: <game>\terrain\ter1_x8.pcx, ter1wreck_x8.pcx and units_x8.pcx (TER1, TER1WRECK and UNITS.PCX
-// at 8x, stock palette indices) replace the monolith, pods, resource specials, terraforming, the Unity wreck and the
-// native life / artifact sprites on the main map, each made at exactly the size the engine draws the stock one.
-// Byte-checked, cave-free, both exes. See objecthd.cpp.
+// Drop-in HD map objects: <game>\terrain\ter1_x8.pcx and ter1wreck_x8.pcx (TER1 and TER1WRECK.PCX at 8x, stock palette
+// and indices) replace the monolith, pods, resource specials, terraforming, landmarks and the Unity wreck wherever the
+// game draws them, each made from its cell at the size the engine gives the stock cell (usually within a pixel of the
+// stock sprite). Art a pack does not supply, or that cannot be used, is drawn exactly as stock. Byte-checked,
+// cave-free, both exes. See objecthd.cpp.
 
 constexpr int kObjectHdDefault = 1;   // [UIMod] ObjectHD
 
 void InstallObjectHd();
-bool ObjectHdAvailable();             // installed: a pack is on disk and every site passed its byte check
+bool ObjectHdAvailable();             // installed: a usable sheet is on disk, the Longevity tab is, every site passed
 int  ObjectHdGet();
-void ObjectHdSet(int on);             // live: the map repaints; off frees every HD sprite
+void ObjectHdSet(int on);             // live: the map, the HUD and the base screen repaint
 void ObjectHdSave();

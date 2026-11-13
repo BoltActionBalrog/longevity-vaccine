@@ -142,6 +142,7 @@
     <ClInclude Include="src\basehd_law.h" />
     <ClInclude Include="src\hdpack.h" />
     <ClInclude Include="src\objecthd.h" />
+    <ClInclude Include="src\objecthd_table.h" />
     <ClInclude Include="src\version.h" />
     <ClInclude Include="src\vidsafety.h" />
     <ClInclude Include="src\vidwatch.h" />
