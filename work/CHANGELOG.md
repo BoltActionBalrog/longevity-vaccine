@@ -2,11 +2,6 @@
 
 UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
-## Unreleased
-
-### HD art
-- HD base sprites: an art pack can replace each faction's bases with sharp versions, drawn at exactly the size of the originals at every zoom and on every screen that shows a base. Switch them on and off in the new HD art page of Longevity Mod Preferences (the More button).
-
 ## 1.0.0 -- 2026-11-08
 
 ### High-resolution UI scaling

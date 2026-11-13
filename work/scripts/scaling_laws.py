@@ -1568,14 +1568,16 @@ PREF_FRAME_SITES = (0x48FB19, 0x48FB29, 0x48FB39, 0x48FBB7, 0x48FC01, 0x49184D, 
 
 #: The PrefWin frames' NATIVE half-open rects, measured on the pristine image (prefwin_halfopen_emu at 1024x768; the
 #: sites rebuild them from PrefWin_build's statics every call).  'dll' is uimod.dll's Longevity-page slider frame
-#: (prefs.cpp: FrameX, FrameY - BotShift + 44, + FrameW, + 48; BotShift is 0 at every g > 16).
+#: (prefs.cpp: FrameX, FrameY - BotShift + kSliderY, + FrameW, + 48; BotShift is 0 at every g > 16): since the tab's
+#: two pages (2026-11-13) it sits one button row (0x17 = 23) higher, kSliderY = 44 - 23 = 21, because the stock More
+#: button takes the audio frame's last row; it was (256, 331, 713, 379).
 PREF_FRAME_NATIVE = {
     "backdrop": (23, 0, 723, 390),
     "inner": (27, 4, 719, 386),
     "lpanel": (30, 7, 250, 383),
     "rpanel": (253, 7, 716, 383),
     "sframe": (256, 287, 713, 379),
-    "dll": (256, 331, 713, 379),
+    "dll": (256, 308, 713, 356),
 }
 #: The frames' CONTENT, native child-window x / y / w / h (thunk_pref_gwinit scales each arg by floor, so a child's
 #: device right edge is fl(x g/16) + fl(w g/16)): the left panel's button column (first row y 10, last row 360 + 20),
@@ -1585,7 +1587,10 @@ PREF_FRAME_NATIVE = {
 PREF_BTN_X, PREF_BTN_W = 33, 214
 PREF_CONTENT_TOP, PREF_CONTENT_LAST_Y, PREF_ROW_H = 10, 360, 20
 PREF_LIST_X, PREF_LIST_W = 256, 457
-PREF_LABEL_LAST_Y = 356             # the audio page's 4th label row (290 + 3 * 22); the Longevity frame's 2nd
+PREF_LABEL_LAST_Y = 356             # the audio page's 4th label row (290 + 3 * 22)
+PREF_DLL_LABEL_LAST_Y = 333         # the Longevity frame's 2nd label row (prefs.cpp: LabelY0 + kSliderY + 22)
+#: each slider frame's last label row: its bottom mirrors its top about that row (_pref_slider_frame_bottom)
+PREF_SLIDER_LAST_LABEL = {"sframe": PREF_LABEL_LAST_Y, "dll": PREF_DLL_LABEL_LAST_Y}
 
 
 def prefwin_window_wh(g: int) -> Tuple[int, int]:
@@ -1613,12 +1618,13 @@ def pref_backdrop_draw_rect(rect: Tuple[int, int, int, int], g: int) -> Tuple[in
     return bandmap_rect_from_halfopen(rail_left_extent(g), t, r, b, g)
 
 
-def _pref_slider_frame_bottom(t: int, g: int) -> int:
+def _pref_slider_frame_bottom(t: int, g: int, last_label_y: int = PREF_LABEL_LAST_Y) -> int:
     """A slider frame's half-open device bottom (prefwin_layout): its top fl(t g/16) mirrored about the label column --
-    bottom channel = fl((t + 3)g/16) - fl(t g/16) - K below the last label row's fl(356g/16) + fl(20g/16)."""
+    bottom channel = fl((t + 3)g/16) - fl(t g/16) - K below its last label row's fl(y g/16) + fl(20g/16)
+    (PREF_SLIDER_LAST_LABEL: 356 for the audio frame, 333 for the Longevity frame)."""
     k = stroke_width(g)
     f = lambda v: popup_scale_floor(v, g)                                     # noqa: E731
-    return f(PREF_LABEL_LAST_Y) + f(PREF_ROW_H) + (f(t + 3) - f(t) - k) + k
+    return f(last_label_y) + f(PREF_ROW_H) + (f(t + 3) - f(t) - k) + k
 
 
 @functools.lru_cache(maxsize=None)
@@ -1636,6 +1642,7 @@ def pref_chain_split(g: int) -> Tuple[Tuple[int, int, int, int], Tuple[int, int,
     SCORED: every distinct spacing the split sets, each against vanilla x g/16 as |16 v - w g| -- the eight channels,
     the PANEL GAP (list_l - btn_r - 2K - c_lp - c_rp, vanilla 3) and the two slider frames' BOTTOM GAPS to the right
     panel (vanilla 3; v2 left these three unscored and they absorbed the error, audit-w6A v2: 4K's gap 9 vs 7.5).
+    (Since 2026-11-13 only the audio frame's bottom gap: uimod.dll's frame moved a button row up.)
     The split minimises, in order: the number of spacings MORE THAN 1 px off; the number of vanilla relations it
     breaks -- the cross-axis channel pairs left unequal (a_h | a_t, b_h | b_v, c_lp | c_v, c_rp | c_v: each frame's
     four sides are equal in vanilla); the worst error; the sum of squared errors; then the wider outer channels
@@ -1656,7 +1663,10 @@ def pref_chain_split(g: int) -> Tuple[Tuple[int, int, int, int], Tuple[int, int,
     s_t = f(PREF_CONTENT_TOP) - k - 2 * k
     s_b = (f(bd[3]) - k) - bot - 2 * k
     gap0 = list_l - btn_r - 2 * k
-    sfb = [_pref_slider_frame_bottom(PREF_FRAME_NATIVE[n][1], g) for n in ("sframe", "dll")]
+    # the slider frame that closes the right panel (vanilla bottom gap 3): the audio page's. The Longevity frame shared
+    # that edge until 2026-11-13; since the tab's two pages it sits a button row higher (the More button's row lies
+    # between it and the panel), so its bottom gap is no longer a vanilla spacing and is not scored.
+    sfb = [_pref_slider_frame_bottom(PREF_FRAME_NATIVE["sframe"][1], g)]
     err = lambda v, w: abs(16 * v - w * g)                                    # noqa: E731
     hs, vs = [], []
     for a in range(s_l + 1):
@@ -1711,7 +1721,7 @@ def prefwin_layout(g: int) -> dict:
     The slider frames (the audio page's, uimod.dll's Longevity frame) keep their top fl(t g/16) and span the page
     list's columns [fl(256g/16), fl(256g/16) + fl(457g/16)) -- the right panel is mirrored about that span, so panel
     -> frame L == R -- and their BOTTOM mirrors the top about the label column: bottom channel = fl((t + 3)g/16) -
-    fl(t g/16) - K, below the last label row's fl(356g/16) + fl(20g/16).
+    fl(t g/16) - K, below the frame's own last label row's fl(y g/16) + fl(20g/16) (PREF_SLIDER_LAST_LABEL).
 
     Returns the INCLUSIVE device rects the band-map renderers draw (key = PREF_FRAME_NATIVE's) and the channels.
     g <= 16: the native half-open rects (the primitive's own render; vanilla's channels 3 / 2 / 2 by construction)."""
@@ -1728,7 +1738,7 @@ def prefwin_layout(g: int) -> dict:
     list_r = list_l + f(PREF_LIST_W)
     top, bot = f(PREF_CONTENT_TOP), f(PREF_CONTENT_LAST_Y) + f(PREF_ROW_H)
     (a_h, b_h, c_lp, c_rp), (a_t, b_v, c_v, a_b) = pref_chain_split(g)
-    sf_b = {n: _pref_slider_frame_bottom(PREF_FRAME_NATIVE[n][1], g) for n in ("sframe", "dll")}
+    sf_b = {n: _pref_slider_frame_bottom(PREF_FRAME_NATIVE[n][1], g, PREF_SLIDER_LAST_LABEL[n]) for n in ("sframe", "dll")}
     # half-open [L, R) x [T, B), then inclusive for the band map
     in_ho = (bd_in[0] + a_h, bd_in[1] + a_t, bd_in[2] - a_h, bd_in[3] - a_b)
     pt, pb = in_ho[1] + k + b_v, in_ho[3] - k - b_v
@@ -15024,25 +15034,30 @@ def popup_title_ring_clear(g: int, ornate: bool = False) -> int:
 
 
 
-# ---- HD base sprites (src/uimod/src/basehd_law.h is the port) ----------------------------------------------------
+# ---- HD sprite hooks: bases, map objects (src/uimod/src/basehd_law.h is the port) ----------------------------------------------------
 
 BASE_HD_COLOUR_LO, BASE_HD_COLOUR_HI = 10, 245   # Buffer_load_pcx(name, 0, 10, 236): the loaded art's colour indices
+#   (loaded = file + 10 mod 256: the key 9 = file 255, 0 = file 246 the shadow / black-ink index)
 
 
-def base_hd_sprite_size(w: int, h: int, num: int, den: int) -> Tuple[int, int]:
-    """LAW (PROPORTIONATE) -- the size an HD base sprite is made at: exactly the size Sprite_draw_dest gives the stock
-    w x h sprite at SCALE_NUM_G/SCALE_DEN_G = num/den, which truncates (_ftol of w * num/den). Floor in integers.
-    Identity at num == den."""
-    return (w * num // den, h * num // den)
+def base_hd_cell_size(w: int, h: int, num: int, den: int) -> Tuple[int, int]:
+    """LAW (PROPORTIONATE) -- the size an HD copy of a w x h sprite cell is made at for SCALE_NUM_G/SCALE_DEN_G =
+    num/den: the size the engine's scaled draw gives the stock CELL, _ftol(w * f) x _ftol(h * f) with f =
+    engine_scale_f(num, den) (float32).  Identity at num == den.  The engine trims each stock sprite to its content
+    box and truncates that box's size and offsets separately, so the HD sprite drawn from this cell lands within
+    about a pixel of the stock one, not always on it (accepted 2026-11-13)."""
+    f = engine_scale_f(num, den)
+    return (_ftol(w * f), _ftol(h * f))
 
 
 def palette_box_shrink(src: List[List[int]], dw: int, dh: int, rgb: List[Tuple[int, int, int]]) -> List[List[int]]:
     """LAW -- resize an index image to dw x dh without leaving its palette (basehd's HD master -> on-screen size).
     Footprint of destination (tx, ty): x0 = tx*sw//dw, x1 = max((tx+1)*sw//dw, x0+1), likewise y.
-    The special index (outside BASE_HD_COLOUR_LO..HI: the key, shadow and marker indices) met most often wins when it
-    covers more pixels than all colour pixels together (a tie goes to the colours); otherwise the colour index present
-    in the footprint nearest (squared distance) to the mean colour of the colour pixels, ties to the one met first in
-    row-major order. Never blends and never invents an index. rgb[i] = the colour index i is shown with."""
+    When the special pixels (outside BASE_HD_COLOUR_LO..HI: the key, shadow and marker indices) TOGETHER outnumber the
+    colour pixels, the special index met most often wins (ties to the one met first); otherwise (a tie goes to the
+    colours) the colour index present in the footprint nearest (squared distance) to the mean colour of the colour
+    pixels, ties to the one met first in row-major order. Never blends and never invents an index. rgb[i] = the
+    colour index i is shown with."""
     sh, sw = len(src), len(src[0])
     out = []
     for ty in range(dh):
@@ -15060,9 +15075,10 @@ def palette_box_shrink(src: List[List[int]], dw: int, dh: int, rgb: List[Tuple[i
                         order.append(v)
                         count[v] = 0
                     count[v] += 1
-            special, special_n, colour_n, s = -1, 0, 0, [0, 0, 0]
+            special, special_n, special_total, colour_n, s = -1, 0, 0, 0, [0, 0, 0]
             for v in order:
                 if v < BASE_HD_COLOUR_LO or v > BASE_HD_COLOUR_HI:
+                    special_total += count[v]
                     if count[v] > special_n:
                         special, special_n = v, count[v]
                 else:
@@ -15070,7 +15086,7 @@ def palette_box_shrink(src: List[List[int]], dw: int, dh: int, rgb: List[Tuple[i
                     for ch in range(3):
                         s[ch] += count[v] * rgb[v][ch]
             best = special
-            if colour_n and colour_n >= special_n:
+            if colour_n and colour_n >= special_total:
                 best_d = None
                 for v in order:
                     if BASE_HD_COLOUR_LO <= v <= BASE_HD_COLOUR_HI:

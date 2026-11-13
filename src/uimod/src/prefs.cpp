@@ -208,11 +208,19 @@ constexpr int  kBaseViewChkId  = 0x77;   // "Closing a Base Never Recenters Map"
 constexpr int  kClipChkId      = 0x78;   // "Constrain Mouse to Window" nested under the display-mode row ([UIMod] ConstrainMouse,
                                          // vidmode.cpp); dimmed and inert outside Fullscreen
 // The page's second page, "HD art" (one row per drop-in art pack whose hook is installed), behind the STOCK "More"
-// button (PrefWin_btn_more, id 0x5E: PrefWin_on_command 0x4914B0 flips tab 2 <-> 6 with it, and the show/hide
+// button (PrefWin_btn_more, id 0x5E: PrefWin_on_command 0x491400's More case 0x4914B0 flips tab 2 <-> 6 with it, and the show/hide
 // switches 0x48FFB0 / 0x490140 show it on those two tabs only). On our tab we show it ourselves and take its click
 // (WrapCommand); its own case never runs there. Row ids 0x7A..0x7F are the art rows (kArtRows); next free 0x80
 constexpr int  kMoreBtnId   = 0x5E;
 constexpr uintptr_t kVA_MoreBtn = 0x00872140;   // PrefWin_btn_more (PrefWin +0x1A868)
+// Its caption: PrefWin_show_cur_page 0x490140 sets it at every show, BaseButton_set_name 0x6074E0 with
+// Strings_get(TextTable, TextLabels.labels[i]) -- "More" (i 1088) on tab 2 (0x4901B1..0x4901D0), "Back" (i 664) on
+// tab 6 (0x4901FC..0x490234). On our tab we set it the same way for our page, so a translated game follows.
+constexpr uintptr_t kVA_TextLabels  = 0x009B90F8;   // TextLabels {char** labels; uint32 count}
+constexpr uintptr_t kVA_TextTable   = 0x009B90D8;   // TextTable: the labels' string pool
+constexpr uintptr_t kVA_StringsGet  = 0x006169A0;   // Strings_get: thiscall (Strings*, char*) RET 4
+constexpr uintptr_t kVA_BtnSetName  = 0x006074E0;   // BaseButton_set_name: thiscall (button, const char*)
+constexpr int  kLabelMore = 1088, kLabelBack = 664;
 constexpr int  kArtChkId0   = 0x7A;
 constexpr int  kArtRowMax   = 6;
 struct ArtRow { const char* text; bool (*avail)(); int (*get)(); void (*set)(int); void (*save)(); int def; };
@@ -861,11 +869,14 @@ int RowLabelY(int g, const BYTE* rowFont, uintptr_t sprVA)
     return ty;
 }
 
-// Our tab has two pages, flipped by the stock More button (see kMoreBtnId):
-//   page 1, the mod's own controls -- the display-mode row (+ Constrain Mouse), the update row, the mouse group
-//     (Modern Control Set, the map-drag cells, the camera rows) and the slider frame (Base Font Size, Drag Hold Time);
-//   page 2, gameplay & art -- the cloak rules, the airdrop row, the portrait group and the HD art rows (kArtRows).
-// (One page held all 15 rows with zero slack, and the More button had nowhere to go -- user 2026-11-12.)
+// Our tab has two fixed pages, flipped by the stock More button (see kMoreBtnId); a setting is always on the same
+// page whatever packs are installed, and rows that are absent close up within their own page:
+//   page 1, how the game runs and plays -- the display-mode row (+ Constrain Mouse), the update row, the mouse group
+//     (Modern Control Set, the map-drag cells, the camera rows), the cloak rules and the airdrop row, in main's
+//     order and positions, then the slider frame (Base Font Size, Drag Hold Time);
+//   page 2, replacement art -- the portrait group and the HD art rows (kArtRows). Never empty: two portrait rows
+//     always exist.
+// (Assignment: the maintainer, 2026-11-13. One page could not hold the art rows and the More button.)
 // ForPage1 / ForPage2 visit every BUILT widget of a page: an optional row is never touched unbuilt (zeroed vtable = AV).
 template <typename F> void ForPage1(F f)
 {
@@ -875,6 +886,10 @@ template <typename F> void ForPage1(F f)
     if (g_modernRow) { f(g_w.moderncheck); f(g_w.rcmovecheck); }
     if (g_dragRow) for (auto& c : g_w.dragcell) f(c);
     if (g_cameraRow) { f(g_w.clickview); f(g_w.baseview); }
+    f(g_w.aicheck);
+    f(g_w.cargocheck);
+    f(g_w.markcheck);
+    f(g_w.airdropcheck);
     f(g_w.label);
     f(g_w.slider);
     if (g_holdRow) { f(g_w.holdlabel); f(g_w.holdslider); }
@@ -882,10 +897,6 @@ template <typename F> void ForPage1(F f)
 
 template <typename F> void ForPage2(F f)
 {
-    f(g_w.aicheck);
-    f(g_w.cargocheck);
-    f(g_w.markcheck);
-    f(g_w.airdropcheck);
     f(g_w.customcheck);
     if (g_hdRow) f(g_w.hdcheck);
     f(g_w.scancheck);
@@ -901,6 +912,18 @@ void HidePage1()
 }
 
 void HidePage2() { ForPage2([](void* w) { WinHide(w); }); }
+
+// The stock More button's caption from the engine's own label i (kLabelMore / kLabelBack), as PrefWin_show_cur_page
+// sets it; left as it is when the label table does not hold i.
+void SetMoreCaption(int i)
+{
+    const BYTE* tl = At(kVA_TextLabels);
+    char** labels = *reinterpret_cast<char** const*>(tl);
+    const uint32_t count = *reinterpret_cast<const uint32_t*>(tl + 4);
+    if (!labels || static_cast<uint32_t>(i) >= count) return;
+    const char* text = reinterpret_cast<char*(__thiscall*)(void*, char*)>(At(kVA_StringsGet))(At(kVA_TextTable), labels[i]);
+    if (text) reinterpret_cast<void(__thiscall*)(void*, const char*)>(At(kVA_BtnSetName))(At(kVA_MoreBtn), text);
+}
 
 // Repaint the whole Preferences page through vtbl+0x30, so WrapRefresh re-issues our rows too.
 void RefreshPrefWin()
@@ -933,6 +956,7 @@ void __fastcall WrapRefresh(void* self, void* edx)
     // not have it (the engine's own show/hide switches handle tabs 2 and 6)
     const int tab = Rd<int>(kVA_PrefWin + kTabIdOfs);
     if (OurTabActive()) {
+        SetMoreCaption(g_page ? kLabelBack : kLabelMore);   // page 1 "More", page 2 "Back" (the engine's own labels)
         WinShow(At(kVA_MoreBtn));
         WinRedraw(At(kVA_MoreBtn));
         g_moreShown = true;
@@ -1351,11 +1375,12 @@ void BuildWidgets()
                   Rd<int>(kVA_FrameX) + kChkSubIndent, Rd<int>(kVA_TabY0) + kChkRowDy + kOptRow0 * kChkRowPitch,
                   RowW(Rd<int>(kVA_FrameX) + kChkSubIndent, kChkTextDx + clipTextW + 4), boxH + kChkTextDy, prefwin, 0);   // room for the label's descenders below the box
         }
-        // The option rows, in the user's order (2026-11-07), over our two pages (2026-11-12, see ForPage1/2).
+        // The option rows, in the user's order (2026-11-07), over two fixed pages (the maintainer's assignment,
+        // 2026-11-13, see ForPage1/2): page 1 is how the game runs and plays, page 2 is replacement art.
         // Page 1, under the display rows: the update row (a program setting, like the display rows above it), the
-        // mouse group (Modern Control Set with its child, the two map-drag cells on ONE line, the two camera rows: one
-        // block, ending nearest the Drag Hold Time slider it governs). Page 2, from its first row: the gameplay rules
-        // (the cloak group, then the airdrop row), the portrait group, then the HD art rows.
+        // mouse group (Modern Control Set with its child, the two map-drag cells on ONE line, the two camera rows),
+        // then the gameplay rules (the cloak group, then the airdrop row) -- the order and positions main has.
+        // Page 2, from its first row: the portrait group, then the HD art rows. A row never changes page.
         // A row whose feature is unbound is not built and the rows below it move up: k counts the rows built.
         // Every row is the same widget class, vtable and painter (CheckContentDraw); the row's window rect is
         // native and the GraphicWin_init gate scales it once.
@@ -1424,6 +1449,13 @@ void BuildWidgets()
             row(g_w.baseview, kBaseViewChkId, kBaseViewText, 0, k++);
         }
 
+        // the gameplay rules: the AI-visibility parent with its two nested rows, then the airdrop-diversion row
+        // (top-level: it covers fog of war, not only cloaks)
+        row(g_w.aicheck, kAiChkId, kAiChkText, 0, k++);
+        row(g_w.cargocheck, kCargoChkId, kCargoChkText, kChkSubIndent, k++);
+        row(g_w.markcheck, kMarkChkId, kMarkChkText, kChkSubIndent, k++);
+        row(g_w.airdropcheck, kAirdropChkId, kAirdropChkText, 0, k++);
+
         {
             // the page's vertical room is runtime layout (PrefWin_build's statics): log it, and say so loudly if
             // the last row would reach the slider-area frame drawn below the option rows
@@ -1441,14 +1473,7 @@ void BuildWidgets()
         base = 0;
         k = 0;
 
-        // the gameplay rules: the AI-visibility parent with its two nested rows, then the airdrop-diversion row
-        // (top-level: it covers fog of war, not only cloaks)
-        row(g_w.aicheck, kAiChkId, kAiChkText, 0, k++);
-        row(g_w.cargocheck, kCargoChkId, kCargoChkText, kChkSubIndent, k++);
-        row(g_w.markcheck, kMarkChkId, kMarkChkText, kChkSubIndent, k++);
-        row(g_w.airdropcheck, kAirdropChkId, kAirdropChkText, 0, k++);
-
-        // the portrait group closes the list, the cloak rows' parent/child pattern: "Enable Custom Portraits" at
+        // the portrait group opens page 2, the cloak rows' parent/child pattern: "Enable Custom Portraits" at
         // the list's left edge; nested one box width in, "Use Turovetsky's HD Portrait Pack" (only while the pack is
         // installed: no row for a pack the player does not have) and "Add Scanlines" (its scanlines are always the
         // brightened kind: the former "Brighten Scanlines" row made way for the airdrop row, user 2026-10-30)
@@ -1735,6 +1760,8 @@ void PrefsBubblePoll()
     if (!SliderHeld(g_bubbleSb)) SliderBubbleClear();
 }
 
+namespace { bool g_prefsInstalled = false; }   // InstallPrefsTab completed (PrefsTabInstalled)
+
 void InstallPrefsTab()
 {
     // 0) patched-exe gate: the pristine/unpatched exe has no code cave -- the tab's
@@ -1766,5 +1793,9 @@ void InstallPrefsTab()
     memcpy(site + 1, &rel, 4);
     VirtualProtect(site, 5, old, &old);
 
+    g_prefsInstalled = true;
     Dbg("[uimod] Init: prefs tab hook installed\n");
 }
+
+// The Longevity tab is hooked in on this exe: a feature whose only switch is a row on it installs only then.
+bool PrefsTabInstalled() { return g_prefsInstalled; }
