@@ -405,7 +405,7 @@ extern "C" void __stdcall Init(HMODULE self)
     // the monolith, pods, resources, terraforming, landmarks and the Unity wreck wherever the game draws them (the
     // terrain pass, the Datalinks terraforming page, the tutorial popups). Nothing is patched without a usable pack
     // or without the Longevity tab; "HD Map Objects" in Longevity Mod Preferences ([UIMod] ObjectHD) switches it
-    // live. 36 byte-checked E8 retargets, cave-free, both exes. See objecthd.cpp.
+    // live, and off holds no memory. 36 byte-checked E8 retargets. See objecthd.cpp.
     InstallObjectHd();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.

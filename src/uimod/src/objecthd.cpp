@@ -17,10 +17,13 @@
 //    work/tests/test_objecthd_sites.py): MapWin_gen_terrain_poly 0x4632D0 -- 18 Sprite_blit_scaled_core 0x5E4B9A and
 //    3 Sprite_draw_dest 0x5E5833 calls, scaled by SCALE_NUM_G / SCALE_DEN_G (0x696D18 / 0x696D1C); it is also the
 //    terrain pass of the base screen's resource view, the HUD tile pane and the tutorial terrain view. The Datalinks
-//    terraforming page DatalinkWin_draw_terraform 0x431180 -- 13 Sprite_draw_2 0x5E4B4A calls (num / den on the
-//    stack). The tutorial and hint popups (action_terraform, Console_give_hints -> TutWin_tut_map -> tut_win) hand
-//    TER1 sprites to the popup: as its picture, drawn by BasePop_on_redraw's Sprite_draw_2 @0x604C72 (on the
-//    patched exe the mod's thunk_art_draw, the same contract), or as a SpriteBox item, drawn @0x610E7B. Each engine
+//    terraforming page DatalinkWin_draw_terraform 0x431180 -- 13 Sprite_draw_2 0x5E4B4A calls, each after
+//    `push 1; push 1` (den, num). Those two immediates are NOT 1 / 1 while Datalinks is open: the mod rewrites them at
+//    run time to scale the page, so the hook must size the HD copy from the num / den it is handed (as it does) and
+//    never assume 1 / 1 or g / 16. The tutorial and hint popups (action_terraform, Console_give_hints ->
+//    TutWin_tut_map -> tut_win) hand TER1 sprites to the popup: as its picture, drawn by BasePop_on_redraw's
+//    Sprite_draw_2 @0x604C72 (on the patched exe that E8 calls the mod's thunk_art_draw, the same contract), or as a
+//    SpriteBox item, drawn @0x610E7B. Each engine
 //    draw scales by a truncated size and nearest-neighbour SKIPPING, so an 8x sprite must never be shrunk by it; each
 //    takes an unscaled branch when num == den.
 //
@@ -31,22 +34,34 @@
 // of one the pack does not supply, is the original call with the original arguments.
 //
 // Art that is not provided, or cannot be used, is drawn exactly as the game draws it without this module, decided once:
-//  * per sheet: the pack file is proven at Init (hdpack::Load: bounded scan of the whole file, the stock sheet's
-//    palette); a file that fails is logged once and its sheet stays stock;
-//  * per object: a cell that is all background / slab is stock for good (found at Init, one debug line);
+//  * per sheet: the pack file is proven at Init and again each time the row is switched on (hdpack::Load: bounded
+//    scan of the whole file, the stock sheet's palette); a file that fails is logged and its sheet stays stock;
+//  * per object: a cell that is all background / slab is stock for good (found when the sheet is proven, one debug
+//    line);
 //  * per object and size: a cut that fails (an empty rect, no memory) is remembered and never retried.
-// Nothing is allocated through the engine except the one scratch Buffer the cut goes through (grow-only, at most
-// kMaxCut x the cell, its address room probed first); everything else is plain memory and its failure is stock.
+// The engine's fatal exit on an allocation failure is bounded, not gone: the scratch Buffer the cut goes through
+// (Buffer_init; grow-only, at most kMaxCut x the cell, its address room probed first) and the HD sprite itself
+// (Sprite_extract_2's allocator) are engine allocations of at most about 1 MB, as in basehd.cpp. Everything else is
+// plain memory and its failure is stock.
 //
-// Memory budget: each usable sheet is its file bytes (~3.5 MB) for the session -- read and scanned once; an object at
-// a new size expands only its own cell's scanlines. Cut objects cost about w x h bytes each and are kept for every
-// size drawn (kSizes per object), up to kBudget in all, least recently drawn first out. Switching the row off keeps
-// them, so switching it on again costs nothing.
+// Memory budget: each usable sheet is its RLE stream (~3.5 MB) while the row is on -- read and scanned once; an
+// object at a new size expands only its own cell's scanlines. Cut objects cost about w x h bytes each and are kept
+// for every size drawn (kSizes per object), up to kBudget in all, least recently drawn first out. With the row off
+// nothing is held: switching it off frees the cut objects, both sheets and the cell buffer and shrinks the scratch
+// Buffer to 4x4; a game started with ObjectHD=0 proves the sheets at install (to decide whether the row exists) and
+// releases them straight away. Switching it on proves the sheets again (16 to 47 ms each), then ~2 ms per object on
+// its first draw at a size.
 //
 // Levers: the 21 draw calls in MapWin_gen_terrain_poly, the 13 in DatalinkWin_draw_terraform and the two popup draws,
-// byte-checked E8 retargets, cave-free. The extract calls are left alone: the table is static.
+// byte-checked E8 retargets. The extract calls are left alone: the table is static. The popup picture's E8 calls
+// Sprite_draw_2 on the unpatched exe and thunk_art_draw on the patched one; the hook chains to whichever of those two
+// it is -- the thunk only when the E8 lands at .pcave2 + kOffArtDraw and the thunk's first bytes are kArtDrawEntry --
+// and anything else installs nothing.
 // Installed only where the Longevity Preferences tab is and only when a sheet on disk is usable and has art: otherwise
 // nothing is patched and no row is built. "HD Map Objects" ([UIMod] ObjectHD) switches it live.
+//
+// OBJECTHD_SELFTEST (work/tests/objecthd_cache_selftest.cpp): the image base, the game folder and the engine functions
+// are the test's, so the bookkeeping below runs against a fake engine; nothing else differs.
 
 #include "objecthd.h"
 #include "basehd_law.h"
@@ -83,7 +98,10 @@ constexpr uintptr_t kVA_StatusWinRedraw = 0x4B9EA0; // StatusWin_redraw: thiscal
 constexpr uintptr_t kVA_StatusWin    = 0x8C5568;   // StatusWin_g
 constexpr uintptr_t kVA_GraphicWinRedraw = 0x5D5A70; // GraphicWin_redraw: thiscall (GraphicWin*)
 constexpr uintptr_t kVA_BaseWin      = 0x6A7628;   // BaseWin_g (+0x9C bit 0: on screen)
-constexpr uintptr_t kVA_ArtDraw      = 0xA35EB0;   // thunk_art_draw (pcave2+0x29EB0): Sprite_draw_2's contract
+// thunk_art_draw, the patcher's popup-picture draw (Sprite_draw_2's contract): at .pcave2 + kOffArtDraw, and its
+// entry -- `cmp [0x668740], 16; jg big; push Sprite_draw_2; ret` -- is checked before the hook chains to it.
+constexpr uintptr_t kOffArtDraw      = 0x29EB0;
+const BYTE kArtDrawEntry[] = {0x83, 0x3D, 0x40, 0x87, 0x66, 0x00, 0x10, 0x7F, 0x06, 0x68, 0x4A, 0x4B, 0x5E, 0x00, 0xC3};
 constexpr uintptr_t kTerrainLo = 0x4632D0, kTerrainHi = 0x466CA0;   // MapWin_gen_terrain_poly
 
 // load_terrain's cuts: one byte-checked site per pattern, proof that the table below is this exe's.
@@ -103,7 +121,10 @@ constexpr int kMaxCut = 12;                             // never cut above 12x t
 constexpr int kLoadShift = 10;                          // Buffer_load_pcx(name, 0, 10, 236): loaded = file + 10 mod 256
 constexpr int kKeyIndex = 9, kBgIndex = 7, kSlabIndex = 6;   // load_terrain's Buffer_change_color(0x107/0x106 -> 0x109)
 constexpr int kSizes = 24;                              // sizes kept per object (PRACX: up to 20 zoom levels + the rest)
-constexpr size_t kBudget = size_t(24) << 20;            // all cut objects together (w x h bytes each)
+#ifndef OBJECTHD_BUDGET
+#define OBJECTHD_BUDGET (size_t(24) << 20)
+#endif
+constexpr size_t kBudget = OBJECTHD_BUDGET;             // all cut objects together (w x h bytes each)
 
 struct Sprite { uint8_t raw[0x2C]; };
 struct Slot { int w, h, state; unsigned used; Sprite spr; };   // state 1 = HD sprite, -1 = this size fails: stock
@@ -122,21 +143,26 @@ void BuildTable()
     for (int i = 0; i < n; ++i) g_entries[g_count++] = Entry{rows[i].va, rows[i].sheet, rows[i].x, rows[i].y, -1, {}};
 }
 
-typedef int (__thiscall* FExtract2)(void*, void*, int, int, int, int, int, void*);
 typedef int (__thiscall* FDraw2)(void*, void*, int, int, int, int, int);
-typedef int (__thiscall* FBlitCore)(void*, void*, int, int, int);
-typedef int (__thiscall* FDrawDest)(void*, void*, int, int, int, void*);
-typedef void (__thiscall* FSpriteClose)(void*);
-typedef void (__thiscall* FBufferCtor)(void*);
-typedef int (__thiscall* FBufferInit)(void*, int, int, int, void*);
 
-FExtract2 g_extract = nullptr;
-FDraw2 g_draw2 = nullptr;                               // the Datalinks / SpriteBox sites' target: Sprite_draw_2
-FDraw2 g_popupArt = nullptr;                            // the popup picture site's target (Sprite_draw_2 or the mod's thunk)
-FBlitCore g_blitCore = nullptr;
-FDrawDest g_drawDest = nullptr;
+// The engine functions the module calls (bound from the exe at install; a fake engine under OBJECTHD_SELFTEST).
+struct Engine {
+    int (__thiscall* extract)(void*, void*, int, int, int, int, int, void*);   // Sprite_extract_2
+    FDraw2 draw2;                                       // the Datalinks / SpriteBox sites' target: Sprite_draw_2
+    FDraw2 popupArt;                                    // the popup picture site's target: Sprite_draw_2 or thunk_art_draw
+    int (__thiscall* blitCore)(void*, void*, int, int, int);
+    int (__thiscall* drawDest)(void*, void*, int, int, int, void*);
+    void (__thiscall* spriteClose)(void*);
+    void (__thiscall* bufferCtor)(void*);
+    int (__thiscall* bufferInit)(void*, int, int, int, void*);
+    void (__cdecl* drawMap)(int);
+    int (__thiscall* statusRedraw)(void*);
+    void (__thiscall* graphicRedraw)(void*);
+};
+
+Engine g_eng = {};
 hdpack::Pack g_pack[kSheets];
-int g_state[kSheets] = {};                              // 1 = usable, -1 = none / unusable
+int g_state[kSheets] = {};                              // 1 = usable, -1 = none / unusable, 0 = released (row off)
 uint8_t g_map[256];                                     // file index -> load_terrain's (+10, then background / slab -> key)
 alignas(16) uint8_t g_scratch[kBufSize + 0x80];         // the one scratch Buffer every cut goes through (grow-only)
 bool g_scratchReady = false;
@@ -148,7 +174,15 @@ int g_on = kObjectHdDefault;
 unsigned g_clock = 0;
 char g_dir[MAX_PATH];
 
-BYTE* At(uintptr_t va) { return reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr)) + (va - 0x400000); }
+#ifdef OBJECTHD_SELFTEST
+BYTE* g_testImage = nullptr;                            // the fake exe image (0x400000-based)
+char g_testDir[MAX_PATH];
+BYTE* ImageBase() { return g_testImage; }
+#else
+BYTE* ImageBase() { return reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr)); }
+#endif
+
+BYTE* At(uintptr_t va) { return ImageBase() + (va - 0x400000); }
 
 void Log(const char* fmt, ...)
 {
@@ -215,6 +249,7 @@ bool LoadSheet(int sheet)
     PackRel(sheet, rel, sizeof rel);
     _snprintf_s(path, sizeof path, _TRUNCATE, "%s%s", g_dir, rel);
     g_state[sheet] = -1;
+    hdpack::Free(&g_pack[sheet]);
     if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) return false;   // no pack for this sheet: stock, quietly
     uint8_t pal[768];
     _snprintf_s(stock, sizeof stock, _TRUNCATE, "%s%s.pcx", g_dir, kSheetName[sheet]);
@@ -262,7 +297,7 @@ bool LoadSheet(int sheet)
 void CloseSlot(Slot& s)
 {
     if (s.state == 1) {
-        if (HasData(s.spr)) reinterpret_cast<FSpriteClose>(At(kVA_SpriteClose))(&s.spr);
+        if (HasData(s.spr)) g_eng.spriteClose(&s.spr);
         g_bytes -= static_cast<size_t>(s.w) * s.h;
     }
     s = Slot{};
@@ -298,10 +333,10 @@ bool Scratch(int w, int h)
     if (!probe) return false;
     VirtualFree(probe, 0, MEM_RELEASE);
     if (!g_scratchReady) {
-        reinterpret_cast<FBufferCtor>(At(kVA_BufferCtor))(g_scratch);
+        g_eng.bufferCtor(g_scratch);
         g_scratchReady = true;
     }
-    reinterpret_cast<FBufferInit>(At(kVA_BufferInit))(g_scratch, nw, nh, 0, nullptr);
+    g_eng.bufferInit(g_scratch, nw, nh, 0, nullptr);
     if (!Pixels(g_scratch) || Field(g_scratch, kBufW) != nw || Field(g_scratch, kBufPitch) < nw) return false;
     g_scratchW = nw;
     g_scratchH = nh;
@@ -339,7 +374,15 @@ Slot* Cut(Entry& e, int w, int h, void* dst)
     PackRel(e.sheet, rel, sizeof rel);
     const DWORD t0 = GetTickCount();
     const int cw = kW * kMaster, ch = kH * kMaster;
-    if (!hdpack::Expand(g_pack[e.sheet], e.x * kMaster, e.y * kMaster, cw, ch, g_map, g_cell)) return s;
+    if (!g_cell) g_cell = static_cast<uint8_t*>(malloc(static_cast<size_t>(cw) * ch));
+    if (!g_cell) {
+        Log("[objecthd] %s: no memory to cut an object -> stock at %dx%d\n", rel, w, h);
+        return s;
+    }
+    if (!hdpack::Expand(g_pack[e.sheet], e.x * kMaster, e.y * kMaster, cw, ch, g_map, g_cell)) {
+        Log("[objecthd] %s: the cell (%d,%d) lies outside the pack -> that object stays stock\n", rel, e.x, e.y);
+        return s;
+    }
     if (!Scratch(w, h)) {
         Log("[objecthd] no room for a %dx%d scratch -> stock at that size\n", w, h);
         return s;
@@ -348,9 +391,9 @@ Slot* Cut(Entry& e, int w, int h, void* dst)
     Colours(dst, rgbq);
     basehd_law::PaletteBoxShrink(g_cell, cw, ch, cw, Pixels(g_scratch), w, h, Field(g_scratch, kBufPitch), rgbq);
     // cut in place: an engine Sprite is never copied to another address
-    if (g_extract(&s->spr, g_scratch, kKey, 0, 0, w, h, nullptr) != 0 || !HasData(s->spr)) {
+    if (g_eng.extract(&s->spr, g_scratch, kKey, 0, 0, w, h, nullptr) != 0 || !HasData(s->spr)) {
         Dbg("[objecthd] %s (%d,%d) at %dx%d cuts empty -> stock at that size\n", rel, e.x, e.y, w, h);
-        if (HasData(s->spr)) reinterpret_cast<FSpriteClose>(At(kVA_SpriteClose))(&s->spr);
+        if (HasData(s->spr)) g_eng.spriteClose(&s->spr);
         s->spr = Sprite{};
         return s;
     }
@@ -365,7 +408,7 @@ Slot* Cut(Entry& e, int w, int h, void* dst)
 Entry* EntryFor(const void* spr)
 {
     const uintptr_t va = reinterpret_cast<uintptr_t>(spr);
-    const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) - 0x400000;
+    const uintptr_t base = reinterpret_cast<uintptr_t>(ImageBase()) - 0x400000;
     for (int i = 0; i < g_count; ++i) if (g_entries[i].va + base == va) return &g_entries[i];
     return nullptr;
 }
@@ -400,37 +443,43 @@ struct Unscaled {                                     // SCALE_NUM_G = SCALE_DEN
 
 int __fastcall BlitCoreHook(void* spr, void* /*edx*/, void* dst, int key, int x, int y)
 {
-    if (Sprite* hd = HdFor(spr, dst, ScaleNum(), ScaleDen())) { Unscaled one; return g_blitCore(hd, dst, key, x, y); }
-    return g_blitCore(spr, dst, key, x, y);
+    if (Sprite* hd = HdFor(spr, dst, ScaleNum(), ScaleDen())) { Unscaled one; return g_eng.blitCore(hd, dst, key, x, y); }
+    return g_eng.blitCore(spr, dst, key, x, y);
 }
 
 int __fastcall DrawDestHook(void* spr, void* /*edx*/, void* dst, int key, int x, int y, void* table)
 {
-    if (Sprite* hd = HdFor(spr, dst, ScaleNum(), ScaleDen())) { Unscaled one; return g_drawDest(hd, dst, key, x, y, table); }
-    return g_drawDest(spr, dst, key, x, y, table);
+    if (Sprite* hd = HdFor(spr, dst, ScaleNum(), ScaleDen())) { Unscaled one; return g_eng.drawDest(hd, dst, key, x, y, table); }
+    return g_eng.drawDest(spr, dst, key, x, y, table);
 }
 
-// Sprite_draw_2 sets the scale globals from its own num / den: an HD copy at that ratio is drawn at 1 / 1.
+// Sprite_draw_2 sets the scale globals from its own num / den: an HD copy at that ratio is drawn at 1 / 1. The HD
+// copy is sized from num / den as handed in -- at the Datalinks sites those are the mod's run-time scale, not the
+// `push 1; push 1` in the exe's bytes.
 int __fastcall Draw2Hook(void* spr, void* /*edx*/, void* dst, int key, int x, int y, int num, int den)
 {
-    if (Sprite* hd = HdFor(spr, dst, num, den)) return g_draw2(hd, dst, key, x, y, 1, 1);
-    return g_draw2(spr, dst, key, x, y, num, den);
+    if (Sprite* hd = HdFor(spr, dst, num, den)) return g_eng.draw2(hd, dst, key, x, y, 1, 1);
+    return g_eng.draw2(spr, dst, key, x, y, num, den);
 }
 
 int __fastcall PopupArtHook(void* spr, void* /*edx*/, void* dst, int key, int x, int y, int num, int den)
 {
-    if (Sprite* hd = HdFor(spr, dst, num, den)) return g_popupArt(hd, dst, key, x, y, 1, 1);
-    return g_popupArt(spr, dst, key, x, y, num, den);
+    if (Sprite* hd = HdFor(spr, dst, num, den)) return g_eng.popupArt(hd, dst, key, x, y, 1, 1);
+    return g_eng.popupArt(spr, dst, key, x, y, num, den);
 }
 
 bool GameDir(char* out, size_t n)
 {
+#ifdef OBJECTHD_SELFTEST
+    return strcpy_s(out, n, g_testDir) == 0;
+#else
     const DWORD len = GetModuleFileNameA(nullptr, out, static_cast<DWORD>(n));
     if (len == 0 || len >= n) return false;
     char* slash = strrchr(out, '\\');
     if (!slash) return false;
     slash[1] = 0;
     return true;
+#endif
 }
 
 void IniPath(char* out, size_t n) { _snprintf_s(out, n, _TRUNCATE, "%sAlpha Centauri.ini", g_dir); }
@@ -438,10 +487,50 @@ void IniPath(char* out, size_t n) { _snprintf_s(out, n, _TRUNCATE, "%sAlpha Cent
 // Every screen behind the Preferences window that can show an object: the map, the HUD panels, the base screen.
 void RepaintObjectScreens()
 {
-    reinterpret_cast<void(__cdecl*)(int)>(At(kVA_DrawMap))(1);
-    reinterpret_cast<int(__thiscall*)(void*)>(At(kVA_StatusWinRedraw))(At(kVA_StatusWin));
-    if (*reinterpret_cast<int*>(At(kVA_BaseWin + 0x9C)) & 1)
-        reinterpret_cast<void(__thiscall*)(void*)>(At(kVA_GraphicWinRedraw))(At(kVA_BaseWin));
+    g_eng.drawMap(1);
+    g_eng.statusRedraw(At(kVA_StatusWin));
+    if (*reinterpret_cast<int*>(At(kVA_BaseWin + 0x9C)) & 1) g_eng.graphicRedraw(At(kVA_BaseWin));
+}
+
+// The row is off: hold nothing -- every cut object, both sheets' bytes (proven again when the row is switched on), the
+// cell buffer; the scratch Buffer shrinks to 4x4 (Buffer_init closes the old surface first).
+void ReleaseAll()
+{
+    for (int i = 0; i < g_count; ++i) {
+        for (Slot& s : g_entries[i].slots) CloseSlot(s);
+        g_entries[i].blank = -1;
+    }
+    for (int s = 0; s < kSheets; ++s) {
+        hdpack::Free(&g_pack[s]);
+        g_state[s] = 0;
+    }
+    free(g_cell);
+    g_cell = nullptr;
+    if (g_scratchReady && (g_scratchW > 4 || g_scratchH > 4)) {
+        g_eng.bufferInit(g_scratch, 4, 4, 0, nullptr);
+        g_scratchW = g_scratchH = 4;
+    }
+}
+
+// The row is on: prove both sheets again (and find their blank cells). A sheet that fails now stays stock.
+void ProveAll()
+{
+    for (int s = 0; s < kSheets; ++s) LoadSheet(s);
+}
+
+void BindEngine(uintptr_t popupTarget)
+{
+    g_eng.extract = reinterpret_cast<decltype(g_eng.extract)>(At(kVA_Extract2));
+    g_eng.draw2 = reinterpret_cast<FDraw2>(At(kVA_Draw2));
+    g_eng.popupArt = reinterpret_cast<FDraw2>(popupTarget);
+    g_eng.blitCore = reinterpret_cast<decltype(g_eng.blitCore)>(At(kVA_BlitCore));
+    g_eng.drawDest = reinterpret_cast<decltype(g_eng.drawDest)>(At(kVA_DrawDest));
+    g_eng.spriteClose = reinterpret_cast<decltype(g_eng.spriteClose)>(At(kVA_SpriteClose));
+    g_eng.bufferCtor = reinterpret_cast<decltype(g_eng.bufferCtor)>(At(kVA_BufferCtor));
+    g_eng.bufferInit = reinterpret_cast<decltype(g_eng.bufferInit)>(At(kVA_BufferInit));
+    g_eng.drawMap = reinterpret_cast<decltype(g_eng.drawMap)>(At(kVA_DrawMap));
+    g_eng.statusRedraw = reinterpret_cast<decltype(g_eng.statusRedraw)>(At(kVA_StatusWinRedraw));
+    g_eng.graphicRedraw = reinterpret_cast<decltype(g_eng.graphicRedraw)>(At(kVA_GraphicWinRedraw));
 }
 
 } // namespace
@@ -453,7 +542,9 @@ void ObjectHdSet(int on)
 {
     on = on ? 1 : 0;
     if (!g_installed || on == g_on) return;
-    g_on = on;                                           // the HD objects stay cut: switching back on costs nothing
+    g_on = on;
+    if (on) ProveAll();                                  // proven again; a sheet that fails now stays stock
+    else ReleaseAll();                                   // off holds nothing
     RepaintObjectScreens();
 }
 
@@ -510,10 +601,11 @@ void InstallObjectHd()
         Log("[objecthd] unexpected bytes at SpriteBox draw %X -> HD objects NOT installed\n", kSpriteBoxSite);
         return;
     }
-    uintptr_t lo = 0, hi = 0;                            // the popup picture: Sprite_draw_2, or the mod's thunk_art_draw
+    // the popup picture: Sprite_draw_2, or the patcher's thunk_art_draw at .pcave2 + kOffArtDraw with its entry bytes
+    uintptr_t lo = 0, hi = 0;
     const uintptr_t art = CallTarget(kPopupArtSite);
-    const bool artThunk = art == reinterpret_cast<uintptr_t>(At(kVA_ArtDraw)) && UimodPcave2Range(&lo, &hi) &&
-                          art >= lo && art < hi;
+    const bool artThunk = UimodPcave2Range(&lo, &hi) && art == lo + kOffArtDraw && art + sizeof kArtDrawEntry <= hi &&
+                          memcmp(reinterpret_cast<const void*>(art), kArtDrawEntry, sizeof kArtDrawEntry) == 0;
     if (art != reinterpret_cast<uintptr_t>(At(kVA_Draw2)) && !artThunk) {
         Log("[objecthd] unexpected bytes at popup picture draw %X -> HD objects NOT installed\n", kPopupArtSite);
         return;
@@ -529,17 +621,19 @@ void InstallObjectHd()
     for (int s = 0; s < kSheets; ++s) usable = LoadSheet(s) || usable;
     if (!usable) {
         Log("[objecthd] no usable pack in terrain\\ -> HD objects NOT installed\n");
+        for (int s = 0; s < kSheets; ++s) hdpack::Free(&g_pack[s]);
+        free(g_cell);
+        g_cell = nullptr;
         return;
     }
 
     char ini[MAX_PATH];
     IniPath(ini, sizeof ini);
     g_on = GetPrivateProfileIntA("UIMod", "ObjectHD", kObjectHdDefault, ini) != 0 ? 1 : 0;
-    g_extract = reinterpret_cast<FExtract2>(At(kVA_Extract2));
-    g_draw2 = reinterpret_cast<FDraw2>(At(kVA_Draw2));
-    g_popupArt = reinterpret_cast<FDraw2>(art);
-    g_blitCore = reinterpret_cast<FBlitCore>(At(kVA_BlitCore));
-    g_drawDest = reinterpret_cast<FDrawDest>(At(kVA_DrawDest));
+#ifndef OBJECTHD_SELFTEST
+    BindEngine(art);
+#endif
+    if (!g_on) ReleaseAll();                             // off from the ini: the proof decided the row; hold nothing
     for (int i = 0; i < nbc; ++i) Retarget(bc[i], reinterpret_cast<const void*>(&BlitCoreHook));
     for (int i = 0; i < ndd; ++i) Retarget(dd[i], reinterpret_cast<const void*>(&DrawDestHook));
     for (uint32_t site : kDatalinkSites) Retarget(site, reinterpret_cast<const void*>(&Draw2Hook));
