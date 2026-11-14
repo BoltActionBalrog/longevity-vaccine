@@ -1,17 +1,30 @@
-"""A placeholder pack for the HD main menu (src/uimod/src/menuhd.cpp), built from the player's own game files: smooth
-3x enlargements of the stock opening, planet strips and moons, quantized to the stock xopeninga palette (indices
-0..235), in the layout menuhd reads. It exercises the hook at any resolution without an art pack.
+"""A placeholder pack for the HD main menu (src/uimod/src/menuhd.cpp), built from the player's own game files, for
+testing the hook at any resolution without an art pack: Lanczos 3x enlargements of the stock opening and planet
+strips and pixel-replicated 3x moons, quantized to the stock xopeninga palette (indices 0..235), in the layout menuhd
+reads.
 
-Usage: python make_menu_placeholder_pack.py <game dir> [<out dir>]   (default out: <game>\\menu\\hd)   needs Pillow + numpy
+EVERYTHING IT WRITES IS THE GAME'S OWN PICTURES, ENLARGED. It is for testing on your own machine only: never share
+its output, never publish it as a pack.
+
+Usage: python make_menu_placeholder_pack.py <out dir> [--game <game dir>]   needs Pillow + numpy
+The game is found through config.py (as every tool here does) unless --game names it. Nothing is written into the
+game folder unless <out dir> is <game>\\menu\\hd -- copy the output there yourself to test.
 Writes space_x3.pcx (the stock left part + a generated starfield), the 27 S#L#C#_x3.pcx and moon1..3_x3.pcx, plus
 PLACEHOLDER.txt so nobody mistakes them for real art.
+
+The strips and moons are converted to colour through the SCREEN palette (xopeninga.pcx's): the engine shows them
+through it, not through their own file palettes (which differ at entries 128..138).
 """
+import argparse
 import random
 import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import config  # noqa: E402
 
 K = 3
 
@@ -33,9 +46,20 @@ def save(idx, pal, path):
     im.save(path)
 
 
+def screen_rgb(path, pal):
+    """A stock picture's indices shown through the screen palette, as the engine shows them."""
+    idx = np.array(Image.open(path))
+    lut = np.array(pal, np.uint8).reshape(-1, 3)
+    return idx, lut[idx]
+
+
 def main():
-    game = Path(sys.argv[1])
-    out = Path(sys.argv[2]) if len(sys.argv) > 2 else game / "menu" / "hd"
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("out", type=Path, help="where to write the placeholder pack")
+    ap.add_argument("--game", type=Path, default=None, help="the game folder (default: config.py's)")
+    args = ap.parse_args()
+    game = args.game or config.game_dir()
+    out = args.out
     out.mkdir(parents=True, exist_ok=True)
     stock = Image.open(game / ("xopeninga.pcx.orig" if (game / "xopeninga.pcx.orig").exists() else "xopeninga.pcx"))
     pal = stock.getpalette()[:768]
@@ -68,21 +92,22 @@ def main():
         for l in (1, 2, 3):
             for c in (1, 2, 3):
                 n = f"S{s}L{l}C{c}"
-                im = Image.open(game / f"{n}.pcx").convert("RGB").resize((404 * K, 768 * K), Image.LANCZOS)
+                _idx, rgbs = screen_rgb(game / f"{n}.pcx", pal)
+                im = Image.fromarray(rgbs).resize((404 * K, 768 * K), Image.LANCZOS)
                 save(quant(im, pimg), pal, out / f"{n}_x3.pcx")
 
     for m in (1, 2, 3):
-        src = Image.open(game / f"moon{m}.pcx")
-        idx = np.array(src)
+        idx, rgbm = screen_rgb(game / f"moon{m}.pcx", pal)
         key = idx == 255
-        rgbm = np.array(src.convert("RGB"))
+        rgbm = rgbm.copy()
         rgbm[key] = 0                                   # no magenta in the colours: dithering would smear it into the edges
         col = np.minimum(np.array(Image.fromarray(rgbm).quantize(palette=pimg, dither=Image.Dither.NONE)), 235).astype(np.uint8)
         col[key] = 255
         big = np.repeat(np.repeat(col, K, 0), K, 1)
         save(big, pal, out / f"moon{m}_x3.pcx")
 
-    (out / "PLACEHOLDER.txt").write_text("Placeholder art made by smac_menu_placeholder.py from the stock pictures. "
+    (out / "PLACEHOLDER.txt").write_text("Placeholder art made by work/scripts/make_menu_placeholder_pack.py from "
+                                         "the game's own pictures, enlarged. For testing only: do not share it. "
                                          "Replace with a real art pack.\n")
     print("wrote", out)
 

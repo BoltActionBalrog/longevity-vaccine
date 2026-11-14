@@ -1542,7 +1542,7 @@ extern int  change_opening(char* pcx_name);                                    /
 extern void close_opening(void);                                               // addr: 0x00589B20  thinker   5 callers
 extern struct GraphicWin* TopMenuWin;                                          // addr: 0x00945824  thinker   full-screen opening backdrop window, ScreenW x ScreenH (top_menu creates, change_opening fills, SetupWin decorations draw into +0x444, loading screens reuse)
 extern int  ExpansionEnabled;                                                  // addr: 0x009A6488  thinker   SMACX expansion flag; top_menu picks xopening*.pcx when set
-extern int  init_opening(const char* pcx_name);                                // addr: 0x00589B60  thinker   no direct E8 callers
+extern int  init_opening(const char* pcx_name);                                // addr: 0x00589B60  thinker   no direct E8 callers (Thinker's top_menu calls it); load @0x589C84, stretch @0x589CCB
 extern void TextScroll_ctor(void* self);                                       // addr: 0x00629110  observed  scroll-text widget ctor (chat log; 9 caller screens incl Datalinks 0x429300)
 extern int  TextScroll_attach(void* self, ...);                                // addr: 0x006292D0  observed  thiscall; creates child GraphicWin from rect args; scrollbar w from g_scrollbar_w; SHARED (9 callers) - scale ARGS at call site only
 extern void ScrollBar_subctor(void* self);                                     // addr: 0x00605370  observed  thiscall; inits scrollbar fields +0xA14..+0xAA4 from config globals 0x9B8DE0.. + sprite ptrs

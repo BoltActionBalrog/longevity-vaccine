@@ -146,7 +146,6 @@
     <ClInclude Include="src\objecthd_table.h" />
     <ClInclude Include="src\menuhd.h" />
     <ClInclude Include="src\menuhd_law.h" />
-    <ClInclude Include="src\pcx_decode.h" />
     <ClInclude Include="src\version.h" />
     <ClInclude Include="src\vidsafety.h" />
     <ClInclude Include="src\vidwatch.h" />
