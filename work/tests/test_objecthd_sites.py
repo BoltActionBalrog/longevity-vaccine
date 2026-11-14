@@ -232,9 +232,41 @@ def test_every_draw_site_is_the_call_objecthd_expects(pe, baked, symtab, which):
     assert len(calls(img, TERRAIN_PASS, TERRAIN_PASS_END, DRAW_DEST)) == const("kDrawDestCalls") == 3
     assert calls(img, DATALINK, DATALINK_END, DRAW2) == DATALINK_SITES
     assert target(img, SPRITEBOX_SITE) == DRAW2
+    assert target(img, POPUP_ART_SITE) == (DRAW2 if which == "pristine" else symtab["thunk_art_draw"])
+
+
+def pcave2(img):
+    sec = [s for s in img.sections if s.Name.rstrip(b"\0") == b".pcave2"]
+    assert len(sec) == 1
+    return img.OPTIONAL_HEADER.ImageBase + sec[0].VirtualAddress
+
+
+def art_entry():
+    m = re.search(r"kArtDrawEntry\[\] = \{([^}]*)\}", HD)
+    return bytes(int(v, 16) for v in m.group(1).replace(" ", "").split(","))
+
+
+def test_the_popup_thunk_is_found_by_its_cave_offset_and_entry_bytes(baked, symtab):
+    """On the patched exe the popup picture's E8 calls thunk_art_draw. objecthd takes the thunk only at .pcave2 +
+    kOffArtDraw and only when its first bytes are kArtDrawEntry (the g / 16 test that falls back to Sprite_draw_2);
+    a later bake that moves or changes it fails that check and installs nothing."""
     art = symtab["thunk_art_draw"]
-    assert art == const("kVA_ArtDraw")
-    assert target(img, POPUP_ART_SITE) == (DRAW2 if which == "pristine" else art)
+    assert art - pcave2(baked) == const("kOffArtDraw")
+    entry = art_entry()
+    assert rd(baked, art, len(entry)) == entry
+    assert entry[9:14] == b"\x68" + struct.pack("<I", DRAW2)          # push Sprite_draw_2; ret -- the same contract
+    assert "kVA_ArtDraw" not in HD and "0xA35EB0" not in HD.upper().replace("0X", "0x")
+
+
+def test_each_datalinks_draw_pushes_1_1_which_the_mod_rewrites(pe):
+    """Each of the 13 Datalinks Sprite_draw_2 calls is preceded by push 1 (den); push 1 (num), then the other args.
+    The mod rewrites those immediates at run time to scale the page, so the hook must size the HD copy from the num /
+    den it is handed -- the source says so where a later edit would look."""
+    for site in DATALINK_SITES:
+        before = rd(pe, site - 0x20, 0x20)
+        i = before.rfind(bytes.fromhex("6A016A01"))
+        assert i >= 0 and 0x20 - i <= 0x16, hex(site)
+    assert "never assume 1 / 1 or g / 16" in HD
 
 
 def test_each_datalinks_draw_is_of_a_table_sprite(pe, table):
@@ -246,12 +278,16 @@ def test_each_datalinks_draw_is_of_a_table_sprite(pe, table):
         ",".join(f"0x{s:X}" for s in DATALINK_SITES)
 
 
-def test_no_patch_site_overlaps_a_hooked_call():
-    """patches.yaml writes none of the 36 E8s objecthd retargets (0x604C72 is re-pointed by the patcher, at thunk_art_draw,
-    which objecthd chains to: only its rel32 changes, never its opcode)."""
+def test_no_patch_site_overlaps_a_hooked_call(pe):
+    """patches.yaml writes none of the 36 E8s objecthd retargets -- the 21 terrain-pass calls (found by the same scan
+    the hook does), the 13 Datalinks calls and the SpriteBox call -- nor the 8 extract sites it checks (0x604C72 is
+    re-pointed by the patcher, at thunk_art_draw, which objecthd chains to: only its rel32 changes, never its opcode)."""
     sites, _g, _c, _sym = ap.load_patches(pathlib.Path(ap.DEFAULT_PATCHES))
     assert len(sites) > 1000
-    ours = DATALINK_SITES + [SPRITEBOX_SITE] + EXTRACT_SITES
+    terrain = calls(pe, TERRAIN_PASS, TERRAIN_PASS_END, BLIT_CORE) + calls(pe, TERRAIN_PASS, TERRAIN_PASS_END, DRAW_DEST)
+    assert len(terrain) == 21
+    ours = terrain + DATALINK_SITES + [SPRITEBOX_SITE] + EXTRACT_SITES
+    assert len(set(terrain + DATALINK_SITES + [SPRITEBOX_SITE, POPUP_ART_SITE])) == 36
     span = {s["id"]: s.get("length") or len(s.get("original_bytes", "").split()) or 5 for s in sites}
     hits = [(s["id"], hex(s["virtual_addr"])) for s in sites for o in ours
             if s["virtual_addr"] < o + 5 and o < s["virtual_addr"] + span[s["id"]]]
