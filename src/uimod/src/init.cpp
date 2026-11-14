@@ -410,8 +410,9 @@ extern "C" void __stdcall Init(HMODULE self)
     InstallObjectHd();
 
     // The HD main menu and planet setup: <game>\menu\hd\ (panorama + custom_planet strips + moons) composed at any
-    // resolution by one uniform scale. Nothing is patched without menu\hd\space_x3.pcx; "HD Main Menu" in Longevity
-    // Mod Preferences ([UIMod] MenuHD) switches it. 13 byte-checked E8 retargets, cave-free, both exes. See menuhd.cpp.
+    // resolution by one uniform scale. Nothing is patched without a usable menu\hd\space_x3.pcx or without the
+    // Longevity tab; "HD Main Menu" there ([UIMod] MenuHD) switches it. Buffer_load_pcx's entry + 7 byte-checked E8
+    // retargets, PRACX and PRACX + Thinker. See menuhd.cpp.
     InstallMenuHd();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.
