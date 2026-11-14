@@ -58,6 +58,8 @@ extern int  g_cursor_cut_guard;                // addr: 0x009BC494  observed  lo
 extern void load_fixed_sprites(void);         // addr: 0x00455E80  thinker   parent UI bootstrap; sole caller of load_interface
 extern void load_menu(void);                  // addr: 0x00402F40  guess     menu.pcx (main menu)
 extern void load_faction_art(int faction);    // addr: 0x00453710  thinker   cdecl; <faction>.pcx -> 37 Sprites at g_faction_sprites[faction]
+extern void load_terrain(void);                // addr: 0x00451C50  thinker   TER1.PCX / TER1WRECK.PCX / TEXTURE.PCX -> the terrain sprites and textures
+extern void load_vehicles(void);               // addr: 0x00454270  thinker   UNITS.PCX -> the unit sprites
 extern void show_credits(void);               // addr: 0x00428DF0  thinker   View Credits entry: new CreditsWin(0x2D6C) + load_credits_a; callers top_menu/Console_menu_proc/Console_on_key_click/end_of_game
 extern void CreditsWin_ctor(void* self);      // addr: 0x00428780  observed  thiscall; 2x GraphicWin + Font + Buffer + FlatButton + Time subobjects
 extern void load_credits_a(struct CreditsWin* self); // addr: 0x004289F0  observed  thiscall; View Credits modal: fullscreen win + credits[2].pcx via GraphicWin_load_pcx + 400x400 scroller subwin @(30,200|100) + Font 14 + 30ms timer
@@ -179,6 +181,7 @@ extern void base_drones(void);                                         // addr: 
 extern int game_rand(void);                                            // addr: 0x0064601D  thinker  cdecl; C runtime rand 0..32767
 extern struct CFacility Facility[];                                    // addr: 0x009A4B68  thinker  stride 0x30, name at +0
 extern struct MFaction MFactions[8];                                   // addr: 0x00946A50  thinker  stride 0x59C
+// field: MFaction +0x04 char filename[24]   the faction's art file stem ("<filename>.pcx")
 extern void* g_iat_timeGetTime;                                        // addr: 0x00669368  observed  IAT slot
 extern void drone_riot(void);                                          // addr: 0x004F4FB0  thinker  cdecl; CurrentBase riot + defection
 extern void base_psych(void);                                          // addr: 0x004EA540  thinker  cdecl; CurrentBase psych stages
@@ -1442,6 +1445,7 @@ extern struct BasePop* g_current_basepop;                   // addr: 0x009B8D7C 
 extern struct SubInterface* g_iface_diplo_talk;             // addr: 0x007AE800  observed  = DiploTalkWin+0xA14 (mode id 4); MP twin 0x7AE81C = DiploWin+0xA14 (mode 0xB)
 extern struct Sprite* g_faction_portrait_table[8];          // addr: 0x006846D8  observed  = 0x78EE48+f*0x65C (131x157 leader portrait, interface.pcx (0x130,0x1C9)); X_pops art for diplomacy popups
 extern BYTE g_faction_sprites[8][0x65C];                    // addr: 0x0078E978  observed  per faction: 37 Sprites (0x2C each) from +0; filled by load_faction_art
+extern struct Sprite* g_base_sprite_table[];               // addr: 0x0076E590  observed  base_draw's Sprite* per base icon (into g_faction_sprites)
 extern struct Sprite g_faction_council_small[8];            // addr: 0x0078EDF0  observed  stride 0x65C; 96x115 council/combat portrait, unframed
 extern struct Sprite g_faction_council_big[8];              // addr: 0x0078EE1C  observed  stride 0x65C; 118x144 leader portrait, unframed
 extern struct Sprite g_faction_art[8];                      // addr: 0x0078EE48  observed  stride 0x65C: +0 portrait 131x157, +0x2C logo 65x50, +0x58 base pic 233x124, +0x84 164x198; filled by load_faction_art
