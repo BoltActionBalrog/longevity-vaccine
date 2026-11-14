@@ -24,24 +24,37 @@
 // Art that is not provided, or cannot be used, is drawn exactly as the game draws it without this module: the
 // original call with the original arguments, decided once and then free.
 //  * per faction: the pack file is proven once (hdpack::Load: bounded scan of the whole file, the faction file's
-//    palette) when load_faction_art loads that faction; a file that fails is logged once and that faction stays stock;
-//  * per sprite: a cell that is all key is stock for good (one debug line);
+//    palette) at the first draw of one of that faction's bases while the row is on; a file that fails is logged once
+//    and that faction stays stock;
+//  * per sprite: a cell that is all key is stock for good (one debug line); a sprite whose own stock cut failed is
+//    forgotten, so it is drawn as the game draws it (and never from another faction's pack);
 //  * per sprite and size: a cut that fails (an empty rect, no memory) is remembered and never retried.
-// Nothing is allocated through the engine except the one scratch Buffer the cut goes through (grow-only, at most
-// kMaxCut x the stock cell, its address room probed first); everything else is plain memory and its failure is stock.
+// The engine's fatal exit on an allocation failure is bounded, not gone: two engine allocations remain on the cut
+// path, both at most about 1 MB -- the one scratch Buffer the cut goes through (Buffer_init; grow-only, at most
+// kMaxCut x the stock cell, its address room probed first, which narrows the window but does not commit the memory)
+// and the HD sprite itself (Sprite_extract_2 allocates it through the engine's allocator 0x5D4510, which exits when
+// malloc fails -- the same failure the stock game has for its own sprites). Everything else is plain memory and its
+// failure is stock.
 //
-// Memory budget: a faction's pack is its file bytes (~3 to 4 MB) while that faction is in the game -- the file is
-// read and scanned once, and a sprite at a new size expands only its own cell's scanlines from them. Cut sprites cost
-// about w x h bytes each and are kept for every size drawn (kSizes per sprite), up to kBudget in all, least recently
-// drawn first out. Switching the row off keeps them, so switching it on again costs nothing.
+// Memory budget: a faction's pack is its RLE stream (~3 to 4 MB) while that faction is in the game and the row is on
+// -- the file is read and scanned once, and a sprite at a new size expands only its own cell's scanlines from it. Cut
+// sprites cost about w x h bytes each and are kept for every size drawn (kSizes per sprite), up to kBudget in all,
+// least recently drawn first out. With the row off nothing is held: switching it off frees the cut sprites, the packs
+// and the cell buffer and shrinks the scratch Buffer to 4x4, and nothing is read while it is off (a game started with
+// BaseHD=0 included). Switching it on proves each faction's pack again at its first draw (~11 to 16 ms a pack, then
+// 2 to 8 ms a sprite on screen).
 //
 // Levers, both byte-checked E8 retargets, cave-free (work/tests/test_basehd_sites.py pins them):
 //  * @0x453836 -> ExtractRecorder: records each base sprite and its rect. The faction comes from the sprite's slot in
 //    g_faction_sprites, its file from MFactions[f].filename -- never a scratch string. Sprites cut before this module
 //    was installed are placed by their slot at their first draw (Adopt).
 //  * @0x55B32B -> DrawHook: a recorded sprite whose faction has a usable pack is drawn from its HD copy.
-// Installed only where the Longevity Preferences tab is, and only when at least one pack on disk is usable: otherwise
-// nothing is patched and no row is built. "HD Base Sprites" ([UIMod] BaseHD) switches it live.
+// Installed only where the Longevity Preferences tab is, and only when at least one pack on disk is usable (proven at
+// install, then released): otherwise nothing is patched and no row is built. "HD Base Sprites" ([UIMod] BaseHD)
+// switches it live.
+//
+// BASEHD_SELFTEST (work/tests/basehd_cache_selftest.cpp): the image base, the game folder and the engine functions are
+// the test's, so the bookkeeping below runs against a fake engine; nothing else differs.
 
 #include "basehd.h"
 #include "basehd_law.h"
@@ -91,8 +104,11 @@ constexpr int kKey = 9;                               // load_faction_art's key 
 constexpr int kLoadShift = 10;                        // Buffer_load_pcx(name, 0, 10, 236): loaded = file + 10 mod 256
 constexpr int kEntries = 8 * 24;                      // 8 faction slots x 24 base sprites
 constexpr int kSizes = 24;                            // sizes kept per sprite (PRACX: up to 20 zoom levels, + HUD/base screen)
-constexpr size_t kBudget = size_t(32) << 20;          // all cut base sprites together (w x h bytes each)
-constexpr int kPacks = 32;                            // faction stems remembered (in play + seen this session)
+#ifndef BASEHD_BUDGET
+#define BASEHD_BUDGET (size_t(32) << 20)
+#endif
+constexpr size_t kBudget = BASEHD_BUDGET;             // all cut base sprites together (w x h bytes each)
+constexpr int kPacks = 32;                            // faction stems recorded (a record nothing uses is reused)
 
 struct Sprite { uint8_t raw[0x2C]; };                 // +0x04 data, +0x10/+0x14 w/h, +0x28 owner flag
 
@@ -108,18 +124,23 @@ struct Entry {
 
 struct FactionPack {
     char stem[32];                                    // the faction file stem, e.g. "UNIV" ("" = free record)
-    int state;                                        // 0 = not tried (or released), 1 = usable, -1 = unusable
+    int state;                                        // 0 = not proven (or released), 1 = usable, -1 = unusable
     hdpack::Pack px;
 };
 
-typedef int (__thiscall* FExtract2)(void*, void*, int, int, int, int, int, void*);
-typedef int (__thiscall* FDraw)(void*, void*, int, int, int, void*);
-typedef void (__thiscall* FSpriteClose)(void*);
-typedef void (__thiscall* FBufferCtor)(void*);
-typedef int (__thiscall* FBufferInit)(void*, int, int, int, void*);
+// The engine functions the module calls (bound from the exe at install; a fake engine under BASEHD_SELFTEST).
+struct Engine {
+    int (__thiscall* extract)(void*, void*, int, int, int, int, int, void*);   // Sprite_extract_2
+    int (__thiscall* draw)(void*, void*, int, int, int, void*);                // Sprite_draw_dest
+    void (__thiscall* spriteClose)(void*);
+    void (__thiscall* bufferCtor)(void*);
+    int (__thiscall* bufferInit)(void*, int, int, int, void*);
+    void (__cdecl* drawMap)(int);
+    int (__thiscall* statusRedraw)(void*);
+    void (__thiscall* graphicRedraw)(void*);
+};
 
-FExtract2 g_extract = nullptr;
-FDraw g_draw = nullptr;
+Engine g_eng = {};
 Entry g_entries[kEntries];
 FactionPack g_packs[kPacks];
 alignas(16) uint8_t g_scratch[kBufSize + 0x80];      // the one scratch Buffer every cut goes through (grow-only)
@@ -131,9 +152,18 @@ size_t g_bytes = 0;                                   // cut sprites held, w x h
 bool g_installed = false;
 int g_on = kBaseHdDefault;
 unsigned g_clock = 0;
+bool g_fullLogged = false;
 char g_dir[MAX_PATH];
 
-BYTE* At(uintptr_t va) { return reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr)) + (va - 0x400000); }
+#ifdef BASEHD_SELFTEST
+BYTE* g_testImage = nullptr;                          // the fake exe image (0x400000-based)
+char g_testDir[MAX_PATH];
+BYTE* ImageBase() { return g_testImage; }
+#else
+BYTE* ImageBase() { return reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr)); }
+#endif
+
+BYTE* At(uintptr_t va) { return ImageBase() + (va - 0x400000); }
 
 void Log(const char* fmt, ...)
 {
@@ -232,22 +262,41 @@ void LoadPack(FactionPack& p)
     Dbg("[basehd] %s proven in %lu ms (%zu bytes kept)\n", rel, GetTickCount() - t0, p.px.size);
 }
 
-// The record for <stem>, loading it if it was never tried; -1 when the table is full (then that faction stays stock).
+bool Referenced(int pack)
+{
+    for (const Entry& e : g_entries) if (e.stock && e.pack == pack) return true;
+    return false;
+}
+
+// The record for <stem> (nothing is read here: a pack is proven at its first draw while the row is on). A record no
+// sprite uses -- a faction that left, an unusable or released pack -- is reused when the table is full; -1 only when
+// every record is in use (then that faction stays stock, one log line).
 int PackFor(const char* stem)
 {
     int freeRec = -1;
     for (int i = 0; i < kPacks; ++i) {
-        if (g_packs[i].stem[0] && _stricmp(g_packs[i].stem, stem) == 0) {
-            if (g_packs[i].state == 0) LoadPack(g_packs[i]);
-            return i;
-        }
+        if (g_packs[i].stem[0] && _stricmp(g_packs[i].stem, stem) == 0) return i;
         if (!g_packs[i].stem[0] && freeRec < 0) freeRec = i;
     }
-    if (freeRec < 0) return -1;
+    for (int i = 0; freeRec < 0 && i < kPacks; ++i) if (!Referenced(i)) freeRec = i;
+    if (freeRec < 0) {
+        if (!g_fullLogged) Log("[basehd] all %d pack records are in use -> stock bases for %s\n", kPacks, stem);
+        g_fullLogged = true;
+        return -1;
+    }
     FactionPack& p = g_packs[freeRec];
+    hdpack::Free(&p.px);
+    p = FactionPack{};
     strncpy_s(p.stem, stem, _TRUNCATE);
-    LoadPack(p);
     return freeRec;
+}
+
+// Whether <pack> is usable, proving it first if it has not been (only ever called while the row is on).
+bool Ready(int pack)
+{
+    if (pack < 0) return false;
+    if (g_packs[pack].state == 0) LoadPack(g_packs[pack]);
+    return g_packs[pack].state == 1;
 }
 
 // Whether a proven pack has art in at least one of its 24 cells (load_faction_art's grid): a pack of blank cells draws
@@ -273,9 +322,7 @@ void ReleaseUnusedPacks()
     for (int i = 0; i < kPacks; ++i) {
         FactionPack& p = g_packs[i];
         if (p.state != 1) continue;
-        bool used = false;
-        for (const Entry& e : g_entries) if (e.stock && e.pack == i) { used = true; break; }
-        if (!used) {
+        if (!Referenced(i)) {
             hdpack::Free(&p.px);
             p.state = 0;
             Dbg("[basehd] %s left the game: its pack is released\n", p.stem);
@@ -288,7 +335,7 @@ void ReleaseUnusedPacks()
 void CloseSlot(Slot& s)
 {
     if (s.state == 1) {
-        if (HasData(s.spr)) reinterpret_cast<FSpriteClose>(At(kVA_SpriteClose))(&s.spr);
+        if (HasData(s.spr)) g_eng.spriteClose(&s.spr);
         g_bytes -= static_cast<size_t>(s.w) * s.h;
     }
     s = Slot{};
@@ -298,6 +345,14 @@ void Release(Entry& e)
 {
     for (Slot& s : e.slots) CloseSlot(s);
     e.blank = -1;
+}
+
+// e's sprite has no stock art any more (its own cut failed): drop e, so the sprite is the game's own again.
+void Forget(Entry& e)
+{
+    Release(e);
+    e = Entry{};
+    e.pack = -1;
 }
 
 // Over budget: drop the least recently drawn HD sprites (never `keep`).
@@ -330,10 +385,10 @@ bool Scratch(int w, int h)
     if (!probe) return false;
     VirtualFree(probe, 0, MEM_RELEASE);
     if (!g_scratchReady) {
-        reinterpret_cast<FBufferCtor>(At(kVA_BufferCtor))(g_scratch);
+        g_eng.bufferCtor(g_scratch);
         g_scratchReady = true;
     }
-    reinterpret_cast<FBufferInit>(At(kVA_BufferInit))(g_scratch, nw, nh, 0, nullptr);
+    g_eng.bufferInit(g_scratch, nw, nh, 0, nullptr);
     if (!Pixels(g_scratch) || Field(g_scratch, kBufW) != nw || Field(g_scratch, kBufPitch) < nw) return false;
     g_scratchW = nw;
     g_scratchH = nh;
@@ -371,9 +426,14 @@ Slot* Cut(Entry& e, int w, int h, void* dst)
     const DWORD t0 = GetTickCount();
     const int cw = e.w * kMaster, ch = e.h * kMaster;
     if (!g_cell) g_cell = static_cast<uint8_t*>(malloc(static_cast<size_t>(kCellW) * kMaster * kCellH * kMaster));
-    if (!g_cell || cw > kCellW * kMaster || ch > kCellH * kMaster ||
-        !hdpack::Expand(g_packs[e.pack].px, e.x * kMaster, e.y * kMaster, cw, ch, g_map, g_cell)) {
+    if (!g_cell) {
         Log("[basehd] %s: no memory to cut a base sprite -> stock at %dx%d\n", g_packs[e.pack].stem, w, h);
+        return s;
+    }
+    if (cw > kCellW * kMaster || ch > kCellH * kMaster ||
+        !hdpack::Expand(g_packs[e.pack].px, e.x * kMaster, e.y * kMaster, cw, ch, g_map, g_cell)) {
+        Log("[basehd] %s: the cell (%d,%d) %dx%d lies outside the pack -> that base sprite stays stock\n",
+            g_packs[e.pack].stem, e.x, e.y, e.w, e.h);
         return s;
     }
     if (e.blank < 0) {
@@ -393,9 +453,9 @@ Slot* Cut(Entry& e, int w, int h, void* dst)
     Colours(dst, rgbq);
     basehd_law::PaletteBoxShrink(g_cell, cw, ch, cw, Pixels(g_scratch), w, h, Field(g_scratch, kBufPitch), rgbq);
     // cut in place: an engine Sprite is never copied to another address
-    if (g_extract(&s->spr, g_scratch, kKey, 0, 0, w, h, nullptr) != 0 || !HasData(s->spr)) {
+    if (g_eng.extract(&s->spr, g_scratch, kKey, 0, 0, w, h, nullptr) != 0 || !HasData(s->spr)) {
         Dbg("[basehd] %s (%d,%d) at %dx%d cuts empty -> stock at that size\n", g_packs[e.pack].stem, e.x, e.y, w, h);
-        if (HasData(s->spr)) reinterpret_cast<FSpriteClose>(At(kVA_SpriteClose))(&s->spr);
+        if (HasData(s->spr)) g_eng.spriteClose(&s->spr);
         s->spr = Sprite{};
         return s;
     }
@@ -437,7 +497,7 @@ Entry* Adopt(void* spr)
 {
     int idx = 0;
     const int f = FactionOf(spr, &idx);
-    if (f < 0 || idx >= 24 || !FactionFile(f)[0]) return nullptr;
+    if (f < 0 || idx >= 24 || !FactionFile(f)[0] || !HasData(*static_cast<const Sprite*>(spr))) return nullptr;
     Entry* e = NewEntry(spr);
     if (!e) return nullptr;
     const int water = idx / 12, size = idx % 12 / 3, def = idx % 3;
@@ -450,15 +510,18 @@ Entry* Adopt(void* spr)
 // Stands in for Sprite_extract_2 at load_faction_art's base-sprite site: same contract (thiscall, RET 0x1C).
 int __fastcall ExtractRecorder(void* spr, void* /*edx*/, void* src, int key, int x, int y, int w, int h, void* a8)
 {
-    const int rc = g_extract(spr, src, key, x, y, w, h, a8);
+    const int rc = g_eng.extract(spr, src, key, x, y, w, h, a8);
     int idx = 0;
     const int f = FactionOf(spr, &idx);
-    if (rc != 0 || f < 0 || x < 0 || y < 0 || w != kCellW || h != kCellH || x + w > kBlockW || y + h > kBlockH)
-        return rc;
+    if (f < 0) return rc;
     Entry* e = EntryOf(spr);
-    if (!e) e = NewEntry(spr);
-    if (!e) return rc;
-    Assign(*e, FactionFile(f), x, y, w, h);
+    if (rc != 0 || !HasData(*static_cast<const Sprite*>(spr)) || x < 0 || y < 0 || w != kCellW || h != kCellH ||
+        x + w > kBlockW || y + h > kBlockH) {
+        if (e) Forget(*e);                             // no stock art: never draw an earlier faction's in its place
+    } else {
+        if (!e) e = NewEntry(spr);
+        if (e) Assign(*e, FactionFile(f), x, y, w, h);
+    }
     if (idx == 23) ReleaseUnusedPacks();               // the faction's last base sprite: drop packs no slot uses
     return rc;
 }
@@ -466,34 +529,37 @@ int __fastcall ExtractRecorder(void* spr, void* /*edx*/, void* src, int key, int
 // Stands in for Sprite_draw_dest at base_draw's site: same contract (thiscall, RET 0x14).
 int __fastcall DrawHook(void* spr, void* /*edx*/, void* dst, int key, int x, int y, void* table)
 {
-    if (!g_on) return g_draw(spr, dst, key, x, y, table);
+    if (!g_on) return g_eng.draw(spr, dst, key, x, y, table);
     Entry* e = EntryOf(spr);
     if (!e) e = Adopt(spr);
     int32_t* num = reinterpret_cast<int32_t*>(At(kVA_ScaleNum));
     const int32_t n = *num, d = *reinterpret_cast<int32_t*>(At(kVA_ScaleDen));
-    if (!e || e->pack < 0 || g_packs[e->pack].state != 1 || e->blank == 1 || n <= 0 || d <= 0)
-        return g_draw(spr, dst, key, x, y, table);
+    if (!e || e->blank == 1 || n <= 0 || d <= 0 || !Ready(e->pack)) return g_eng.draw(spr, dst, key, x, y, table);
     int w = 0, h = 0;
     basehd_law::CellSize(e->w, e->h, n, d, &w, &h);
-    if (w < 1 || h < 1 || w > e->w * kMaxCut || h > e->h * kMaxCut) return g_draw(spr, dst, key, x, y, table);
+    if (w < 1 || h < 1 || w > e->w * kMaxCut || h > e->h * kMaxCut) return g_eng.draw(spr, dst, key, x, y, table);
     Slot* s = Find(*e, w, h);
     if (!s) s = Cut(*e, w, h, dst);
-    if (!s || s->state != 1) return g_draw(spr, dst, key, x, y, table);
+    if (!s || s->state != 1) return g_eng.draw(spr, dst, key, x, y, table);
     s->used = ++g_clock;
     *num = d;                                          // Sprite_draw_dest's unscaled branch (num == den): drawn 1:1
-    const int rc = g_draw(&s->spr, dst, key, x, y, table);
+    const int rc = g_eng.draw(&s->spr, dst, key, x, y, table);
     *num = n;
     return rc;
 }
 
 bool GameDir(char* out, size_t n)
 {
+#ifdef BASEHD_SELFTEST
+    return strcpy_s(out, n, g_testDir) == 0;
+#else
     const DWORD len = GetModuleFileNameA(nullptr, out, static_cast<DWORD>(n));
     if (len == 0 || len >= n) return false;
     char* slash = strrchr(out, '\\');
     if (!slash) return false;
     slash[1] = 0;
     return true;
+#endif
 }
 
 void IniPath(char* out, size_t n) { _snprintf_s(out, n, _TRUNCATE, "%sAlpha Centauri.ini", g_dir); }
@@ -501,10 +567,40 @@ void IniPath(char* out, size_t n) { _snprintf_s(out, n, _TRUNCATE, "%sAlpha Cent
 // Every screen behind the Preferences window that can show a base: the map, the HUD panels, the base screen.
 void RepaintBaseScreens()
 {
-    reinterpret_cast<void(__cdecl*)(int)>(At(kVA_DrawMap))(1);
-    reinterpret_cast<int(__thiscall*)(void*)>(At(kVA_StatusWinRedraw))(At(kVA_StatusWin));
-    if (*reinterpret_cast<int*>(At(kVA_BaseWin + 0x9C)) & 1)
-        reinterpret_cast<void(__thiscall*)(void*)>(At(kVA_GraphicWinRedraw))(At(kVA_BaseWin));
+    g_eng.drawMap(1);
+    g_eng.statusRedraw(At(kVA_StatusWin));
+    if (*reinterpret_cast<int*>(At(kVA_BaseWin + 0x9C)) & 1) g_eng.graphicRedraw(At(kVA_BaseWin));
+}
+
+// The row is off: hold nothing. Every cut sprite and every pack's bytes go (a pack is proven again at its faction's
+// first draw once the row is on; an unusable one is tried again then too), the cell buffer is freed and the scratch
+// Buffer shrinks to 4x4 (Buffer_init closes the old surface first). The entries -- which sprite is which faction's
+// which cell -- stay: they are a few KB of bookkeeping and hold no pixels.
+void ReleaseAll()
+{
+    for (Entry& e : g_entries) Release(e);
+    for (FactionPack& p : g_packs) {
+        hdpack::Free(&p.px);
+        p.state = 0;
+    }
+    free(g_cell);
+    g_cell = nullptr;
+    if (g_scratchReady && (g_scratchW > 4 || g_scratchH > 4)) {
+        g_eng.bufferInit(g_scratch, 4, 4, 0, nullptr);
+        g_scratchW = g_scratchH = 4;
+    }
+}
+
+void BindEngine()
+{
+    g_eng.extract = reinterpret_cast<decltype(g_eng.extract)>(At(kVA_Extract2));
+    g_eng.draw = reinterpret_cast<decltype(g_eng.draw)>(At(kVA_DrawDest));
+    g_eng.spriteClose = reinterpret_cast<decltype(g_eng.spriteClose)>(At(kVA_SpriteClose));
+    g_eng.bufferCtor = reinterpret_cast<decltype(g_eng.bufferCtor)>(At(kVA_BufferCtor));
+    g_eng.bufferInit = reinterpret_cast<decltype(g_eng.bufferInit)>(At(kVA_BufferInit));
+    g_eng.drawMap = reinterpret_cast<decltype(g_eng.drawMap)>(At(kVA_DrawMap));
+    g_eng.statusRedraw = reinterpret_cast<decltype(g_eng.statusRedraw)>(At(kVA_StatusWinRedraw));
+    g_eng.graphicRedraw = reinterpret_cast<decltype(g_eng.graphicRedraw)>(At(kVA_GraphicWinRedraw));
 }
 
 } // namespace
@@ -516,7 +612,8 @@ void BaseHdSet(int on)
 {
     on = on ? 1 : 0;
     if (!g_installed || on == g_on) return;
-    g_on = on;                                         // the HD sprites stay cut: switching back on costs nothing
+    g_on = on;
+    if (!on) ReleaseAll();                             // off holds nothing; on proves the packs again as they are drawn
     RepaintBaseScreens();
 }
 
@@ -542,7 +639,9 @@ void InstallBaseHd()
         return;
     }
     for (int i = 0; i < 256; ++i) g_map[i] = static_cast<uint8_t>(i + kLoadShift);
-    // Usable art decides it: prove packs until one passes (the rest are proven when their faction is loaded).
+    // Usable art decides it: prove packs until one passes. Each is proven in a record of its own outside the table and
+    // released straight away -- the table holds only factions met in play, and a faction's pack is proven again at its
+    // first draw while the row is on.
     bool usable = false;
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
@@ -551,15 +650,17 @@ void InstallBaseHd()
         char* suffix = strrchr(stem, '_');
         if (!suffix || _stricmp(suffix, "_x8.pcx") != 0 || suffix == stem || suffix - stem >= 24) continue;
         *suffix = 0;
-        const int p = PackFor(stem);
-        usable = p >= 0 && g_packs[p].state == 1 && HasArt(g_packs[p]);
-        if (p >= 0 && g_packs[p].state == 1 && !usable) {
+        FactionPack probe = {};
+        strncpy_s(probe.stem, stem, _TRUNCATE);
+        LoadPack(probe);
+        usable = probe.state == 1 && HasArt(probe);
+        if (probe.state == 1 && !usable)
             Log("[basehd] bases\\%s_x%d.pcx has no art in any base cell -> stock bases for %s\n", stem, kMaster, stem);
-            hdpack::Free(&g_packs[p].px);
-            g_packs[p].state = -1;
-        }
+        hdpack::Free(&probe.px);
     } while (!usable && FindNextFileA(fh, &fd));
     FindClose(fh);
+    free(g_cell);
+    g_cell = nullptr;
     if (!usable) {
         Log("[basehd] no usable pack in bases\\ -> HD bases NOT installed\n");
         return;
@@ -576,8 +677,9 @@ void InstallBaseHd()
     char ini[MAX_PATH];
     IniPath(ini, sizeof ini);
     g_on = GetPrivateProfileIntA("UIMod", "BaseHD", kBaseHdDefault, ini) != 0 ? 1 : 0;
-    g_extract = reinterpret_cast<FExtract2>(At(kVA_Extract2));
-    g_draw = reinterpret_cast<FDraw>(At(kVA_DrawDest));
+#ifndef BASEHD_SELFTEST
+    BindEngine();
+#endif
     Retarget(kSiteExtract, reinterpret_cast<const void*>(&ExtractRecorder));
     Retarget(kSiteDraw, reinterpret_cast<const void*>(&DrawHook));
     g_installed = true;

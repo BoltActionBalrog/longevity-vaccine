@@ -5,7 +5,8 @@
 //     out: n x { int32 cell_w, cell_h (CellSize(sw, sh, num, den)) ; dw*dh B indices (PaletteBoxShrink to dw x dh) }
 //   basehd_selftest pack <list.txt> <out.bin>
 //     list: one case per line: <pcx path> <wantW> <wantH> <palette path or -> <x0> <y0> <cw> <ch>
-//     out : per case int32 hdpack::Result ; when kOk, int32 expand_ok and cw*ch B (Expand through the identity map)
+//     out : per case int32 hdpack::Result ; when kOk, int32 bytes held, int32 expand_ok and cw*ch B (Expand through
+//           the identity map; a rect that does not fit is never written to)
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -56,7 +57,10 @@ static int Pack(const char* list, const char* out)
         const int32_t r = hdpack::Load(&p, path, w, h, havePal ? pal : nullptr);
         std::fwrite(&r, 4, 1, o);
         if (r == hdpack::kOk) {
-            std::vector<uint8_t> px(static_cast<size_t>(cw) * ch);
+            const int32_t held = static_cast<int32_t>(p.size);
+            std::fwrite(&held, 4, 1, o);
+            const bool fits = cw > 0 && ch > 0 && static_cast<long long>(cw) * ch <= (1 << 24);
+            std::vector<uint8_t> px(fits ? static_cast<size_t>(cw) * ch : 1);
             const int32_t ok = hdpack::Expand(p, x0, y0, cw, ch, ident, px.data()) ? 1 : 0;
             std::fwrite(&ok, 4, 1, o);
             std::fwrite(px.data(), 1, px.size(), o);

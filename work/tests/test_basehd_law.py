@@ -22,7 +22,7 @@ import scaling_laws as SL  # noqa: E402
 
 KEY = 9        # load_faction_art's transparency key (file 255 + 10)
 SHADOW = 0     # file 246 after Buffer_load_pcx(.., 10, 236): the shadow / black-ink index
-OK, NO_FILE, NOT_PCX, WRONG_SIZE, BAD_BODY, NO_PALETTE, WRONG_PALETTE = 0, 1, 2, 3, 4, 5, 6   # hdpack::Result
+OK, NO_FILE, NOT_PCX, WRONG_SIZE, BAD_BODY, NO_PALETTE, WRONG_PALETTE, NO_MEMORY, TOO_BIG = range(9)   # hdpack::Result
 
 
 def synth(sw, sh, seed):
@@ -183,7 +183,8 @@ def image(w, h, seed):
 
 
 def run_pack(exe, tmp_path, cases):
-    """cases: (name, file bytes, wantW, wantH, palette bytes or None, rect) -> [(result, expanded bytes or None)]"""
+    """cases: (name, file bytes, wantW, wantH, palette bytes or None, rect)
+    -> [(result, expanded bytes or None, bytes held or None)]"""
     lines = []
     for i, (name, data, w, h, pal, rect) in enumerate(cases):
         p = tmp_path / f"{i}_{name}.pcx"
@@ -201,14 +202,14 @@ def run_pack(exe, tmp_path, cases):
         rect = case[5]
         (r,) = struct.unpack_from("<i", raw, at)
         at += 4
-        px = None
+        px = held = None
         if r == OK:
-            (ok,) = struct.unpack_from("<i", raw, at)
-            at += 4
-            n = rect[2] * rect[3]
+            held, ok = struct.unpack_from("<2i", raw, at)
+            at += 8
+            n = rect[2] * rect[3] if 0 < rect[2] * rect[3] <= 1 << 24 else 1
             px = raw[at:at + n] if ok else None
             at += n
-        res.append((r, px))
+        res.append((r, px, held))
     assert at == len(raw)
     return res
 
@@ -236,19 +237,31 @@ def test_pack_reader(exe, tmp_path):
         ("short_file", good[:200], 64, 40, None, (0, 0, 1, 1)),
         ("empty", b"", 64, 40, None, (0, 0, 1, 1)),
         ("rect_outside", good, 64, 40, None, (60, 0, 8, 1)),
+        # slack between the stream and the trailer: accepted, but only the stream is kept
+        ("padded", good[:-769] + bytes(1000) + good[-769:], 64, 40, None, (0, 0, 64, 40)),
+        # more than any honest 64x40 file can be (header + 2 bytes a pixel + trailer): refused unread
+        ("padded_past_worst_case", good[:-769] + bytes(128 + 2 * 64 * 40) + good[-769:], 64, 40, None, (0, 0, 1, 1)),
+        ("x_wraps", good, 64, 40, None, (0x7FFFFFF0, 0, 0x20, 1)),
+        ("y_wraps", good, 64, 40, None, (0, 0x7FFFFFF0, 1, 0x20)),
     ]
     want = {"good": OK, "good_full": OK, "wrong_palette": WRONG_PALETTE, "wrong_size": WRONG_SIZE,
             "truncated_half": BAD_BODY, "no_trailer": BAD_BODY, "trailer_marker": NO_PALETTE,
             "uncompressed": NOT_PCX, "bpl_65535": NOT_PCX, "bpl_66": NOT_PCX, "run_crosses_line": BAD_BODY,
-            "zero_run": BAD_BODY, "short_file": NOT_PCX, "empty": NO_FILE, "rect_outside": OK}
-    for case, (r, px) in zip(cases, run_pack(exe, tmp_path, cases)):
+            "zero_run": BAD_BODY, "short_file": NOT_PCX, "empty": NO_FILE, "rect_outside": OK,
+            "padded": OK, "padded_past_worst_case": TOO_BIG, "x_wraps": OK, "y_wraps": OK}
+    stream = 128 + len(body)
+    for case, (r, px, held) in zip(cases, run_pack(exe, tmp_path, cases)):
         name, rect = case[0], case[5]
         assert r == want[name], name
         if name.startswith("good"):
             x0, y0, cw, ch = rect
             assert px == bytes(v for row in img[y0:y0 + ch] for v in row[x0:x0 + cw]), name
-        if name == "rect_outside":
-            assert px is None                              # Expand refuses a rect outside the pack
+        if name in ("rect_outside", "x_wraps", "y_wraps"):
+            assert px is None, name                        # Expand refuses a rect outside the pack, even one that wraps
+        if name in ("good", "padded"):
+            assert held == stream, name                    # the header and the RLE stream; no slack, no trailer
+        if name == "padded":
+            assert px == bytes(v for row in img for v in row)
 
 
 def test_pack_reader_survives_random_damage(exe, tmp_path):
@@ -265,7 +278,7 @@ def test_pack_reader_survives_random_damage(exe, tmp_path):
         if rnd.random() < 0.3:
             d = d[:rnd.randrange(128, len(d))]
         cases.append((f"r{i}", bytes(d), 48, 30, None, (0, 0, 48, 30)))
-    for r, px in run_pack(exe, tmp_path, cases):
+    for r, px, _held in run_pack(exe, tmp_path, cases):
         assert r in (OK, NOT_PCX, BAD_BODY, NO_PALETTE)
         if r == OK:
             assert px is not None and len(px) == 48 * 30

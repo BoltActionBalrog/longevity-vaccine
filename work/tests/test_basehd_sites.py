@@ -184,3 +184,39 @@ def test_art_row_ids_are_unique_and_free():
     others = [i for i in ids if i != art0]
     assert not art & set(others)
     assert len(set(others)) == len(others)
+
+
+def test_the_more_button_caption_is_the_engines_labels_1088_and_664(pe):
+    """PrefWin_show_cur_page captions the More button (PrefWin + 0x1A868) with Strings_get(TextTable,
+    TextLabels.labels[1088]) on tab 2 and labels[664] on tab 6: prefs.cpp's kLabelMore / kLabelBack are those."""
+    text_labels, text_table, strings_get = const(PREFS, "kVA_TextLabels"), const(PREFS, "kVA_TextTable"), const(PREFS, "kVA_StringsGet")
+    assert (text_labels, text_table, strings_get) == (0x9B90F8, 0x9B90D8, 0x6169A0)
+    more, back = const(PREFS, "kLabelMore"), const(PREFS, "kLabelBack")
+    # tab 2: mov eax, [TextLabels]; add esi, 0x1A868; mov ecx, [eax + 4*1088]; push ecx; mov ecx, TextTable; call
+    assert rd(pe, 0x4901B1, 5) == b"\xA1" + struct.pack("<I", text_labels)
+    assert rd(pe, 0x4901B6, 6) == b"\x81\xC6" + struct.pack("<I", MORE_OFS)
+    assert rd(pe, 0x4901BC, 6) == b"\x8B\x88" + struct.pack("<I", 4 * more)
+    assert rd(pe, 0x4901C3, 5) == b"\xB9" + struct.pack("<I", text_table)
+    assert call_target(pe, 0x4901C8) == strings_get
+    # tab 6: mov eax, [TextLabels]; ...; mov ecx, TextTable; mov eax, [eax + 4*664]; push eax; call Strings_get
+    assert rd(pe, 0x4901FC, 5) == b"\xA1" + struct.pack("<I", text_labels)
+    assert rd(pe, 0x490208, 5) == b"\xB9" + struct.pack("<I", text_table)
+    assert rd(pe, 0x49020D, 6) == b"\x8B\x80" + struct.pack("<I", 4 * back)
+    assert call_target(pe, 0x490214) == strings_get
+
+
+def test_switching_off_shrinks_the_scratch_through_buffer_init_which_closes_the_old_surface(pe):
+    """ReleaseAll shrinks the scratch Buffer with Buffer_init(4, 4): on a change of size Buffer_init first calls its
+    close routine (0x5D7470: DeleteObject on the DIB section, the DC) before it makes the new one -- the same path the
+    grow-only scratch takes. Its early-out is the same w and h only."""
+    assert rd(pe, 0x5D76B6, 6) == bytes.fromhex("3B9E80000000")          # cmp ebx, [esi+0x80]   (w)
+    assert rd(pe, 0x5D76D6, 2) == bytes.fromhex("8BCE")                  # mov ecx, esi
+    assert call_target(pe, 0x5D76D8) == 0x5D7470                          # close the old surface
+    assert "g_eng.bufferInit(g_scratch, 4, 4, 0, nullptr);" in HD
+
+
+def test_the_sprite_itself_is_an_engine_allocation(pe):
+    """The comment's claim: Sprite_extract_2 allocates the sprite through the engine allocator 0x5D4510 (@0x5E3D11),
+    whose failure is the engine's fatal exit -- so the HD sprite is one of the two engine allocations on the cut path."""
+    assert call_target(pe, 0x5E3D11) == 0x5D4510
+    assert "0x5D4510" in HD and "bounded, not gone" in HD
