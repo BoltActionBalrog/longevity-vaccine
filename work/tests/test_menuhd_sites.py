@@ -171,3 +171,16 @@ def test_symbols_and_names():
     assert "kVA_BufferInit" in HD and "BufferResize" not in HD
     assert "pcx_decode" not in HD and "std::vector" not in HD                   # the bounded reader; no exceptions
     assert not (SRC_DIR / "pcx_decode.h").exists()
+
+
+def test_the_menu_is_released_when_a_game_loads_its_terrain(pe):
+    """load_terrain's first load is TEXTURE.PCX (push 0x684FBC; mov ecx, the loading canvas; ... call Buffer_load_pcx):
+    the detour sees it and frees the composed menu, the previews and the scratch surface before the game allocates its
+    terrain -- under Thinker the 32-bit process had no room for both (black ground, seen in game 2026-11-14)."""
+    load_terrain = 0x451C50
+    assert calls(pe, load_terrain, load_terrain + 0x100, LOAD_PCX)[0] == 0x451CDC
+    # push 0xEC; push 0x0A; push 0; push "TEXTURE.PCX"; mov ecx, 0x798668 (the loading canvas)
+    assert rd(pe, 0x451CBB, 19) == bytes.fromhex("68EC0000006A0A6A0068") + struct.pack("<I", 0x684FBC) + \
+        b"\xB9" + struct.pack("<I", 0x798668)
+    assert pe.get_string_at_rva(0x684FBC - pe.OPTIONAL_HEADER.ImageBase) == b"TEXTURE.PCX"
+    assert 'if (strcmp(stem, "TEXTURE") == 0) ReleaseMenu();' in HD

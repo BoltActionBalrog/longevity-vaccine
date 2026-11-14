@@ -46,7 +46,10 @@
 // Memory: the composed menu (w x h bytes, 8.3 MB at 4K) and up to kCache previews at their drawn size (about 17 MB
 // at 4K for a step's three, the previous step's three and one spare), least recently drawn first out, a good entry
 // replaced only once its successor is made. A pack file is read for the one picture being made and released
-// straight after. "HD Main Menu" ([UIMod] MenuHD) switches it; it takes effect the next time the menu is drawn.
+// straight after. None of it is held in play: when a game loads its terrain (load_terrain's first load, TEXTURE.PCX,
+// seen by the detour) the menu, the previews and the scratch surface are freed -- under Thinker the 32-bit process had
+// no room for both (the map's ground came out black) -- and they are made again back at the menu.
+// "HD Main Menu" ([UIMod] MenuHD) switches it; it takes effect the next time the menu is drawn.
 
 #include "menuhd.h"
 #include "menuhd_law.h"
@@ -380,6 +383,24 @@ void ToScratch(const uint8_t* px, int w, int h, int pitch)
 
 bool Active() { return g_installed && g_on && *reinterpret_cast<int*>(At(kVA_ScreenWidth)) != kNarrowWidth; }
 
+// A game is starting (load_terrain's first load, TEXTURE.PCX): the menu holds nothing in play -- the composed menu,
+// the cached previews and the scratch Buffer's surface all go. Back at the menu they are made again (the menu once,
+// each preview at its first draw).
+void ReleaseMenu()
+{
+    if (g_menu || g_scratchW > 4 || g_scratchH > 4) Dbg("[menuhd] a game is loading: the menu's memory is released\n");
+    free(g_menu);
+    g_menu = nullptr;
+    g_menuW = g_menuH = 0;
+    g_menuFailed = false;
+    g_composed = false;
+    for (Cached& c : g_cache) { free(c.px); c = Cached{}; }
+    if (g_scratchReady && (g_scratchW > 4 || g_scratchH > 4)) {
+        reinterpret_cast<FBufferInit>(At(kVA_BufferInit))(g_scratch, 4, 4, 0, nullptr);   // closes the old surface
+        g_scratchW = g_scratchH = 4;
+    }
+}
+
 // --- hooks ------------------------------------------------------------------------------------------------------
 
 // Stands in for Buffer_load_pcx (entry detour, same contract): records what the Buffer now holds, then the stock load.
@@ -387,6 +408,7 @@ int __fastcall LoadPcxHook(void* buf, void* /*edx*/, const char* name, void* pal
 {
     char stem[16];
     Stem(name ? name : "", stem, sizeof stem);
+    if (strcmp(stem, "TEXTURE") == 0) ReleaseMenu();
     const bool ours = strcmp(stem, "XOPENINGA") == 0 || IsStrip(stem) || IsMoon(stem);
     Loaded* slot = nullptr;
     for (Loaded& l : g_loaded) if (l.buf == buf) slot = &l;
