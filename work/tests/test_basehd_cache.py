@@ -1,6 +1,6 @@
 """basehd.cpp's own bookkeeping, run: the remembered failure per (sprite, size), the blank cell, the budget trim, the
-stale entry after a new game, Adopt, the pack table, and that the row switched off (or off from the ini) holds and
-reads nothing.
+stale entry after a new game, Adopt, the pack table, a scratch resize that fails without the fatal exit, and that the
+row switched off (or off from the ini) holds and reads nothing.
 
 tests/basehd_cache_selftest.cpp compiles basehd.cpp itself (BASEHD_SELFTEST: a fake exe image and fake engine
 functions, real packs on disk read by the real hdpack reader, a 60,000-byte budget) and runs one scenario per process.
@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 import cpp_harness  # noqa: E402
 
 SCENARIOS = ["off_holds_nothing", "failure_memory", "blank_cell", "budget_trim", "stale_entry", "adopt_skips_empty",
-             "table_reuse", "junk_first"]
+             "table_reuse", "junk_first", "scratch_resize_fails"]
 
 
 @pytest.fixture(scope="module")

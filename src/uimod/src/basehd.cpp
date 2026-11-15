@@ -31,10 +31,11 @@
 //  * per sprite and size: a cut that fails (an empty rect, no memory) is remembered and never retried.
 // The engine's fatal exit on an allocation failure is bounded, not gone: two engine allocations remain on the cut
 // path, both at most about 1 MB -- the one scratch Buffer the cut goes through (Buffer_init; grow-only, at most
-// kMaxCut x the stock cell, its address room probed first, which narrows the window but does not commit the memory)
-// and the HD sprite itself (Sprite_extract_2 allocates it through the engine's allocator 0x5D4510, which exits when
-// malloc fails -- the same failure the stock game has for its own sprites). Everything else is plain memory and its
-// failure is stock.
+// kMaxCut x the stock cell, its address room probed first, which narrows the window but does not commit the memory;
+// ReleaseAll's Buffer_init(4, 4) is the same call at 16 bytes; only a failed CreateDIBSection in it exits) and the HD
+// sprite itself (Sprite_extract_2 allocates it through the engine's allocator 0x5D4510, which exits when malloc fails
+// -- the same failure the stock game has for its own sprites). Everything else is plain memory and its failure is
+// stock.
 //
 // Memory budget: a faction's pack is its RLE stream (~3 to 4 MB) while that faction is in the game and the row is on
 // -- the file is read and scanned once, and a sprite at a new size expands only its own cell's scanlines from it. Cut
@@ -375,10 +376,13 @@ Slot* Find(Entry& e, int w, int h)
 }
 
 // The scratch Buffer at least w x h. Grow-only, at most kMaxCut x the cell; the address room for its DIB section is
-// probed first, because Buffer_init's own failure is the engine's fatal exit.
+// probed first, because a failed CreateDIBSection in Buffer_init is the engine's fatal exit. Buffer_init's other
+// failure is not: on a size change it closes the Buffer first (pixels, width, height and pitch zeroed) and returns 1
+// when CreateCompatibleDC fails. So the recorded size is cleared on any failure, and the early return also needs
+// pixels: the next cut resizes again instead of writing through a closed Buffer.
 bool Scratch(int w, int h)
 {
-    if (g_scratchReady && w <= g_scratchW && h <= g_scratchH) return true;
+    if (g_scratchReady && Pixels(g_scratch) && w <= g_scratchW && h <= g_scratchH) return true;
     const int nw = w > g_scratchW ? w : g_scratchW, nh = h > g_scratchH ? h : g_scratchH;
     const size_t need = static_cast<size_t>((nw + 3) & ~3) * nh;
     void* probe = VirtualAlloc(nullptr, need * 2 + (1 << 20), MEM_RESERVE, PAGE_READWRITE);
@@ -389,7 +393,10 @@ bool Scratch(int w, int h)
         g_scratchReady = true;
     }
     g_eng.bufferInit(g_scratch, nw, nh, 0, nullptr);
-    if (!Pixels(g_scratch) || Field(g_scratch, kBufW) != nw || Field(g_scratch, kBufPitch) < nw) return false;
+    if (!Pixels(g_scratch) || Field(g_scratch, kBufW) != nw || Field(g_scratch, kBufPitch) < nw) {
+        g_scratchW = g_scratchH = 0;
+        return false;
+    }
     g_scratchW = nw;
     g_scratchH = nh;
     return true;
@@ -574,8 +581,9 @@ void RepaintBaseScreens()
 
 // The row is off: hold nothing. Every cut sprite and every pack's bytes go (a pack is proven again at its faction's
 // first draw once the row is on; an unusable one is tried again then too), the cell buffer is freed and the scratch
-// Buffer shrinks to 4x4 (Buffer_init closes the old surface first). The entries -- which sprite is which faction's
-// which cell -- stay: they are a few KB of bookkeeping and hold no pixels.
+// Buffer shrinks to 4x4 (Buffer_init closes the old surface first; if the new one is not made, the size recorded is
+// 0 and the next cut resizes). The entries -- which sprite is which faction's which cell -- stay: they are a few KB
+// of bookkeeping and hold no pixels.
 void ReleaseAll()
 {
     for (Entry& e : g_entries) Release(e);
@@ -587,7 +595,7 @@ void ReleaseAll()
     g_cell = nullptr;
     if (g_scratchReady && (g_scratchW > 4 || g_scratchH > 4)) {
         g_eng.bufferInit(g_scratch, 4, 4, 0, nullptr);
-        g_scratchW = g_scratchH = 4;
+        g_scratchW = g_scratchH = Pixels(g_scratch) ? 4 : 0;
     }
 }
 

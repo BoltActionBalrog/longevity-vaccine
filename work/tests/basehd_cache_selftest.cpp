@@ -33,6 +33,7 @@ static int g_liveSprites = 0;        // sprite pixel blocks held
 static void* g_lastDrawn = nullptr;
 static int g_lastNum = 0, g_lastDen = 0;
 static int g_bufW = 0, g_bufH = 0;   // the scratch Buffer's size as the fake Buffer_init last made it
+static bool g_failBufInit = false;   // Buffer_init fails the way the engine's does when CreateCompatibleDC fails
 
 static int& SprField(void* spr, int off) { return *reinterpret_cast<int*>(static_cast<uint8_t*>(spr) + off); }
 static void*& SprData(void* spr) { return *reinterpret_cast<void**>(static_cast<uint8_t*>(spr) + 4); }
@@ -72,6 +73,17 @@ static void __fastcall FakeBufferCtor(void* buf, void*) { memset(buf, 0, kBufSiz
 static int __fastcall FakeBufferInit(void* buf, void*, int w, int h, int, void*)
 {
     uint8_t* b = static_cast<uint8_t*>(buf);
+    if (g_failBufInit && (w != *reinterpret_cast<int*>(b + kBufW) || h != g_bufH)) {
+        // 0x5D76D8: a size change closes the Buffer first (pixels, width, height, pitch zeroed); then the DC call
+        // fails and Buffer_init returns 1 without the fatal exit.
+        free(*reinterpret_cast<void**>(b + kBufData));
+        *reinterpret_cast<void**>(b + kBufData) = nullptr;
+        *reinterpret_cast<int*>(b + kBufW) = 0;
+        *reinterpret_cast<int*>(b + kBufH) = 0;
+        *reinterpret_cast<int*>(b + kBufPitch) = 0;
+        g_bufW = g_bufH = 0;
+        return 1;
+    }
     free(*reinterpret_cast<void**>(b + kBufData));
     const int pitch = (w + 3) & ~3;
     *reinterpret_cast<void**>(b + kBufData) = malloc(static_cast<size_t>(pitch) * h);
@@ -428,6 +440,35 @@ static void JunkFirst()
     Check(used == 0 && LoadedPacks() == 0 && !g_cell, "install holds no record and no bytes", Num(used));
 }
 
+// Buffer_init closes the scratch and then fails without exiting: that cut is stock, the next cut at the earlier size
+// is stock too (not a write through the closed Buffer), and once Buffer_init works again the cuts are HD. The same
+// for the 4x4 shrink when the row goes off.
+static void ScratchResizeFails()
+{
+    WritePack("FACA", kAll);
+    WriteIni(1);
+    Install();
+    LoadFaction(0, "FACA");
+    SetScale(16, 16);
+    Check(Draw(0, 0), "HD at 16/16: the scratch holds one cell");
+    g_failBufInit = true;
+    SetScale(25, 16);
+    Check(!Draw(0, 1), "the failed resize draws stock");
+    Check(g_scratchW == 0 && g_scratchH == 0, "no size is recorded for the closed Buffer",
+          Num(g_scratchW) + "x" + Num(g_scratchH));
+    SetScale(16, 16);
+    Check(!Draw(0, 2), "the next cut at the earlier size is stock, not a write through the closed Buffer");
+    g_failBufInit = false;
+    Check(Draw(0, 3), "Buffer_init works again: HD");
+    g_failBufInit = true;
+    BaseHdSet(0);
+    Check(g_scratchW == 0 && g_scratchH == 0, "off with a failed 4x4 shrink: no size recorded",
+          Num(g_scratchW) + "x" + Num(g_scratchH));
+    g_failBufInit = false;
+    BaseHdSet(1);
+    Check(Draw(0, 4), "on again: HD");
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 3) return 2;
@@ -445,6 +486,7 @@ int main(int argc, char** argv)
     else if (s == "adopt_skips_empty") AdoptSkipsEmpty();
     else if (s == "table_reuse") TableReuse();
     else if (s == "junk_first") JunkFirst();
+    else if (s == "scratch_resize_fails") ScratchResizeFails();
     else return 2;
     return g_fails ? 1 : 0;
 }
