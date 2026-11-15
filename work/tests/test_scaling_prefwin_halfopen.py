@@ -102,9 +102,8 @@ def law_channels(g):
             "slider frame>labels T|B": (lab_t - (sf[1] + k), (sf[3] - k + 1) - lab_b),
             "slider frame>labels L | sliders R": (lab_l - (sf[0] + k), (sf[2] - k + 1) - sl_r),
             "right panel>Longevity frame L|R": (dl[0] - (rp[0] + k), (rp[2] - k + 1) - dl[2] - 1),
-            "Longevity frame>labels T|B": (fl(334, g) - (dl[1] + k), (dl[3] - k + 1) - lab_b),
-            "right panel>slider frame B": (rp[3] - k + 1) - sf[3] - 1,
-            "right panel>Longevity frame B": (rp[3] - k + 1) - dl[3] - 1}
+            "Longevity frame>labels T|B": (fl(311, g) - (dl[1] + k), (dl[3] - k + 1) - (fl(333, g) + fl(20, g))),
+            "right panel>slider frame B": (rp[3] - k + 1) - sf[3] - 1}
 
 
 # ============================================================================== 1. laws
@@ -131,7 +130,7 @@ def test_law_native_identity():
                   "right panel>list T | More B": (2, 2), "~panel gap": 3, "right panel>slider frame L|R": (2, 2),
                   "slider frame>labels T|B": (2, 2), "slider frame>labels L | sliders R": (2, 2),
                   "right panel>Longevity frame L|R": (2, 2), "Longevity frame>labels T|B": (2, 2),
-                  "right panel>slider frame B": 3, "right panel>Longevity frame B": 3}, \
+                  "right panel>slider frame B": 3}, \
         "the vanilla census (pristine image, prefwin_halfopen_emu at 1024x768): every pair mirrored"
 
 
@@ -164,7 +163,7 @@ def test_law_mirror_rule(g):
 SPACINGS = (("backdrop>inner L|R", 0, 3), ("backdrop>inner T|B", 0, 3), ("backdrop>inner T|B", 1, 3),
             ("inner>panels L|R", 0, 2), ("inner>left panel T|B", 0, 2), ("left panel>buttons L|R", 0, 2),
             ("right panel>list L|R", 0, 2), ("left panel>buttons T|B", 0, 2), ("~panel gap", None, 3),
-            ("right panel>slider frame B", None, 3), ("right panel>Longevity frame B", None, 3))
+            ("right panel>slider frame B", None, 3))
 
 
 def spacing_errors(g):
@@ -208,13 +207,13 @@ def test_law_spacing_census(g):
 
 @pytest.mark.parametrize("g", G_RANGE)
 def test_law_gaps_bounded(g):
-    """The derived gaps -- the panel gap (vanilla 3) and each slider frame's bottom gap to the right panel (vanilla 3)
-    -- never under 1 px (no stroke on a stroke); the slider-frame gaps within 1.25 px of vanilla x g/16 at every g, the
+    """The derived gaps -- the panel gap (vanilla 3) and the audio slider frame's bottom gap to the right panel (vanilla
+    3; uimod.dll's frame sits a button row higher since 2026-11-13, above the More button) -- never under 1 px (no stroke on a stroke); the slider-frame gaps within 1.25 px of vanilla x g/16 at every g, the
     panel gap within 1.69 px (v4: g 23 / 39 trade it for fewer broken relations) and within 1.375 px at the standard
     screens (2560x1440: the user's choice, 7 vs 5.62)."""
     ch = law_channels(g)
-    for name in ("right panel>slider frame B", "right panel>Longevity frame B"):
-        assert ch[name] >= 1 and abs(16 * ch[name] - 3 * g) <= 20, (g, name, ch[name])
+    name = "right panel>slider frame B"
+    assert ch[name] >= 1 and abs(16 * ch[name] - 3 * g) <= 20, (g, name, ch[name])
     gap = ch["~panel gap"]
     assert gap >= 1 and abs(16 * gap - 3 * g) <= (22 if g in (18, 20, 22, 25, 30, 40) else 27), (g, gap)
 
@@ -236,7 +235,7 @@ def test_law_split_is_optimal(g):
     s_t, s_b = f(10) - 3 * k, (f(390) - k) - (f(360) + f(20)) - 2 * k
     gap0 = f(256) - (f(33) + f(214)) - 2 * k
     bot = f(360) + f(20)
-    sfb = [bot - (f(356) + f(20) + (f(t + 3) - f(t) - k) + k) for t in (287, 331)]
+    sfb = [bot - (f(356) + f(20) + (f(t + 3) - f(t) - k) + k) for t in (287,)]   # the audio frame closes the panel
     hs, vs = [], []
     for a in range(s_l + 1):
         for b in range(s_l + 1):

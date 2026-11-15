@@ -6,6 +6,10 @@
 // game reaches desktop_init (Init runs at loader time, so any time in Init is fine).
 void InstallPrefsTab();
 
+// True once InstallPrefsTab has hooked the tab in (false on an exe without the mod's code cave). A feature whose only
+// switch is a row on the tab installs only when this is true; init.cpp installs the tab before those features.
+bool PrefsTabInstalled();
+
 // Per retrieved message (wheel.cpp's message hook): drops the slider value bubble once the slider is released.
 void PrefsBubblePoll();
 

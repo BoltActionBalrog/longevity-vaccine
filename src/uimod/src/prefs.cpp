@@ -53,6 +53,7 @@
 #include "dragdelay.h"
 #include "modernctl.h"
 #include "update.h"
+#include "basehd.h"
 
 void UimodLog(const char* msg);   // init.cpp: uimod.log + debugger
 void UimodDbg(const char* msg);   // init.cpp: only with [UIMod] DebugLog=1 (developer geometry dumps)
@@ -199,11 +200,36 @@ constexpr int  kAudioRowPitch = 0x16;    // PrefWin_build's audio rows: label/sl
 constexpr int  kSliderFrameRows = 2;     // our slider frame holds two rows (the audio page's holds four) ...
 constexpr int  kSliderBlockDy = (4 - kSliderFrameRows) * kAudioRowPitch;   // ... and sits 44 native lower, same bottom edge
 constexpr int  kSliderFrameH  = kSliderFrameRows * kAudioRowPitch + 4;     // 48 native (the audio frame: 4*22 + 4 = 92)
+constexpr int  kMoreRowDy = 0x17;       // the stock More button sits on the Cancel button's row (PrefWin_build: y0 - 0x17, buttons 0x17 apart) ...
+constexpr int  kSliderY   = kSliderBlockDy - kMoreRowDy;   // ... so our slider block sits one button row higher, clear of it
 // camera rows (modernctl.cpp): the map stays put on a left click / when a base closes
 constexpr int  kClickViewChkId = 0x76;   // "Left Click Doesn't Recenter the Map" ([UIMod] ClickKeepsView)
 constexpr int  kBaseViewChkId  = 0x77;   // "Closing a Base Never Recenters Map" ([UIMod] BaseCloseKeepsView)
 constexpr int  kClipChkId      = 0x78;   // "Constrain Mouse to Window" nested under the display-mode row ([UIMod] ConstrainMouse,
-                                         // vidmode.cpp); dimmed and inert outside Fullscreen; next free 0x7A
+                                         // vidmode.cpp); dimmed and inert outside Fullscreen
+// The page's second page, "HD art" (one row per drop-in art pack whose hook is installed), behind the STOCK "More"
+// button (PrefWin_btn_more, id 0x5E: PrefWin_on_command 0x491400's More case 0x4914B0 flips tab 2 <-> 6 with it, and the show/hide
+// switches 0x48FFB0 / 0x490140 show it on those two tabs only). On our tab we show it ourselves and take its click
+// (WrapCommand); its own case never runs there. Row ids 0x7A..0x7F are the art rows (kArtRows); next free 0x80
+constexpr int  kMoreBtnId   = 0x5E;
+constexpr uintptr_t kVA_MoreBtn = 0x00872140;   // PrefWin_btn_more (PrefWin +0x1A868)
+// Its caption: PrefWin_show_cur_page 0x490140 sets it at every show, BaseButton_set_name 0x6074E0 with
+// Strings_get(TextTable, TextLabels.labels[i]) -- "More" (i 1088) on tab 2 (0x4901B1..0x4901D0), "Back" (i 664) on
+// tab 6 (0x4901FC..0x490234). On our tab we set it the same way for our page, so a translated game follows.
+constexpr uintptr_t kVA_TextLabels  = 0x009B90F8;   // TextLabels {char** labels; uint32 count}
+constexpr uintptr_t kVA_TextTable   = 0x009B90D8;   // TextTable: the labels' string pool
+constexpr uintptr_t kVA_StringsGet  = 0x006169A0;   // Strings_get: thiscall (Strings*, char*) RET 4
+constexpr uintptr_t kVA_BtnSetName  = 0x006074E0;   // BaseButton_set_name: thiscall (button, const char*)
+constexpr int  kLabelMore = 1088, kLabelBack = 664;
+constexpr int  kArtChkId0   = 0x7A;
+constexpr int  kArtRowMax   = 6;
+struct ArtRow { const char* text; bool (*avail)(); int (*get)(); void (*set)(int); void (*save)(); int def; };
+// One line per art pack, in page order; row i has id kArtChkId0 + i. Each setting applies live and is saved with OK.
+const ArtRow kArtRows[] = {
+    { "HD Base Sprites", &BaseHdAvailable, &BaseHdGet, &BaseHdSet, &BaseHdSave, kBaseHdDefault },   // basehd.cpp, [UIMod] BaseHD
+};
+constexpr int  kArtRows_n = static_cast<int>(sizeof kArtRows / sizeof kArtRows[0]);
+static_assert(kArtRows_n <= kArtRowMax, "art row ids 0x7A..0x7F");
 constexpr uintptr_t kVA_ScrollBarVtbl = 0x00669D58;   // ScrollBar vtable (+0x30 draw = thunk_pref_sbzoom on the patched exe)
 constexpr int  kSbVtblBytes = 0x170;     // its extent: 0x168 GraphicWin + 2 ScrollBar virtuals; FileDlg_vtbl starts at 0x669EC8
 constexpr int  kSbValueOfs = 0xA2C;      // ScrollBar raw position; +0xA20/+0xA24 range, +0xA28 inverted flag
@@ -367,6 +393,7 @@ struct alignas(16) Widgets {
     BYTE scancheck[0xC00];   // the "Add Scanlines" row, nested under "Enable Custom Portraits": ditto
     BYTE airdropcheck[0xC00]; // the "Air Drops Divert Around Unseen Defenders" row (top-level, after the cloak rows): ditto
     BYTE modecheck[kModeCells][0xC00];   // Fullscreen / Borderless / Windowed, side by side on one line: ditto
+    BYTE artcheck[kArtRowMax][0xC00];    // the "HD art" page's rows (kArtRows), built only for an installed pack: ditto
     BYTE slider[0x2200];
     BYTE holdlabel[0xC00];   // "Drag Hold Time": inert FlatButton label, the audio page's row 1
     BYTE holdslider[0x2200]; // its ScrollBar, with a PRIVATE vtable copy (see HoldSliderDraw)
@@ -396,6 +423,9 @@ const char kSubBtnText[] = "Reset Skipped Updates";          // clears every "Do
 const char kCustomChkText[] = "Enable Custom Portraits";        // user wording 2026-11-07, was "Enable User Portraits" ([UIMod] CustomPortraits)
 const char kHdChkText[] = "Use Turovetsky's HD Portrait Pack";   // user wording 2026-10-03, pack renamed 2026-11-06 ([UIMod] HdPortraits)
 bool g_hdRow = false;                                           // the HD row exists (the pack is installed)
+bool g_artRow[kArtRowMax] = {};        // art row i exists (its pack's hook installed; latched at the first build)
+int  g_page = 0;                       // our tab's page: 0 the settings, 1 "HD art" (More flips it; leaving the tab resets it)
+bool g_moreShown = false;              // we showed the stock More button on our tab (we hide it again when leaving)
 const char kScanChkText[] = "Add Scanlines";                    // user wording 2026-09-30 ([UIMod] PortraitScanlines)
 const char kAirdropChkText[] = "Air Drops Divert Around Unseen Defenders";   // [UIMod] AirdropDiversion (aivis.cpp)
 const char* const kModeText[kModeCells] = { "Fullscreen", "Borderless", "Windowed" };   // index = VidMode
@@ -731,7 +761,11 @@ void __fastcall CheckContentDraw(void* self, void* /*edx*/)
     int modeCell = -1;                   // the display-mode cells show the mode the game is RUNNING in, read live
     for (int i = 0; i < kModeCells; ++i)
         if (self == static_cast<void*>(g_w.modecheck[i])) modeCell = i;
-    const bool on = modeCell >= 0 ? VidModeDetect() == modeCell
+    int artRow = -1;                     // the "HD art" page's rows
+    for (int i = 0; i < kArtRows_n; ++i)
+        if (self == static_cast<void*>(g_w.artcheck[i])) artRow = i;
+    const bool on = artRow >= 0 ? kArtRows[artRow].get() != 0
+                  : modeCell >= 0 ? VidModeDetect() == modeCell
                   : aiRow ? AiVisGetLocal() != 0 : cargoRow ? AiVisGetCargoOne() != 0 : markRow ? AiVisGetMark() != 0
                   : modernRow ? ModernControlsGet() != 0 : rcRow ? RightClickDragGet() != 0
                   : dragCell >= 0 ? (MapDragButtonGet() == kDragCellValue[dragCell] && (dragCell != 1 || MapDragRightAllowed()))
@@ -739,7 +773,8 @@ void __fastcall CheckContentDraw(void* self, void* /*edx*/)
                   : updRow ? UpdateCheckGet() != 0
                   : customRow ? PortraitCustomGet() != 0 : hdRow ? PortraitHdGet() != 0
                   : scanRow ? PortraitScanGet() != 0 : airdropRow ? AiVisGetAirdrop() != 0 : VidModeClipGet() != 0;
-    const char* text = modeCell >= 0 ? kModeText[modeCell]
+    const char* text = artRow >= 0 ? kArtRows[artRow].text
+                     : modeCell >= 0 ? kModeText[modeCell]
                      : aiRow ? kAiChkText : cargoRow ? kCargoChkText : markRow ? kMarkChkText
                      : modernRow ? kModernChkText : rcRow ? kRcMoveChkText
                      : dragCell >= 0 ? kDragCellText[dragCell]
@@ -834,7 +869,70 @@ int RowLabelY(int g, const BYTE* rowFont, uintptr_t sprVA)
     return ty;
 }
 
-// vtbl+0x30 on_redraw: chain, then show/hide our row by tab and draw its frame.
+// Our tab has two fixed pages, flipped by the stock More button (see kMoreBtnId); a setting is always on the same
+// page whatever packs are installed, and rows that are absent close up within their own page:
+//   page 1, how the game runs and plays -- the display-mode row (+ Constrain Mouse), the update row, the mouse group
+//     (Modern Control Set, the map-drag cells, the camera rows), the cloak rules and the airdrop row, in main's
+//     order and positions, then the slider frame (Base Font Size, Drag Hold Time);
+//   page 2, replacement art -- the portrait group and the HD art rows (kArtRows). Never empty: two portrait rows
+//     always exist.
+// (Assignment: the maintainer, 2026-11-13. One page could not hold the art rows and the More button.)
+// ForPage1 / ForPage2 visit every BUILT widget of a page: an optional row is never touched unbuilt (zeroed vtable = AV).
+template <typename F> void ForPage1(F f)
+{
+    if (g_modeRow) { f(g_w.clipcheck); for (auto& c : g_w.modecheck) f(c); }
+    f(g_w.updcheck);
+    f(g_w.subbtn);
+    if (g_modernRow) { f(g_w.moderncheck); f(g_w.rcmovecheck); }
+    if (g_dragRow) for (auto& c : g_w.dragcell) f(c);
+    if (g_cameraRow) { f(g_w.clickview); f(g_w.baseview); }
+    f(g_w.aicheck);
+    f(g_w.cargocheck);
+    f(g_w.markcheck);
+    f(g_w.airdropcheck);
+    f(g_w.label);
+    f(g_w.slider);
+    if (g_holdRow) { f(g_w.holdlabel); f(g_w.holdslider); }
+}
+
+template <typename F> void ForPage2(F f)
+{
+    f(g_w.customcheck);
+    if (g_hdRow) f(g_w.hdcheck);
+    f(g_w.scancheck);
+    for (int i = 0; i < kArtRows_n; ++i)
+        if (g_artRow[i]) f(g_w.artcheck[i]);
+}
+
+void HidePage1()
+{
+    ForPage1([](void* w) { WinHide(w); });
+    SliderBubbleClear();
+    SliderTipClear();
+}
+
+void HidePage2() { ForPage2([](void* w) { WinHide(w); }); }
+
+// The stock More button's caption from the engine's own label i (kLabelMore / kLabelBack), as PrefWin_show_cur_page
+// sets it; left as it is when the label table does not hold i.
+void SetMoreCaption(int i)
+{
+    const BYTE* tl = At(kVA_TextLabels);
+    char** labels = *reinterpret_cast<char** const*>(tl);
+    const uint32_t count = *reinterpret_cast<const uint32_t*>(tl + 4);
+    if (!labels || static_cast<uint32_t>(i) >= count) return;
+    const char* text = reinterpret_cast<char*(__thiscall*)(void*, char*)>(At(kVA_StringsGet))(At(kVA_TextTable), labels[i]);
+    if (text) reinterpret_cast<void(__thiscall*)(void*, const char*)>(At(kVA_BtnSetName))(At(kVA_MoreBtn), text);
+}
+
+// Repaint the whole Preferences page through vtbl+0x30, so WrapRefresh re-issues our rows too.
+void RefreshPrefWin()
+{
+    void** vtbl = *reinterpret_cast<void***>(At(kVA_PrefWinInst));
+    reinterpret_cast<void(__fastcall*)(void*, void*)>(vtbl[kSlotRefresh / 4])(At(kVA_PrefWinInst), nullptr);
+}
+
+// vtbl+0x30 on_redraw: chain, then show/hide our rows by tab and page and draw the slider frame.
 void __fastcall WrapRefresh(void* self, void* edx)
 {
     g_origRefresh(self, edx);
@@ -854,72 +952,42 @@ void __fastcall WrapRefresh(void* self, void* edx)
     }
     WinRedraw(g_w.tab);
 
+    // the stock More button: ours to show on our tab, ours to hide again when the player leaves for a tab that does
+    // not have it (the engine's own show/hide switches handle tabs 2 and 6)
+    const int tab = Rd<int>(kVA_PrefWin + kTabIdOfs);
     if (OurTabActive()) {
-        WinShow(g_w.label);
-        if (g_modeRow) WinShow(g_w.clipcheck);
-        WinShow(g_w.aicheck);
-        WinShow(g_w.cargocheck);
-        WinShow(g_w.markcheck);
-        if (g_modernRow) { WinShow(g_w.moderncheck); WinShow(g_w.rcmovecheck); }
-        if (g_dragRow) for (auto& c : g_w.dragcell) WinShow(c);
-        if (g_cameraRow) { WinShow(g_w.clickview); WinShow(g_w.baseview); }
-        WinShow(g_w.updcheck);
-        WinShow(g_w.subbtn);
-        WinShow(g_w.customcheck);
-        if (g_hdRow) WinShow(g_w.hdcheck);
-        WinShow(g_w.scancheck);
-        WinShow(g_w.airdropcheck);
-        if (g_modeRow) for (auto& c : g_w.modecheck) WinShow(c);
-        WinShow(g_w.slider);
-        if (g_holdRow) { WinShow(g_w.holdlabel); WinShow(g_w.holdslider); }
+        SetMoreCaption(g_page ? kLabelBack : kLabelMore);   // page 1 "More", page 2 "Back" (the engine's own labels)
+        WinShow(At(kVA_MoreBtn));
+        WinRedraw(At(kVA_MoreBtn));
+        g_moreShown = true;
+    } else {
+        g_page = 0;                       // a tab switch: our tab opens on its first page again
+        if (g_moreShown && tab != 2 && tab != 6) WinHide(At(kVA_MoreBtn));
+        g_moreShown = false;
+    }
+
+    if (OurTabActive() && g_page == 1) {
+        HidePage1();
+        ForPage2([](void* w) { WinShow(w); });
+        ForPage2([](void* w) { WinRedraw(w); });
+    } else if (OurTabActive()) {
+        HidePage2();
+        ForPage1([](void* w) { WinShow(w); });
         // slider-area frame, same rect family as the audio page's (drawn when tab==4):
         // NATIVE rect; thunk_pref_boxframe scales x g/16 and draws thick strokes.
-        // Our frame holds TWO rows, not the audio page's four: it sits kSliderBlockDy lower with the same bottom
-        // edge, which hands the option list two more rows (user 2026-10-07: no room wasted on empty rows).
+        // Our frame holds TWO rows, not the audio page's four (user 2026-10-07: no room wasted on empty rows), and
+        // sits one button row above the audio frame's bottom: the stock More button takes that last row (kSliderY).
         int rect[4];
         rect[0] = Rd<int>(kVA_FrameX);
-        rect[1] = Rd<int>(kVA_FrameY) - Rd<int>(kVA_BotShift) + kSliderBlockDy;
+        rect[1] = Rd<int>(kVA_FrameY) - Rd<int>(kVA_BotShift) + kSliderY;
         rect[2] = rect[0] + Rd<int>(kVA_FrameW);
         rect[3] = rect[1] + kSliderFrameH;
         auto box = reinterpret_cast<FBoxSprite>(At(kVA_PrefBoxFrame));
         box(At(kVA_PrefWin + 0x444), nullptr, rect, At(kVA_FrameArt));
-        WinRedraw(g_w.label);
-        if (g_modeRow) WinRedraw(g_w.clipcheck);
-        WinRedraw(g_w.aicheck);
-        WinRedraw(g_w.cargocheck);
-        WinRedraw(g_w.markcheck);
-        if (g_modernRow) { WinRedraw(g_w.moderncheck); WinRedraw(g_w.rcmovecheck); }
-        if (g_dragRow) for (auto& c : g_w.dragcell) WinRedraw(c);
-        if (g_cameraRow) { WinRedraw(g_w.clickview); WinRedraw(g_w.baseview); }
-        WinRedraw(g_w.updcheck);
-        WinRedraw(g_w.subbtn);
-        WinRedraw(g_w.customcheck);
-        if (g_hdRow) WinRedraw(g_w.hdcheck);
-        WinRedraw(g_w.scancheck);
-        WinRedraw(g_w.airdropcheck);
-        if (g_modeRow) for (auto& c : g_w.modecheck) WinRedraw(c);   // re-detects: Alt+Enter may have changed the mode
-        WinRedraw(g_w.slider);
-        if (g_holdRow) { WinRedraw(g_w.holdlabel); WinRedraw(g_w.holdslider); }
+        ForPage1([](void* w) { WinRedraw(w); });   // the mode cells re-detect: Alt+Enter may have changed the mode
     } else {
-        WinHide(g_w.label);
-        if (g_modeRow) WinHide(g_w.clipcheck);
-        WinHide(g_w.aicheck);
-        WinHide(g_w.cargocheck);
-        WinHide(g_w.markcheck);
-        if (g_modernRow) { WinHide(g_w.moderncheck); WinHide(g_w.rcmovecheck); }
-        if (g_dragRow) for (auto& c : g_w.dragcell) WinHide(c);
-        if (g_cameraRow) { WinHide(g_w.clickview); WinHide(g_w.baseview); }
-        WinHide(g_w.updcheck);
-        WinHide(g_w.subbtn);
-        WinHide(g_w.customcheck);
-        if (g_hdRow) WinHide(g_w.hdcheck);   // an optional row: never touch it unbuilt (zeroed vtable = AV)
-        WinHide(g_w.scancheck);
-        WinHide(g_w.airdropcheck);
-        if (g_modeRow) for (auto& c : g_w.modecheck) WinHide(c);
-        WinHide(g_w.slider);
-        if (g_holdRow) { WinHide(g_w.holdlabel); WinHide(g_w.holdslider); }
-        SliderBubbleClear();
-        SliderTipClear();
+        HidePage1();
+        HidePage2();
     }
 }
 
@@ -940,6 +1008,8 @@ void CommitAll()
     AiVisSaveAirdrop();
     if (g_modeRow) { VidModeSave(VidModeDetect()); VidModeClipSave(); }   // the mode the game is running in, however it got there
     HoldCommit();
+    for (int i = 0; i < kArtRows_n; ++i)
+        if (g_artRow[i]) kArtRows[i].save();
 }
 
 // vtbl+0xB0 command: persist on OK, reset on Restore Defaults, chain everything.
@@ -947,6 +1017,18 @@ void __fastcall WrapCommand(void* self, void* edx, int id)
 {
     if (g_built) {
         if (id == kLabelId || id == kHoldLabelId) return;   // the "Base Font Size" / "Drag Hold Time" labels are inert
+        if (id == kMoreBtnId && OurTabActive()) {   // the stock More button on OUR tab: flip our pages
+            g_page = g_page ? 0 : 1;                                // (never its own case: that would jump to tab 2 / 6)
+            RefreshPrefWin();
+            return;
+        }
+        for (int i = 0; i < kArtRows_n; ++i) {
+            if (g_artRow[i] && id == kArtChkId0 + i) {              // live (the hook repaints the map); saved with OK / Enter
+                kArtRows[i].set(kArtRows[i].get() ? 0 : 1);
+                WinRedraw(g_w.artcheck[i]);
+                return;
+            }
+        }
         if (g_modeRow && id == kClipChkId) {   // live (SyncClip); persisted on OK / Enter; inert outside Fullscreen
             if (!VidModeFullscreenRunning()) return;
             VidModeClipSet(VidModeClipGet() ? 0 : 1);
@@ -1060,10 +1142,7 @@ void __fastcall WrapCommand(void* self, void* edx, int id)
             UpdateSubscribeAll();         // on Yes: DeclinedUpdates cleared, the checkbox turns on
             WinRedraw(g_w.updcheck);
             WinRedraw(g_w.subbtn);
-            {   // the page repaints after the nested popup -- through vtbl+0x30, so WrapRefresh re-issues our rows too
-                void** vtbl = *reinterpret_cast<void***>(At(kVA_PrefWinInst));
-                reinterpret_cast<void(__fastcall*)(void*, void*)>(vtbl[kSlotRefresh / 4])(At(kVA_PrefWinInst), nullptr);
-            }
+            RefreshPrefWin();             // the page repaints after the nested popup
             return;
         }
         if (id == 0x5C) {                 // OK -> commit (engine writes volumes the same way)
@@ -1116,6 +1195,11 @@ void __fastcall WrapCommand(void* self, void* edx, int id)
             if (g_holdRow) {               // vanilla 333 ms
                 DragDelaySet(kDragDelayDefault);
                 set(g_w.holdslider, nullptr, DragDelayPosFromMs(kDragDelayDefault));
+            }
+            for (int i = 0; i < kArtRows_n; ++i) {
+                if (!g_artRow[i]) continue;
+                kArtRows[i].set(kArtRows[i].def);
+                WinRedraw(g_w.artcheck[i]);
             }
         }
     }
@@ -1242,7 +1326,7 @@ void BuildWidgets()
     // the slider row, in the audio sliders' position (our page shows one row there)
     ctor(g_w.label, nullptr);
     binit(g_w.label, nullptr, "Base Font Size", kLabelId,
-          Rd<int>(kVA_LabelX), Rd<int>(kVA_LabelY0) - shift + kSliderBlockDy,
+          Rd<int>(kVA_LabelX), Rd<int>(kVA_LabelY0) - shift + kSliderY,
           Rd<int>(kVA_LabelW), Rd<int>(kVA_LabelH), prefwin, 0);
     // static label, not a control: pin the forced draw state to NORMAL so hover and
     // click never change its look (content_draw honors [+0xAB8] before the dynamic
@@ -1291,15 +1375,18 @@ void BuildWidgets()
                   Rd<int>(kVA_FrameX) + kChkSubIndent, Rd<int>(kVA_TabY0) + kChkRowDy + kOptRow0 * kChkRowPitch,
                   RowW(Rd<int>(kVA_FrameX) + kChkSubIndent, kChkTextDx + clipTextW + 4), boxH + kChkTextDy, prefwin, 0);   // room for the label's descenders below the box
         }
-        // The option rows, in the user's order (2026-11-07), top to bottom: the update row (a program setting,
-        // like the display rows above it), the mouse group (Modern Control Set with its child, the two map-drag
-        // cells on ONE line, the two camera rows: one block, ending nearest the Drag Hold Time slider it governs),
-        // the gameplay rules (the cloak group, then the airdrop row), and the portrait group closing the list.
+        // The option rows, in the user's order (2026-11-07), over two fixed pages (the maintainer's assignment,
+        // 2026-11-13, see ForPage1/2): page 1 is how the game runs and plays, page 2 is replacement art.
+        // Page 1, under the display rows: the update row (a program setting, like the display rows above it), the
+        // mouse group (Modern Control Set with its child, the two map-drag cells on ONE line, the two camera rows),
+        // then the gameplay rules (the cloak group, then the airdrop row) -- the order and positions main has.
+        // Page 2, from its first row: the portrait group, then the HD art rows. A row never changes page.
         // A row whose feature is unbound is not built and the rows below it move up: k counts the rows built.
         // Every row is the same widget class, vtable and painter (CheckContentDraw); the row's window rect is
         // native and the GraphicWin_init gate scales it once.
         const int fx = Rd<int>(kVA_FrameX);
-        auto rowY = [&](int k) { return Rd<int>(kVA_TabY0) + kChkRowDy + (optRow0 + k) * kChkRowPitch; };
+        int base = optRow0;                                // page 1: under the display rows; page 2: its first row
+        auto rowY = [&](int k) { return Rd<int>(kVA_TabY0) + kChkRowDy + (base + k) * kChkRowPitch; };
         auto labelW = [&](const char* t, int fallback) {   // fallback only while no font is measurable
             return fm ? reinterpret_cast<FFontWidth>(At(kVA_FontWidth))(fm, nullptr, t) + 8 : fallback;
         };
@@ -1369,7 +1456,24 @@ void BuildWidgets()
         row(g_w.markcheck, kMarkChkId, kMarkChkText, kChkSubIndent, k++);
         row(g_w.airdropcheck, kAirdropChkId, kAirdropChkText, 0, k++);
 
-        // the portrait group closes the list, the cloak rows' parent/child pattern: "Enable Custom Portraits" at
+        {
+            // the page's vertical room is runtime layout (PrefWin_build's statics): log it, and say so loudly if
+            // the last row would reach the slider-area frame drawn below the option rows
+            const int lastBottom = rowY(k - 1) + boxH + kChkTextDy;
+            const int frameTop = Rd<int>(kVA_FrameY) - Rd<int>(kVA_BotShift) + kSliderY;
+            char msg[192];
+            _snprintf_s(msg, sizeof msg, _TRUNCATE,
+                        "[uimod] prefs: page 1: %d option rows at row indices %d..%d, y=%d..%d (native), slider frame top=%d%s\n",
+                        k, base, base + k - 1, rowY(0), lastBottom, frameTop, lastBottom > frameTop ? "  !! OVERLAPS THE FRAME" : "");
+            if (lastBottom > frameTop) Dbg(msg);  // a real overlap is a fault: every log
+            else UimodDbg(msg);
+        }
+
+        // page 2
+        base = 0;
+        k = 0;
+
+        // the portrait group opens page 2, the cloak rows' parent/child pattern: "Enable Custom Portraits" at
         // the list's left edge; nested one box width in, "Use Turovetsky's HD Portrait Pack" (only while the pack is
         // installed: no row for a pack the player does not have) and "Add Scanlines" (its scanlines are always the
         // brightened kind: the former "Brighten Scanlines" row made way for the airdrop row, user 2026-10-30)
@@ -1378,19 +1482,26 @@ void BuildWidgets()
         if (g_hdRow) row(g_w.hdcheck, kHdChkId, kHdChkText, kChkSubIndent, k++);
         row(g_w.scancheck, kScanChkId, kScanChkText, kChkSubIndent, k++);
 
+        // the HD art rows close page 2: one per installed art pack (kArtRows). Latched at the first build like the
+        // other optional rows.
+        if (first)
+            for (int i = 0; i < kArtRows_n; ++i) g_artRow[i] = kArtRows[i].avail();
+        int nArt = 0;
+        for (int i = 0; i < kArtRows_n; ++i)
+            if (g_artRow[i]) { row(g_w.artcheck[i], kArtChkId0 + i, kArtRows[i].text, 0, k++); ++nArt; }
         {
-            // the page's vertical room is runtime layout (PrefWin_build's statics): log it, and say so loudly if
-            // the last row would reach the slider-area frame drawn below the option rows
-            const int firstY = rowY(0);
+            // page 2 must end above the More button's row, which is where our page-1 slider frame ends
             const int lastBottom = rowY(k - 1) + boxH + kChkTextDy;
-            const int frameTop = Rd<int>(kVA_FrameY) - Rd<int>(kVA_BotShift) + kSliderBlockDy;
+            const int moreTop = Rd<int>(kVA_FrameY) - Rd<int>(kVA_BotShift) + kSliderY + kSliderFrameH;
             char msg[192];
             _snprintf_s(msg, sizeof msg, _TRUNCATE,
-                        "[uimod] prefs: %d option rows (updates..portraits) at row indices %d..%d of 0..14, y=%d..%d (native), slider frame top=%d%s\n",
-                        k, optRow0, optRow0 + k - 1, firstY, lastBottom, frameTop, lastBottom > frameTop ? "  !! OVERLAPS THE FRAME" : "");
-            if (lastBottom > frameTop) Dbg(msg);  // a real overlap is a fault: every log
+                        "[uimod] prefs: page 2: %d option rows (%d HD art), y=%d..%d (native), More row top=%d%s\n",
+                        k, nArt, rowY(0), lastBottom, moreTop, lastBottom > moreTop ? "  !! OVERLAPS THE MORE BUTTON" : "");
+            if (lastBottom > moreTop) Dbg(msg);
             else UimodDbg(msg);
         }
+        g_page = 0;
+        g_moreShown = false;
 
         // the display-mode row: three cells on ONE line over the frame span, native x by
         // scaling_laws.pref_mode_cell_x (cum(): half_down(i*frameW, 3), never i*(frameW/3)); the gate
@@ -1466,7 +1577,7 @@ void BuildWidgets()
     }
     sctor(g_w.slider, nullptr);
     *reinterpret_cast<void**>(g_w.slider) = g_sbVtbl;
-    sinit(g_w.slider, nullptr, Rd<int>(kVA_SliderX), Rd<int>(kVA_SliderY0) + kSliderBlockDy,
+    sinit(g_w.slider, nullptr, Rd<int>(kVA_SliderX), Rd<int>(kVA_SliderY0) + kSliderY,
           Rd<int>(kVA_SliderW), prefwin, kSliderId);
     srange(g_w.slider, nullptr, 0, 100);
     sset(g_w.slider, nullptr, g_pct);
@@ -1477,7 +1588,7 @@ void BuildWidgets()
     if (DragDelayAvailable()) {
         ctor(g_w.holdlabel, nullptr);
         binit(g_w.holdlabel, nullptr, kHoldText, kHoldLabelId,
-              Rd<int>(kVA_LabelX), Rd<int>(kVA_LabelY0) - shift + kSliderBlockDy + kAudioRowPitch,
+              Rd<int>(kVA_LabelX), Rd<int>(kVA_LabelY0) - shift + kSliderY + kAudioRowPitch,
               Rd<int>(kVA_LabelW), Rd<int>(kVA_LabelH), prefwin, 0);
         *reinterpret_cast<int*>(g_w.holdlabel + kForceStateOfs) = 0;   // inert, like the font label
         if (g_labelFont) *reinterpret_cast<void**>(g_w.holdlabel + kFontSlotOfs) = g_labelFont;
@@ -1488,7 +1599,7 @@ void BuildWidgets()
         Wr<DWORD>(kVA_DllPrefSlider, reinterpret_cast<DWORD>(&g_w.holdslider));
         sctor(g_w.holdslider, nullptr);
         *reinterpret_cast<void**>(g_w.holdslider) = g_sbVtbl;
-        sinit(g_w.holdslider, nullptr, Rd<int>(kVA_SliderX), Rd<int>(kVA_SliderY0) + kSliderBlockDy + kAudioRowPitch,
+        sinit(g_w.holdslider, nullptr, Rd<int>(kVA_SliderX), Rd<int>(kVA_SliderY0) + kSliderY + kAudioRowPitch,
               Rd<int>(kVA_SliderW), prefwin, kHoldSliderId);
         srange(g_w.holdslider, nullptr, 0, kDragDelayPositions - 1);
         sset(g_w.holdslider, nullptr, DragDelayPosFromMs(DragDelayGet()));
@@ -1517,6 +1628,7 @@ void BuildWidgets()
     if (g_modeRow) for (auto& c : g_w.modecheck) WinHide(c);
     WinHide(g_w.slider);
     if (g_holdRow) { WinHide(g_w.holdlabel); WinHide(g_w.holdslider); }
+    HidePage2();
 
     if (!first) {
         Dbg("[uimod] prefs: Longevity tab rebuilt (PrefWin_build ran again)\n");
@@ -1648,6 +1760,8 @@ void PrefsBubblePoll()
     if (!SliderHeld(g_bubbleSb)) SliderBubbleClear();
 }
 
+namespace { bool g_prefsInstalled = false; }   // InstallPrefsTab completed (PrefsTabInstalled)
+
 void InstallPrefsTab()
 {
     // 0) patched-exe gate: the pristine/unpatched exe has no code cave -- the tab's
@@ -1679,5 +1793,9 @@ void InstallPrefsTab()
     memcpy(site + 1, &rel, 4);
     VirtualProtect(site, 5, old, &old);
 
+    g_prefsInstalled = true;
     Dbg("[uimod] Init: prefs tab hook installed\n");
 }
+
+// The Longevity tab is hooked in on this exe: a feature whose only switch is a row on it installs only then.
+bool PrefsTabInstalled() { return g_prefsInstalled; }

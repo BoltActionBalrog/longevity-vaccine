@@ -1,0 +1,222 @@
+"""uimod's HD base sprites (src/uimod/src/basehd.cpp) and their Preferences page, against the pristine exe.
+
+basehd retargets two E8 calls: load_faction_art's base-sprite Sprite_extract_2 (@0x453836) and base_draw's
+Sprite_draw_dest (@0x55B32B). It names a faction's pack from MFactions[f].filename (the field load_faction_art itself
+reads), maps the pack's indices the way load_faction_art's Buffer_load_pcx(name, 0, 10, 236) maps the stock file's
+(+10 mod 256) -- the pack itself never reaches the engine's decoder --, places an adopted sprite by load_faction_art's
+own grid (101 x 76, index water*12 + size*3 + defence), and draws an HD sprite with SCALE_NUM_G = SCALE_DEN_G,
+Sprite_draw_dest's unscaled branch. The engine functions, globals and Buffer fields it uses are the exe's. The "HD
+art" rows sit on page 2 of the Longevity tab behind the stock More button (id 0x5E), whose own command case flips
+tab 2 <-> 6. Every one of those facts is pinned here, and the constants in the source must be the ones pinned.
+"""
+from __future__ import annotations
+
+import pathlib
+import re
+import struct
+import sys
+
+import pytest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import pefile  # noqa: E402
+
+import config  # noqa: E402
+
+BAK = config.terranx_bak(required=False)
+pytestmark = pytest.mark.skipif(not BAK or not pathlib.Path(BAK).exists(), reason="pristine exe not available")
+
+SRC_DIR = ROOT.parent / "src" / "uimod" / "src"
+HD = (SRC_DIR / "basehd.cpp").read_text(encoding="utf-8")
+PREFS = (SRC_DIR / "prefs.cpp").read_text(encoding="utf-8")
+INIT = (SRC_DIR / "init.cpp").read_text(encoding="utf-8")
+
+LOAD_FACTION_ART = 0x453710
+SITE_EXTRACT, EXTRACT2 = 0x453836, 0x5E39A0
+SITE_DRAW, DRAW_DEST = 0x55B32B, 0x5E5833
+LOAD_PCX = 0x5D7DE0                         # Buffer_load_pcx: load_faction_art's, never basehd's
+FACTION_SPRITES, FACTION_STRIDE, LOAD_CANVAS = 0x78E978, 0x65C, 0x798668
+SPRITE_CLOSE, BUFFER_CTOR, BUFFER_INIT = 0x5E3820, 0x5D7210, 0x5D7670
+DRAW_MAP, MAIN_PALETTE = 0x46B190, 0x94C590
+STATUSWIN_REDRAW, STATUSWIN, GRAPHICWIN_REDRAW, BASEWIN = 0x4B9EA0, 0x8C5568, 0x5D5A70, 0x6A7628
+MFACTIONS, MFACTION_STRIDE, FILENAME = 0x946A50, 0x59C, 0x04
+SCALE_NUM, SCALE_DEN = 0x696D18, 0x696D1C
+PREFWIN, MORE_OFS, MORE_ID = 0x8578D8, 0x1A868, 0x5E
+PREFWIN_COMMAND, MORE_CASE = 0x491400, 0x4914B0
+
+
+@pytest.fixture(scope="module")
+def pe():
+    return pefile.PE(str(BAK), fast_load=True)
+
+
+def rd(pe, va, n):
+    return pe.get_data(va - pe.OPTIONAL_HEADER.ImageBase, n)
+
+
+def call_target(pe, va):
+    b = rd(pe, va, 5)
+    assert b[0] == 0xE8, hex(va)
+    return va + 5 + struct.unpack("<i", b[1:])[0]
+
+
+def const(src, name):
+    m = re.search(r"\b" + name + r"\s*=\s*(0x[0-9A-Fa-f]+|\d+)", src)
+    assert m, name
+    return int(m.group(1), 0)
+
+
+def test_source_constants_are_the_pinned_ones():
+    assert const(HD, "kSiteExtract") == SITE_EXTRACT and const(HD, "kVA_Extract2") == EXTRACT2
+    assert const(HD, "kSiteDraw") == SITE_DRAW and const(HD, "kVA_DrawDest") == DRAW_DEST
+    assert "kVA_LoadPcx" not in HD and "0x5D7DE0" not in HD.upper().replace("0X", "0x")   # packs never meet it
+    assert const(HD, "kVA_FactionSprites") == FACTION_SPRITES and const(HD, "kFactionStride") == FACTION_STRIDE
+    assert const(HD, "kVA_SpriteClose") == SPRITE_CLOSE and const(HD, "kVA_BufferCtor") == BUFFER_CTOR
+    assert const(HD, "kVA_BufferInit") == BUFFER_INIT and "BufferResize" not in HD
+    assert const(HD, "kVA_DrawMap") == DRAW_MAP and const(HD, "kVA_MainPalette") == MAIN_PALETTE
+    assert const(HD, "kVA_StatusWinRedraw") == STATUSWIN_REDRAW and const(HD, "kVA_StatusWin") == STATUSWIN
+    assert const(HD, "kVA_GraphicWinRedraw") == GRAPHICWIN_REDRAW and const(HD, "kVA_BaseWin") == BASEWIN
+    assert const(HD, "kLoadShift") == 10 and const(HD, "kKey") == 9
+    assert const(HD, "kCellW") == 100 and const(HD, "kCellH") == 75
+    assert const(HD, "kVA_MFactions") == MFACTIONS and const(HD, "kMFactionStride") == MFACTION_STRIDE
+    assert const(HD, "kMFactionFilename") == FILENAME
+    assert const(HD, "kVA_ScaleNum") == SCALE_NUM and const(HD, "kVA_ScaleDen") == SCALE_DEN
+    assert "0x9B86A0" not in HD.upper().replace("0X", "0x")       # never the shared scratch string
+    assert const(PREFS, "kMoreBtnId") == MORE_ID and const(PREFS, "kVA_MoreBtn") == PREFWIN + MORE_OFS
+    assert "InstallBaseHd();" in INIT
+
+
+def test_both_sites_are_the_calls_basehd_expects(pe):
+    assert call_target(pe, SITE_EXTRACT) == EXTRACT2
+    assert call_target(pe, SITE_DRAW) == DRAW_DEST
+    assert LOAD_FACTION_ART < SITE_EXTRACT < LOAD_FACTION_ART + 0x200
+
+
+def test_load_faction_art_reads_the_filename_field_and_loads_with_10_236(pe):
+    """basehd's index map (+10 mod 256, kLoadShift) is the one this load gives the stock file."""
+    body = rd(pe, LOAD_FACTION_ART, SITE_EXTRACT - LOAD_FACTION_ART)
+    assert struct.pack("<I", MFACTIONS + FILENAME) in body           # MFactions[f].filename
+    # Buffer_load_pcx(name, 0, 10, 236): push 0xEC; push 0x0A; push 0; push name; ... call Buffer_load_pcx
+    i = body.find(bytes.fromhex("68EC000000" "6A0A" "6A00"))
+    assert i >= 0
+    calls = [LOAD_FACTION_ART + k for k in range(i, i + 24)
+             if body[k] == 0xE8 and LOAD_FACTION_ART + k + 5 + struct.unpack("<i", body[k + 1:k + 5])[0] == LOAD_PCX]
+    assert calls
+    assert "g_map[i] = static_cast<uint8_t>(i + kLoadShift);" in HD
+
+
+def test_the_base_sprite_grid_is_load_faction_arts(pe):
+    """Adopt places a sprite cut before Init by its slot: x = 1 + size*101, y = 1 + (water*3 + defence)*76, slot index
+    water*12 + size*3 + defence, 100x75, key 9, from the loading canvas -- the loop around the one extract call."""
+    # the extract call's arguments: push 0; push 0x4B (h 75); push 0x64 (w 100); push eax (y); push edi (x);
+    # push 9 (key); push 0x798668 (the loading canvas); mov ecx, esi (the sprite); call Sprite_extract_2
+    want = bytes.fromhex("6A00" "6A4B" "6A64" "50" "57" "6A09" "68") + struct.pack("<I", LOAD_CANVAS) + bytes.fromhex("8BCE")
+    assert rd(pe, SITE_EXTRACT - len(want), len(want)) == want
+    # sprite = g_faction_sprites + (base + defence) * 0x2C: imul esi, esi, 0x2C; add esi, 0x78E978
+    assert rd(pe, 0x453819, 9) == bytes.fromhex("6BF62C" "81C6") + struct.pack("<I", FACTION_SPRITES)
+    assert rd(pe, 0x45383B, 0x0B) == bytes.fromhex("83C765" "81C684000000" "4B" "75")   # size: x += 101, sprite += 3
+    assert rd(pe, 0x453811, 5) == bytes.fromhex("BB04000000")                            # 4 sizes
+    assert rd(pe, 0x45384D, 3) == bytes.fromhex("83C64C")                                # defence: y += 76
+    assert rd(pe, 0x453851, 3) == bytes.fromhex("83F803")                                # 3 defence rows
+    assert rd(pe, 0x453857, 5) == bytes.fromhex("BF01000000")                            # x back to 1
+    assert rd(pe, 0x453867, 3) == bytes.fromhex("83C10C")                                # water: base += 12
+    assert rd(pe, 0x4537F4, 7) == bytes.fromhex("C745F002000000")                        # 2 water rows
+    assert rd(pe, 0x4537EF, 5) == bytes.fromhex("BF01000000")                            # x, y start at 1
+    assert "const int water = idx / 12, size = idx % 12 / 3, def = idx % 3;" in HD
+    assert "1 + size * 101, 1 + (water * 3 + def) * 76, kCellW, kCellH" in HD
+
+
+def test_the_engine_calls_and_fields_basehd_uses(pe):
+    """Buffer_init writes w / h at +0x80 / +0x84 and hands +0x54 to CreateDIBSection for the bits; PrefWin_commit_close
+    calls draw_map; GraphicWin_redraw is the FlatButton vtable's +0xF8; the HUD repaint is StatusWin_redraw on
+    StatusWin_g (Console_veh_turn's redraw block); load_menu constructs a Buffer with Buffer_ctor."""
+    init = rd(pe, BUFFER_INIT, 0x1A0)
+    assert bytes.fromhex("899E80000000") in init and bytes.fromhex("89BE84000000") in init
+    assert bytes.fromhex("8D5654") in init
+    assert const(HD, "kBufW") == 0x80 and const(HD, "kBufH") == 0x84 and const(HD, "kBufBits") == 0x54
+    commit = rd(pe, 0x48FDD0, 0x130)
+    assert any(commit[k] == 0xE8 and 0x48FDD0 + k + 5 + struct.unpack("<i", commit[k + 1:k + 5])[0] == DRAW_MAP
+               for k in range(len(commit) - 5))
+    assert struct.unpack("<I", rd(pe, 0x669754 + 0xF8, 4))[0] == GRAPHICWIN_REDRAW
+    assert rd(pe, 0x513D26, 5) == b"\xB9" + struct.pack("<I", STATUSWIN)
+    assert call_target(pe, 0x513D2B) == STATUSWIN_REDRAW
+    assert call_target(pe, 0x402F6B) == BUFFER_CTOR
+
+
+def test_packs_go_through_the_bounded_reader_only():
+    """hdpack proves every pack before use; basehd never hands a pack to Buffer_load_pcx and never destroys an engine
+    Buffer; it installs only where its Preferences row can exist."""
+    assert "hdpack::Load(&p.px, path, kBlockW * kMaster, kBlockH * kMaster, pal)" in HD
+    assert "hdpack::ReadPalette(stock, pal)" in HD                   # against the faction file's own palette
+    assert "0x5D7410" not in HD.upper().replace("0X", "0x")          # Buffer_dtor
+    assert "PrefsTabInstalled()" in HD
+
+
+def test_draw_dest_takes_the_unscaled_branch_when_num_equals_den(pe):
+    """basehd draws its exact-size sprite with SCALE_NUM_G = SCALE_DEN_G (SCALE_DEN_G untouched): Sprite_draw_dest's
+    first test is `cmp num, den; je` past every scaling step."""
+    want = bytes.fromhex("8B0D") + struct.pack("<I", SCALE_NUM) + bytes.fromhex("3B0D") + struct.pack("<I", SCALE_DEN) + b"\x74"
+    assert rd(pe, 0x5E5864, len(want)) == want
+    assert re.search(r"\*num = d;", HD) and not re.search(r"\*den\s*=", HD)
+
+
+def test_more_button_is_id_0x5E_and_its_own_case_flips_tab_2_and_6(pe):
+    # PrefWin_build: lea edi, [esi + 0x1A868] ... push 0x5E ... mov ecx, edi; call BaseButton_init
+    assert rd(pe, 0x48F9A8, 6) == bytes.fromhex("8DBE") + struct.pack("<I", MORE_OFS)
+    assert rd(pe, 0x48F9C5, 2) == bytes([0x6A, MORE_ID])
+    assert call_target(pe, 0x48F9D5) == 0x607210
+    # PrefWin_on_command: ids 6..0x5E through the byte table 0x4917AC -> the dword table 0x491794
+    idx = rd(pe, 0x4917AC + MORE_ID - 6, 1)[0]
+    assert struct.unpack("<I", rd(pe, 0x491794 + 4 * idx, 4))[0] == MORE_CASE
+    case = rd(pe, MORE_CASE, 0x34)
+    assert case.startswith(bytes.fromhex("8B8E140A0000" "B802000000" "3BC8"))   # tab == 2 ?
+    assert bytes.fromhex("C786140A000006000000") in case                      # -> tab 6 (else -> 2)
+    # our tab takes the click before the engine's case could jump to tab 2 / 6
+    assert re.search(r"id == kMoreBtnId && OurTabActive\(\)", PREFS)
+
+
+def test_art_row_ids_are_unique_and_free():
+    ids = [int(v, 16) for v in re.findall(r"constexpr int\s+k\w+Id\w*\s*=\s*0x([0-9A-Fa-f]+)", PREFS)]
+    art0, n = const(PREFS, "kArtChkId0"), const(PREFS, "kArtRowMax")
+    art = set(range(art0, art0 + n))
+    others = [i for i in ids if i != art0]
+    assert not art & set(others)
+    assert len(set(others)) == len(others)
+
+
+def test_the_more_button_caption_is_the_engines_labels_1088_and_664(pe):
+    """PrefWin_show_cur_page captions the More button (PrefWin + 0x1A868) with Strings_get(TextTable,
+    TextLabels.labels[1088]) on tab 2 and labels[664] on tab 6: prefs.cpp's kLabelMore / kLabelBack are those."""
+    text_labels, text_table, strings_get = const(PREFS, "kVA_TextLabels"), const(PREFS, "kVA_TextTable"), const(PREFS, "kVA_StringsGet")
+    assert (text_labels, text_table, strings_get) == (0x9B90F8, 0x9B90D8, 0x6169A0)
+    more, back = const(PREFS, "kLabelMore"), const(PREFS, "kLabelBack")
+    # tab 2: mov eax, [TextLabels]; add esi, 0x1A868; mov ecx, [eax + 4*1088]; push ecx; mov ecx, TextTable; call
+    assert rd(pe, 0x4901B1, 5) == b"\xA1" + struct.pack("<I", text_labels)
+    assert rd(pe, 0x4901B6, 6) == b"\x81\xC6" + struct.pack("<I", MORE_OFS)
+    assert rd(pe, 0x4901BC, 6) == b"\x8B\x88" + struct.pack("<I", 4 * more)
+    assert rd(pe, 0x4901C3, 5) == b"\xB9" + struct.pack("<I", text_table)
+    assert call_target(pe, 0x4901C8) == strings_get
+    # tab 6: mov eax, [TextLabels]; ...; mov ecx, TextTable; mov eax, [eax + 4*664]; push eax; call Strings_get
+    assert rd(pe, 0x4901FC, 5) == b"\xA1" + struct.pack("<I", text_labels)
+    assert rd(pe, 0x490208, 5) == b"\xB9" + struct.pack("<I", text_table)
+    assert rd(pe, 0x49020D, 6) == b"\x8B\x80" + struct.pack("<I", 4 * back)
+    assert call_target(pe, 0x490214) == strings_get
+
+
+def test_switching_off_shrinks_the_scratch_through_buffer_init_which_closes_the_old_surface(pe):
+    """ReleaseAll shrinks the scratch Buffer with Buffer_init(4, 4): on a change of size Buffer_init first calls its
+    close routine (0x5D7470: DeleteObject on the DIB section, the DC) before it makes the new one -- the same path the
+    grow-only scratch takes. Its early-out is the same w and h only."""
+    assert rd(pe, 0x5D76B6, 6) == bytes.fromhex("3B9E80000000")          # cmp ebx, [esi+0x80]   (w)
+    assert rd(pe, 0x5D76D6, 2) == bytes.fromhex("8BCE")                  # mov ecx, esi
+    assert call_target(pe, 0x5D76D8) == 0x5D7470                          # close the old surface
+    assert "g_eng.bufferInit(g_scratch, 4, 4, 0, nullptr);" in HD
+
+
+def test_the_sprite_itself_is_an_engine_allocation(pe):
+    """The comment's claim: Sprite_extract_2 allocates the sprite through the engine allocator 0x5D4510 (@0x5E3D11),
+    whose failure is the engine's fatal exit -- so the HD sprite is one of the two engine allocations on the cut path."""
+    assert call_target(pe, 0x5E3D11) == 0x5D4510
+    assert "0x5D4510" in HD and "bounded, not gone" in HD
