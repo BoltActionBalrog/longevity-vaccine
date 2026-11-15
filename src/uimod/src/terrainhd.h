@@ -1,6 +1,15 @@
 #pragma once
 
-// Drop-in HD terrain textures: <game>\terrain\texture_x2.pcx / _x4.pcx / _x8.pcx (TEXTURE.PCX at 2x / 4x / 8x, stock
-// palette; missing levels are cut down from the 8x one) replace the map's terrain textures at the main map's zoom.
-// Byte-checked, cave-free, both exes; [UIMod] TerrainHD=0 turns it off. See terrainhd.cpp.
+// Drop-in HD terrain textures: <game>\terrain\texture_x8.pcx (TEXTURE.PCX at 8x, stock palette and indices) replaces
+// the map's ground textures wherever the terrain is drawn (the main map, the base screen, the HUD tile view, the
+// Datalinks terraforming page), all at one level for the session (2x or 4x, from the screen's deepest zoom).
+// Textures the pack cannot supply are drawn at that level as exact stock. Byte-checked; installed only where the
+// Longevity Preferences tab is. Switched off, it holds no memory. See terrainhd.cpp.
+
+constexpr int kTerrainHdDefault = 1;   // [UIMod] TerrainHD
+
 void InstallTerrainHd();
+bool TerrainHdAvailable();             // installed: a usable texture_x8.pcx, the Longevity tab, every site passed
+int  TerrainHdGet();
+void TerrainHdSet(int on);             // live: the map, the HUD and the base screen repaint; off puts the stock textures back
+void TerrainHdSave();

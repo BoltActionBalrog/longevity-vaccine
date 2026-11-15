@@ -15259,3 +15259,67 @@ def menu_hd_resample(rows: List[bytes], sw: int, sh: int, pal: bytes, key: int, 
         e0, e1 = e1, e0
         out.append(line)
     return out
+# ---- HD terrain textures (src/uimod/src/terrainhd_law.h is the port) ------------------------------------------------
+
+TERRAIN_HD_TILE = 56          # a stock terrain texture is 56 x 56 texels; the UV tables and immediates are in 0..55
+TERRAIN_HD_MASTER = 8         # the pack: TEXTURE.PCX at 8x (terrain/texture_x8.pcx)
+TERRAIN_HD_MAX_LEVEL = 4      # the most the session level ever is (terrain_hd_level)
+PRACX_HUD_ROWS = 213          # PRACX ZoomInit: the map's height is the screen's minus the 213-row console
+
+
+def terrain_hd_uv_offset(k: int) -> int:
+    """LAW (MEASURED, 2026-11-15) -- the whole-texel offset c(k) of terrain_hd_uv.
+
+    Texture_draw_2 (0x6233C0) walks each polygon edge from u0 << 16 + 0x8000 to raw u1 << 16 (0x61FD04 / 0x61FD1A)
+    with half-open spans, so a vertex's UV lands half a texel in when it starts an edge and on the texel edge when it
+    ends one. At level k the stock content sits at k*u + (k-1)/2 for a starting vertex and at k*u for an ending one;
+    one table value per vertex can only split that: c = round((k - 1) / 4) -> 0, 1, 2 for k = 2, 4, 8.
+
+    Measured on the real image under Unicorn (Texture_draw_2 drawing the stock UV tables' 12 polygons over a tile
+    diamond 32..250 px wide, with a texture whose texels hold their own u / v): the share of drawn samples whose HD
+    texel lies outside the stock texel stock drew there is, for k = 2: c=0 6.2 %, c=1 18.4 %; for k = 4: c=0 9.3 %,
+    c=1 4.9 %, c=2 15.2 %, c=3 27.7 %. (round(u * (56k - 1) / 55), the hook's first law, gave 9.6 % and 12.4 %.)
+    The rest is the start / end split itself: worst 0.75 / 0.63 stock texels at k = 2 / 4."""
+    return (k - 1 + 2) // 4
+
+
+def terrain_hd_uv(u: int, k: int) -> int:
+    """LAW (PROPORTIONATE) -- a stock terrain UV u (0..55) at level k: k*u + c(k) (terrain_hd_uv_offset).
+    Identity at k = 1. Every interval of the stock tables (27 -> 28 included) becomes exactly k HD texels, so the
+    density is even; the largest value 55k + c stays inside the 56k-texel texture (c <= k - 1)."""
+    return u if k == 1 else k * u + terrain_hd_uv_offset(k)
+
+
+def terrain_hd_max_zoom(w: int, h: int) -> int:
+    """LAW (PRACX's) -- the deepest zoom PRACX allows on a w x h screen: ZoomInit's iZoomFactorMax loop (even steps
+    from 2 while w / tile_w > 6 and (h - 213) / tile_h > 3, ZoomFactorToPt: i = (50 (z + 16) / 16 + 1) / 4,
+    tile 8i x 4i). 72 at 3840x2160, 30 at 1920x1080."""
+    mh = h - PRACX_HUD_ROWS
+    z = 0
+    while True:
+        z += 2
+        i = (50 * (z + 16) // 16 + 1) // 4
+        px, py = max(i * 8, 1), max(i * 4, 1)
+        if not (w // px > 6 and mh // py > 3) or z >= 400:
+            return z
+
+
+def terrain_hd_level(w: int, h: int) -> int:
+    """LAW -- the ONE level k every terrain texture is cut at for the session (every console samples the same art, so
+    a screen never looks different because of where the main map was last zoomed): the smallest k in {2, 4} that
+    keeps at least a texel per pixel across a tile at the deepest zoom. A tile is 56 (z + 16) / 16 px wide and shows
+    the texture's diagonal, 56k * sqrt(2) texels: (k*16)^2 * 2 >= (z + 16)^2. Capped at 4 (3.9 is needed at 4K;
+    level 8 would cut ~32 MB of textures in a 2 GB process)."""
+    z = terrain_hd_max_zoom(w, h) + 16
+    k = 2
+    while k < TERRAIN_HD_MAX_LEVEL:
+        if 2 * (k * 16) ** 2 >= z * z:
+            return k
+        k *= 2
+    return TERRAIN_HD_MAX_LEVEL
+
+
+def terrain_hd_nearest(src: List[List[int]], k: int) -> List[List[int]]:
+    """LAW -- a texture the pack does not supply (the two RAINFALL composites, PRACX's Alt+T overlays) at level k:
+    each stock texel a k x k block. Exactly the stock picture at the HD size, so it samples like stock."""
+    return [[v for v in row for _ in range(k)] for row in src for _ in range(k)]
