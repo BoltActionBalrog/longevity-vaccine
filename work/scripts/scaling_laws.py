@@ -15112,16 +15112,17 @@ def menu_hd_layout(w: int, h: int, pic_w: int, pic_h: int, strip_w: int,
     screens scale by width (w/pic_w); the picture is anchored to the BOTTOM of the screen (the engine anchors the menu
     there, so its last bar meets the picture's bottom edge) with black above.
     The widest shape the panorama covers is (pano_w + strip_w) : pic_h (2804:768, about 32.9:9). A wider screen gets
-    the picture at that shape, centred, with plain black bars left and right: the art is never mirrored or repeated,
-    and its edges stay its own.
+    the picture at that shape, RIGHT-aligned, with a plain black bar on the left: the engine anchors the menu bars to
+    the screen's right edge, so they stay on the planet strip (centred, at 5760x1080 the bars stood at x 5274 past the
+    strip's end at 4851). The art is never mirrored or repeated, and its edges stay its own.
     Returns (num, den, x0, y0, core_w, core_h, strip_px, strip_x): core_h = fl(pic_h num/den), core_w = min(w,
-    fl((pano_w + strip_w) num/den)), x0 = (w - core_w) // 2, y0 = h - core_h, strip_px = fl(strip_w num/den),
+    fl((pano_w + strip_w) num/den)), x0 = w - core_w, y0 = h - core_h, strip_px = fl(strip_w num/den),
     strip_x = x0 + core_w - strip_px. Identity at w x h = pic_w x pic_h: (n, n, 0, 0, pic_w, pic_h, strip_w,
     pic_w - strip_w)."""
     num, den = (h, pic_h) if w * pic_h >= h * pic_w else (w, pic_w)
     core_h = pic_h * num // den
     core_w = min(w, (pano_w + strip_w) * num // den)
-    x0 = (w - core_w) // 2
+    x0 = w - core_w
     strip_px = strip_w * num // den
     return (num, den, x0, h - core_h, core_w, core_h, strip_px, x0 + core_w - strip_px)
 

@@ -173,14 +173,92 @@ def test_symbols_and_names():
     assert not (SRC_DIR / "pcx_decode.h").exists()
 
 
-def test_the_menu_is_released_when_a_game_loads_its_terrain(pe):
-    """load_terrain's first load is TEXTURE.PCX (push 0x684FBC; mov ecx, the loading canvas; ... call Buffer_load_pcx):
-    the detour sees it and frees the composed menu, the previews and the scratch surface before the game allocates its
-    terrain -- under Thinker the 32-bit process had no room for both (black ground, seen in game 2026-11-14)."""
-    load_terrain = 0x451C50
-    assert calls(pe, load_terrain, load_terrain + 0x100, LOAD_PCX)[0] == 0x451CDC
-    # push 0xEC; push 0x0A; push 0; push "TEXTURE.PCX"; mov ecx, 0x798668 (the loading canvas)
-    assert rd(pe, 0x451CBB, 19) == bytes.fromhex("68EC0000006A0A6A0068") + struct.pack("<I", 0x684FBC) + \
-        b"\xB9" + struct.pack("<I", 0x798668)
-    assert pe.get_string_at_rva(0x684FBC - pe.OPTIONAL_HEADER.ImageBase) == b"TEXTURE.PCX"
-    assert 'if (strcmp(stem, "TEXTURE") == 0) ReleaseMenu();' in HD
+DESKTOP_INIT = 0x58EE60
+DESKTOP_INIT_CALLERS = [0x51543C, 0x51BC0F, 0x51C5D4, 0x52ACC0, 0x58DFEB, 0x58F4D0]   # 0x52ACC0: control_game
+BUFFER_CLOSE = 0x5D7470
+
+
+def src_bytes(name):
+    m = re.search(name + r"\[\] = \{([^}]*)\}", HD)
+    assert m, name
+    return bytes(int(v, 16) for v in m.group(1).replace(" ", "").split(","))
+
+
+@pytest.mark.parametrize("which", ["pristine", "patched"])
+def test_the_menu_is_released_where_a_game_begins(pe, which, request):
+    """desktop_init (0x58EE60) is called after the menu and never at it: the engine's control_game (0x52ACC0, the
+    WinMain loop: top_menu returns, then desktop_init), game_reload (0x58F4D0), the in-game loads and multiplayer_init;
+    Thinker's control_game calls it from thinker.dll (game.cpp), which only an entry detour sees. The detour's 8
+    moved bytes are the exe's on both images, and Buffer_close (what Buffer_init calls first) is the one ReleaseMenu
+    closes the scratch with."""
+    img = pe if which == "pristine" else request.getfixturevalue("baked")
+    assert rd(img, DESKTOP_INIT, 8) == src_bytes("kDesktopInitEntry") == bytes.fromhex("558BECA184929300")
+    assert rd(img, BUFFER_CLOSE, 6) == src_bytes("kBufferCloseEntry")
+    lo = img.OPTIONAL_HEADER.ImageBase + [s for s in img.sections if s.Name.rstrip(b"\0") == b".text"][0].VirtualAddress
+    text = [s for s in img.sections if s.Name.rstrip(b"\0") == b".text"][0]
+    hi = lo + text.Misc_VirtualSize
+    assert calls(img, lo, hi, DESKTOP_INIT) == DESKTOP_INIT_CALLERS
+    assert rd(img, 0x5D76D8, 5)[0] == 0xE8 and calls(img, 0x5D76D8, 0x5D76DD, BUFFER_CLOSE) == [0x5D76D8]
+    assert "ReleaseMenu();\n    return g_desktopInit(a);" in HD.replace("\r\n", "\n")
+    assert '"TEXTURE"' not in HD and "32-bit process had" not in HD
+
+
+def test_nothing_writes_or_branches_into_the_moved_bytes(pe):
+    """No patches.yaml site writes the two detoured entries, and no rel8 / rel32 branch in .text lands inside them
+    (only their first byte is a target)."""
+    sites, _g, _c, _sym = ap.load_patches(pathlib.Path(ap.DEFAULT_PATCHES))
+    span = {s["id"]: s.get("length") or len(s.get("original_bytes", "").split()) or 5 for s in sites}
+    for va, n in ((LOAD_PCX, 7), (DESKTOP_INIT, 8)):
+        assert [s["id"] for s in sites if s["virtual_addr"] < va + n and va < s["virtual_addr"] + span[s["id"]]] == []
+    import capstone
+    text = [s for s in pe.sections if s.Name.rstrip(b"\0") == b".text"][0]
+    base = pe.OPTIONAL_HEADER.ImageBase + text.VirtualAddress
+    data = text.get_data()
+    inside = {va + i for va, n in ((LOAD_PCX, 7), (DESKTOP_INIT, 8)) for i in range(1, n)}
+    hits = []
+    for i in range(len(data) - 5):
+        b = data[i]
+        if b in (0xE8, 0xE9):
+            t = base + i + 5 + struct.unpack("<i", data[i + 1:i + 5])[0]
+        elif b == 0x0F and 0x80 <= data[i + 1] <= 0x8F:
+            t = base + i + 6 + struct.unpack("<i", data[i + 2:i + 6])[0]
+        elif b == 0xEB or 0x70 <= b <= 0x7F:
+            t = base + i + 2 + struct.unpack("<b", data[i + 1:i + 2])[0]
+        else:
+            continue
+        if t in inside:
+            hits.append((hex(base + i), hex(t)))
+    # a byte-pattern scan also matches bytes inside other instructions: confirm any hit by disassembling from it
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    real = [h for h in hits if any(ins.address == int(h[0], 16) and ins.mnemonic.startswith(("j", "call"))
+                                   for ins in md.disasm(rd(pe, int(h[0], 16), 6), int(h[0], 16), 1))]
+    assert not real, real
+
+
+@pytest.mark.parametrize("entry,name,n", [(0x5D7DE0, "kLoadPcxEntry", 7), (0x58EE60, "kDesktopInitEntry", 8)])
+def test_each_trampoline_runs_the_moved_bytes_then_continues_at_entry_plus_n(pe, entry, name, n):
+    """MakeTrampoline's stub (the n moved bytes, then E9 to entry + n), emulated once against the real image: from the
+    same registers it leaves the same registers and stack as the exe's own first n bytes, and arrives at entry + n."""
+    from unicorn import UC_ARCH_X86, UC_MODE_32, Uc
+    from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EIP, UC_X86_REG_ESP
+    moved = src_bytes(name)
+    assert len(moved) == n and rd(pe, entry, n) == moved
+
+    def run(start, stop, code=None):
+        mu = Uc(UC_ARCH_X86, UC_MODE_32)
+        ib = pe.OPTIONAL_HEADER.ImageBase
+        for s in pe.sections:
+            mu.mem_map(ib + s.VirtualAddress, (max(s.Misc_VirtualSize, s.SizeOfRawData) + 0xFFF) & ~0xFFF)
+            mu.mem_write(ib + s.VirtualAddress, s.get_data())
+        mu.mem_map(0x0F000000, 0x100000)
+        mu.mem_map(0x20000000, 0x1000)
+        if code:
+            mu.mem_write(0x20000000, code)
+        for r, v in ((UC_X86_REG_ESP, 0x0F080000), (UC_X86_REG_EBP, 0x0F090000), (UC_X86_REG_EAX, 0x1234)):
+            mu.reg_write(r, v)
+        mu.emu_start(start, stop)
+        regs = tuple(mu.reg_read(r) for r in (UC_X86_REG_ESP, UC_X86_REG_EBP, UC_X86_REG_EAX, UC_X86_REG_EIP))
+        return regs, bytes(mu.mem_read(0x0F07FFE0, 0x20))
+
+    stub = moved + b"\xE9" + struct.pack("<i", (entry + n) - (0x20000000 + n + 5))
+    assert run(0x20000000, entry + n, stub) == run(entry, entry + n)

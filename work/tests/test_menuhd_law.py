@@ -58,13 +58,15 @@ def test_a_narrow_screen_puts_the_band_above_so_the_menu_meets_the_picture():
     assert (x0, core_w, core_h) == (0, 1280, 960) and y0 + core_h == 1024 and y0 == 64
 
 
-def test_past_the_widest_shape_the_picture_is_centred_with_plain_bars():
-    """The panorama covers (2400 + 404) : 768, about 32.9:9; a wider screen gets that shape centred."""
+def test_past_the_widest_shape_the_picture_is_right_aligned_with_a_plain_bar():
+    """The panorama covers (2400 + 404) : 768, about 32.9:9; a wider screen gets that shape right-aligned, so the
+    menu bars (anchored to the screen's right edge) stay on the planet strip."""
     for w, h in ((3840, 1080), (5120, 1440)):
         lay = layout(w, h)
         assert (lay[2], lay[4]) == (0, w)                                       # 32:9 fills the screen
     num, den, x0, y0, core_w, *_ = layout(5760, 1080)
-    assert core_w == (2400 + 404) * num // den and x0 == (5760 - core_w) // 2 and x0 > 0
+    assert core_w == (2400 + 404) * num // den and x0 == 5760 - core_w and x0 > 0
+    assert x0 + core_w == 5760                                                  # the strip ends at the right edge
 
 
 def test_moon_rect_is_the_pictures_top_left():
@@ -139,11 +141,16 @@ def test_axis_port_matches_law(exe):
     assert at == len(out)
 
 
+#: the canvas range the port tests use: 40 colours (the law's cost is per colour; the game's 10..246 takes the same
+#: code path, and a 236-colour table took ~2.4 s in Python per table and per xdist worker)
+LO, HI = 10, 50
+
+
 def canvas_table(seed):
-    """An RGBQUAD canvas: 10..245 random colours, the rest zero."""
+    """An RGBQUAD canvas: LO..HI-1 random colours, the rest zero."""
     rnd = random.Random(seed)
     q = bytearray(1024)
-    for k in range(10, 246):
+    for k in range(LO, HI):
         q[k * 4:k * 4 + 3] = bytes(rnd.randrange(256) for _ in range(3))
     return bytes(q)
 
@@ -182,9 +189,9 @@ def test_resample_port_matches_law(exe, tmp_path):
         canvas = canvas_table(seed)
         pal = bytes(random.Random(100 + n).randrange(256) for _ in range(768))
         rows = picture(sw, sh, n, key)
-        blob += struct.pack("<9i", sw, sh, key, sn, sd, dw, dh, 10, 246) + pal + canvas + b"".join(rows)
-        want.append(SL.menu_hd_resample(rows, sw, sh, pal, key, sn, sd, dw, dh, canvas, 10, 246,
-                                        lut_for(seed, 10, 246)))
+        blob += struct.pack("<9i", sw, sh, key, sn, sd, dw, dh, LO, HI) + pal + canvas + b"".join(rows)
+        want.append(SL.menu_hd_resample(rows, sw, sh, pal, key, sn, sd, dw, dh, canvas, LO, HI,
+                                        lut_for(seed, LO, HI)))
     (tmp_path / "in.bin").write_bytes(bytes(blob))
     run(exe, "resample", str(tmp_path / "in.bin"), str(tmp_path / "out.bin"))
     raw, at = (tmp_path / "out.bin").read_bytes(), 0
@@ -205,7 +212,7 @@ def test_art_already_in_the_canvas_colours_is_reproduced_exactly():
     for k in range(256):
         pal[k * 3:k * 3 + 3] = bytes((canvas[k * 4 + 2], canvas[k * 4 + 1], canvas[k * 4]))
     rnd = random.Random(5)
-    small = [bytes(rnd.randrange(10, 246) for _ in range(8)) for _ in range(6)]
+    small = [bytes(rnd.randrange(LO, HI) for _ in range(8)) for _ in range(6)]
     big = [bytes(v for v in row for _ in range(3)) for row in small for _ in range(3)]
-    out = SL.menu_hd_resample(big, 24, 18, bytes(pal), -1, 3, 1, 8, 6, canvas, 10, 246, lut_for(0, 10, 246))
+    out = SL.menu_hd_resample(big, 24, 18, bytes(pal), -1, 3, 1, 8, 6, canvas, LO, HI, lut_for(0, LO, HI))
     assert [bytes(r) for r in out] == small

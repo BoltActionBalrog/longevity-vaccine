@@ -29,7 +29,7 @@ inline Layout MenuLayout(int w, int h)
     l.coreH = static_cast<int>(static_cast<long long>(kMenuH) * l.num / l.den);
     const long long widest = static_cast<long long>(kPanoW + kStripW) * l.num / l.den;
     l.coreW = widest < w ? static_cast<int>(widest) : w;
-    l.x0 = (w - l.coreW) / 2;
+    l.x0 = w - l.coreW;                             // past 2804:768 right-aligned: the menu bars stay on the planet
     l.y0 = h - l.coreH;
     l.stripW = static_cast<int>(static_cast<long long>(kStripW) * l.num / l.den);
     l.stripX = l.x0 + l.coreW - l.stripW;

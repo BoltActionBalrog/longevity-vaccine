@@ -28,9 +28,12 @@
 // shows S3L2C2; custom_planet's previews are drawn at the same place by the same law.
 //
 // Levers, all byte-checked:
-//  * Buffer_load_pcx's entry (0x5D7DE0, a 7-byte detour, entry bytes checked) -> LoadPcxHook: records which picture
-//    each Buffer now holds (the opening, a strip, a moon), then the stock load. One lever for both paths: the exe's
-//    callers and Thinker's.
+//  * Buffer_load_pcx's entry (0x5D7DE0, a 7-byte detour, entry bytes checked) -> LoadPcxHook: the stock load, then a
+//    record of which picture the Buffer now holds (the opening, a strip, a moon) when it loaded. One lever for both
+//    paths: the exe's callers and Thinker's.
+//  * desktop_init's entry (0x58EE60, an 8-byte detour, entry bytes checked) -> DesktopInitHook: the menu's memory is
+//    released, then the stock function. Both flows call it after the menu and never at it: the engine's control_game
+//    (0x52ACC0) and Thinker's (game.cpp), game_reload and the in-game loads.
 //  * the two opening stretches (@0x589AE8, @0x589CCB) -> CopyHook: for xopeninga.pcx, the composed menu copied 1:1.
 //  * the 5 SetupWin_draw_item calls -> DrawItemHook: on a composed menu, the highlighted item's preview slot is
 //    emptied for the stock draw and the HD preview is drawn and soft-updated here instead.
@@ -40,17 +43,17 @@
 // size) at install -- it fails: logged, nothing patched, no Preferences row. Every strip and moon file is checked at
 // install (header, size, file length); its full proof is at its first use; a file that fails either is logged once
 // and stays unshown for the session. An allocation failure anywhere is that picture not shown (plain malloc, no
-// exceptions). The engine's fatal exit is bounded, not gone: the scratch Buffer the pictures go through (Buffer_init;
-// its address room probed first; ReleaseMenu's Buffer_init(4, 4) is the same call at 16 bytes) is the one engine
-// allocation. Only a failed CreateDIBSection in Buffer_init exits; its other failure returns with the Buffer closed,
-// and that picture is not shown.
+// exceptions). The engine's fatal exit is bounded, not gone: the scratch Buffer the pictures go through (Buffer_init,
+// at most the whole screen: 8.3 MB at 4K; its address room is probed first, not its commit) is the one engine
+// allocation, made at most once per menu visit after a failure. Only a failed CreateDIBSection in Buffer_init exits;
+// its quiet returns (CreateCompatibleDC: 1, the DirectDraw paths: 0x12, a negative size: 3) leave no usable pixels,
+// and that picture is not shown. ReleaseMenu closes the scratch with Buffer_close (no allocation).
 //
 // Memory: the composed menu (w x h bytes, 8.3 MB at 4K) and up to kCache previews at their drawn size (about 17 MB
 // at 4K for a step's three, the previous step's three and one spare), least recently drawn first out, a good entry
 // replaced only once its successor is made. A pack file is read for the one picture being made and released
-// straight after. None of it is held in play: when a game loads its terrain (load_terrain's first load, TEXTURE.PCX,
-// seen by the detour) the menu, the previews and the scratch surface are freed -- under Thinker the 32-bit process had
-// no room for both (the map's ground came out black) -- and they are made again back at the menu.
+// straight after. None of it is held in play: when a game begins (desktop_init) the menu, the previews and the
+// scratch surface are freed, and they are made again back at the menu.
 // "HD Main Menu" ([UIMod] MenuHD) switches it; it takes effect the next time the menu is drawn.
 
 #include "menuhd.h"
@@ -77,12 +80,17 @@ constexpr uintptr_t kVA_DrawItem     = 0x4AE4D0;   // SetupWin_draw_item: thisca
 constexpr uintptr_t kVA_SoftUpdate   = 0x5D5720;   // GraphicWin_soft_update: thiscall (win, x, y, w, h) RET 0x10
 constexpr uintptr_t kVA_BufferCtor   = 0x5D7210;   // Buffer_ctor: thiscall (Buffer*)
 constexpr uintptr_t kVA_BufferInit   = 0x5D7670;   // Buffer_init: thiscall (Buffer*, w, h, flags, surf) RET 0x10
+constexpr uintptr_t kVA_BufferClose  = 0x5D7470;   // Buffer_close: thiscall (Buffer*) -- what Buffer_init calls first
+constexpr uintptr_t kVA_DesktopInit  = 0x58EE60;   // desktop_init: cdecl (int) -> int
 constexpr uintptr_t kVA_TopMenuWin   = 0x945824;   // TopMenuWin* (GraphicWin; canvas Buffer at +0x444)
 constexpr uintptr_t kVA_ScreenWidth  = 0x9B7B1C;
 constexpr uint32_t kCopySites[] = {0x589AE8, 0x589CCB};   // change_opening's and init_opening's stretch
 constexpr uint32_t kDrawItemSites[] = {0x4AE0D7, 0x4AE3B6, 0x4AE3C9, 0x4AE43A, 0x4AE44A};
 // Buffer_load_pcx's first two instructions: push -1; push 0x662BC7 (its SEH frame) -- moved to the trampoline as is
 const BYTE kLoadPcxEntry[] = {0x6A, 0xFF, 0x68, 0xC7, 0x2B, 0x66, 0x00};
+// desktop_init's first three instructions: push ebp; mov ebp, esp; mov eax, [0x939284] -- moved as is
+const BYTE kDesktopInitEntry[] = {0x55, 0x8B, 0xEC, 0xA1, 0x84, 0x92, 0x93, 0x00};
+const BYTE kBufferCloseEntry[] = {0x53, 0x55, 0x56, 0x8B, 0xF1, 0x57};
 constexpr int kDecoOfs = 0xA1C;                     // SetupWin +0xA1C struct Buffer* deco[3]
 constexpr int kItemCountOfs = 0xFCC;                // SetupWin +0xFCC: item count (draw_item returns at item >= it)
 constexpr int kCanvasOfs = 0x444;
@@ -101,8 +109,11 @@ typedef int (__thiscall* FDrawItem)(void*, int, int);
 typedef int (__thiscall* FSoftUpdate)(void*, int, int, int, int);
 typedef void (__thiscall* FBufferCtor)(void*);
 typedef int (__thiscall* FBufferInit)(void*, int, int, int, void*);
+typedef void (__thiscall* FBufferClose)(void*);
+typedef int (__cdecl* FDesktopInit)(int);
 
 FLoadPcx g_load = nullptr;                          // the trampoline: Buffer_load_pcx's first 7 bytes, then a jmp back
+FDesktopInit g_desktopInit = nullptr;               // the trampoline: desktop_init's first 8 bytes, then a jmp back
 FCopy3 g_copy = nullptr;
 FDrawItem g_drawItem = nullptr;
 bool g_installed = false;
@@ -117,7 +128,7 @@ int g_loadedNext = 0;
 
 // The pack's pieces: 27 strips, 3 moons. state 0 = no file, 1 = header checked (proven at first use), 2 = proven,
 // -1 = unusable (logged once).
-struct Piece { char stem[8]; int state; };
+struct Piece { char stem[8]; int state; bool noMemLogged; };
 Piece g_pieces[30];
 
 uint8_t g_canvas[1024];                             // the canvas colours the LUT below was built for
@@ -133,6 +144,7 @@ unsigned g_clock = 0;
 alignas(16) uint8_t g_scratch[kBufSize + 0x80];
 bool g_scratchReady = false;
 int g_scratchW = 0, g_scratchH = 0;
+bool g_scratchFailed = false;                       // Buffer_init gave no pixels: not tried again this menu visit
 
 BYTE* At(uintptr_t va) { return reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr)) + (va - 0x400000); }
 
@@ -305,7 +317,8 @@ bool DrawPiece(const char* stem, int num, int den, uint8_t* dst, int dw, int dh,
         return true;
     }
     if (why == hdpack::kNoMemory) {                     // no memory now: not shown this time, may be tried again
-        Log("[menuhd] no memory for menu\\hd\\%s -> not shown\n", strrchr(path, '\\') + 1);
+        if (!p->noMemLogged) Log("[menuhd] no memory for menu\\hd\\%s -> not shown\n", strrchr(path, '\\') + 1);
+        p->noMemLogged = true;
         return false;
     }
     Log("[menuhd] menu\\hd\\%s %s (want an 8-bit %dx%d PCX) -> not shown\n", strrchr(path, '\\') + 1, hdpack::Why(why),
@@ -357,10 +370,12 @@ bool ComposeMenu(int w, int h)
 }
 
 // The scratch Buffer at w x h. Its address room is probed first: a failed CreateDIBSection in Buffer_init is the
-// engine's fatal exit. Its other failure is not: on a size change it closes the Buffer first and returns 1 when
-// CreateCompatibleDC fails. Then no size is recorded, and the next picture tries again.
+// engine's fatal exit. Its quiet returns are not (see the header): then no size is recorded and the scratch is not
+// tried again until the next menu visit (ReleaseMenu), so near the GDI handle limit each visit risks one call, not
+// one per draw.
 void* Scratch(int w, int h)
 {
+    if (g_scratchFailed) return nullptr;
     if (!g_scratchReady || !Pixels(g_scratch) || w != g_scratchW || h != g_scratchH) {
         void* probe = VirtualAlloc(nullptr, static_cast<size_t>((w + 3) & ~3) * h * 2 + (1 << 20), MEM_RESERVE,
                                    PAGE_READWRITE);
@@ -376,6 +391,8 @@ void* Scratch(int w, int h)
     }
     if (Field(g_scratch, kBufW) != w || !Pixels(g_scratch) || Field(g_scratch, kBufPitch) < w) {
         g_scratchW = g_scratchH = 0;
+        g_scratchFailed = true;
+        Log("[menuhd] no %dx%d drawing surface -> HD pictures not shown until the next menu visit\n", w, h);
         return nullptr;
     }
     return g_scratch;
@@ -390,33 +407,33 @@ void ToScratch(const uint8_t* px, int w, int h, int pitch)
 
 bool Active() { return g_installed && g_on && *reinterpret_cast<int*>(At(kVA_ScreenWidth)) != kNarrowWidth; }
 
-// A game is starting (load_terrain's first load, TEXTURE.PCX): the menu holds nothing in play -- the composed menu,
-// the cached previews and the scratch Buffer's surface all go. Back at the menu they are made again (the menu once,
-// each preview at its first draw).
+// A game begins (desktop_init): the menu holds nothing in play -- the composed menu, the cached previews and the
+// scratch Buffer's surface all go. Back at the menu they are made again (the menu once, each preview at its first
+// draw), and a scratch that failed is tried again.
 void ReleaseMenu()
 {
-    if (g_menu || g_scratchW > 4 || g_scratchH > 4) Dbg("[menuhd] a game is loading: the menu's memory is released\n");
+    if (g_menu || g_scratchW > 0 || g_scratchH > 0) Dbg("[menuhd] a game begins: the menu's memory is released\n");
     free(g_menu);
     g_menu = nullptr;
     g_menuW = g_menuH = 0;
     g_menuFailed = false;
     g_composed = false;
     for (Cached& c : g_cache) { free(c.px); c = Cached{}; }
-    if (g_scratchReady && (g_scratchW > 4 || g_scratchH > 4)) {
-        reinterpret_cast<FBufferInit>(At(kVA_BufferInit))(g_scratch, 4, 4, 0, nullptr);   // closes the old surface
-        g_scratchW = g_scratchH = Pixels(g_scratch) ? 4 : 0;
-    }
+    if (g_scratchReady) reinterpret_cast<FBufferClose>(At(kVA_BufferClose))(g_scratch);   // no allocation
+    g_scratchW = g_scratchH = 0;
+    g_scratchFailed = false;
 }
 
 // --- hooks ------------------------------------------------------------------------------------------------------
 
-// Stands in for Buffer_load_pcx (entry detour, same contract): records what the Buffer now holds, then the stock load.
+// Stands in for Buffer_load_pcx (entry detour, same contract): the stock load, then a record of what the Buffer now
+// holds -- only when it loaded (0); a failed load clears the Buffer's record.
 int __fastcall LoadPcxHook(void* buf, void* /*edx*/, const char* name, void* pal, int a4, int a5)
 {
+    const int rc = g_load(buf, name, pal, a4, a5);
     char stem[16];
     Stem(name ? name : "", stem, sizeof stem);
-    if (strcmp(stem, "TEXTURE") == 0) ReleaseMenu();
-    const bool ours = strcmp(stem, "XOPENINGA") == 0 || IsStrip(stem) || IsMoon(stem);
+    const bool ours = rc == 0 && (strcmp(stem, "XOPENINGA") == 0 || IsStrip(stem) || IsMoon(stem));
     Loaded* slot = nullptr;
     for (Loaded& l : g_loaded) if (l.buf == buf) slot = &l;
     if (ours) {
@@ -427,9 +444,16 @@ int __fastcall LoadPcxHook(void* buf, void* /*edx*/, const char* name, void* pal
         slot->buf = buf;
         strncpy_s(slot->stem, stem, _TRUNCATE);
     } else if (slot) {
-        *slot = Loaded{};                               // that Buffer holds something else now
+        *slot = Loaded{};                               // that Buffer holds something else now (or nothing)
     }
-    return g_load(buf, name, pal, a4, a5);
+    return rc;
+}
+
+// Stands in for desktop_init (entry detour, same contract): a game begins.
+int __cdecl DesktopInitHook(int a)
+{
+    ReleaseMenu();
+    return g_desktopInit(a);
 }
 
 const char* HeldBy(const void* buf)
@@ -444,8 +468,9 @@ int __fastcall CopyHook(void* src, void* /*edx*/, void* dst, int sx, int sy, int
 {
     const char* held = HeldBy(src);
     g_composed = false;
-    if (Active() && held && strcmp(held, "XOPENINGA") == 0 && dw > 0 && dh > 0 &&
-        (UseColours(dst) || UseColours(src)) && ComposeMenu(dw, dh) && Scratch(dw, dh)) {
+    // the canvas's own colours, never the freshly loaded source's: a canvas with none yet gets the stock menu once
+    if (Active() && held && strcmp(held, "XOPENINGA") == 0 && dw > 0 && dh > 0 && UseColours(dst) &&
+        ComposeMenu(dw, dh) && Scratch(dw, dh)) {
         ToScratch(g_menu, dw, dh, dw);
         g_composed = true;
         return g_copy(g_scratch, dst, 0, 0, dw, dh, dx, dy, dw, dh);
@@ -474,20 +499,23 @@ const Cached* Preview(const char* stem, const menuhd_law::Layout& L, int rw, int
     return c;
 }
 
-// Draw one preview into the TopMenuWin canvas where the law puts it, and present that rect. A piece that is not
-// shown leaves its place empty: black for a strip, the composed menu's own pixels for a moon.
-void PaintPreview(const char* stem)
+// One preview made in the scratch Buffer where the law puts it. False when it cannot be painted (no canvas, its
+// colours or size changed, no scratch): the caller then leaves the stock draw alone. A piece that is not shown leaves
+// its place empty: black for a strip, the composed menu's own pixels for a moon.
+struct Planned { void* win; void* canvas; int x, y, w, h; };
+
+bool PreparePreview(const char* stem, Planned* out)
 {
     uint8_t* win = *reinterpret_cast<uint8_t**>(At(kVA_TopMenuWin));
-    if (!win || !g_menu) return;
+    if (!win || !g_menu) return false;
     void* canvas = win + kCanvasOfs;
     const int w = Field(canvas, kBufW), h = Field(canvas, kBufH) < 0 ? -Field(canvas, kBufH) : Field(canvas, kBufH);
-    if (w != g_menuW || h != g_menuH || !UseColours(canvas)) return;
+    if (w != g_menuW || h != g_menuH || !UseColours(canvas)) return false;
     const menuhd_law::Layout L = menuhd_law::MenuLayout(w, h);
     const bool moon = IsMoon(stem);
     const menuhd_law::Rect m = menuhd_law::MoonRect(L);
     const int rx = moon ? m.x : L.stripX, ry = L.y0, rw = moon ? m.w : L.stripW, rh = moon ? m.h : L.coreH;
-    if (rw <= 0 || rh <= 0 || !Scratch(rw, rh)) return;
+    if (rw <= 0 || rh <= 0 || !Scratch(rw, rh)) return false;
     const Cached* c = Preview(stem, L, rw, rh);
     uint8_t* d = Pixels(g_scratch);
     const int dp = Field(g_scratch, kBufPitch);
@@ -499,8 +527,15 @@ void PaintPreview(const char* stem)
         if (!moon) { memcpy(o, s, rw); continue; }
         for (int x = 0; x < rw; ++x) o[x] = s[x] == menuhd_law::kKey ? under[x] : s[x];   // the moon over the sky
     }
-    g_copy(g_scratch, canvas, 0, 0, rw, rh, rx, ry, rw, rh);
-    reinterpret_cast<FSoftUpdate>(At(kVA_SoftUpdate))(win, rx, ry, rw, rh);
+    *out = Planned{win, canvas, rx, ry, rw, rh};
+    return true;
+}
+
+// The prepared preview into the canvas, and that rect presented.
+void PresentPreview(const Planned& p)
+{
+    g_copy(g_scratch, p.canvas, 0, 0, p.w, p.h, p.x, p.y, p.w, p.h);
+    reinterpret_cast<FSoftUpdate>(At(kVA_SoftUpdate))(p.win, p.x, p.y, p.w, p.h);
 }
 
 // Stands in for SetupWin_draw_item at its 5 callers: same contract (thiscall, RET 8).
@@ -516,34 +551,77 @@ int __fastcall DrawItemHook(void* self, void* /*edx*/, int item, int highlighted
     if (!held || !(IsStrip(held) || IsMoon(held))) return g_drawItem(self, item, highlighted);
     char stem[12];
     strncpy_s(stem, held, _TRUNCATE);
+    Planned plan;
+    if (!PreparePreview(stem, &plan)) return g_drawItem(self, item, highlighted);   // cannot paint: stock, as is
     *slot = nullptr;                                                 // no stock (or patched) preview blit
     const int rc = g_drawItem(self, item, highlighted);
     *slot = deco;
-    PaintPreview(stem);
+    PresentPreview(plan);
     return rc;
 }
 
-// Buffer_load_pcx's entry -> LoadPcxHook; the 7 moved bytes run from the trampoline, then back to 0x5D7DE7.
-bool DetourLoadPcx()
+// The trampoline for an entry detour: the n moved bytes (whole instructions, none relative), then jmp entry + n.
+// Made in its own page, which is execute-read once written. Null when it cannot be made.
+BYTE* MakeTrampoline(const BYTE* e, size_t n)
 {
-    BYTE* e = At(kVA_LoadPcx);
-    if (memcmp(e, kLoadPcxEntry, sizeof kLoadPcxEntry) != 0) return false;
-    BYTE* t = static_cast<BYTE*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-    if (!t) return false;
-    memcpy(t, e, sizeof kLoadPcxEntry);
-    t[7] = 0xE9;
-    const int32_t back = static_cast<int32_t>(reinterpret_cast<uintptr_t>(e + 7) - reinterpret_cast<uintptr_t>(t + 12));
-    memcpy(t + 8, &back, 4);
-    FlushInstructionCache(GetCurrentProcess(), t, 12);
-    g_load = reinterpret_cast<FLoadPcx>(t);
+    BYTE* t = static_cast<BYTE*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    if (!t) return nullptr;
+    memcpy(t, e, n);
+    t[n] = 0xE9;
+    const int32_t back = static_cast<int32_t>(reinterpret_cast<uintptr_t>(e + n) - reinterpret_cast<uintptr_t>(t + n + 5));
+    memcpy(t + n + 1, &back, 4);
     DWORD old;
-    VirtualProtect(e, sizeof kLoadPcxEntry, PAGE_EXECUTE_READWRITE, &old);
-    const int32_t to = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&LoadPcxHook) - reinterpret_cast<uintptr_t>(e + 5));
+    if (!VirtualProtect(t, 32, PAGE_EXECUTE_READ, &old)) {
+        VirtualFree(t, 0, MEM_RELEASE);
+        return nullptr;
+    }
+    FlushInstructionCache(GetCurrentProcess(), t, n + 5);
+    return t;
+}
+
+// entry[0..n) -> jmp hook, nop-padded. The entry bytes were checked by the caller. False (nothing written) when the
+// page cannot be made writable.
+bool WriteEntryJump(BYTE* e, size_t n, const void* hook)
+{
+    DWORD old;
+    if (!VirtualProtect(e, n, PAGE_EXECUTE_READWRITE, &old)) return false;
+    const int32_t to = static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook) - reinterpret_cast<uintptr_t>(e + 5));
     e[0] = 0xE9;
     memcpy(e + 1, &to, 4);
-    e[5] = e[6] = 0x90;
-    VirtualProtect(e, sizeof kLoadPcxEntry, old, &old);
-    FlushInstructionCache(GetCurrentProcess(), e, sizeof kLoadPcxEntry);
+    for (size_t i = 5; i < n; ++i) e[i] = 0x90;
+    DWORD ignored;
+    VirtualProtect(e, n, old, &ignored);
+    FlushInstructionCache(GetCurrentProcess(), e, n);
+    return true;
+}
+
+// Buffer_load_pcx's entry -> LoadPcxHook and desktop_init's -> DesktopInitHook; both trampolines are made before
+// either entry is written, so a failure leaves the exe untouched.
+bool Detours()
+{
+    BYTE* lp = At(kVA_LoadPcx);
+    BYTE* di = At(kVA_DesktopInit);
+    if (memcmp(lp, kLoadPcxEntry, sizeof kLoadPcxEntry) != 0 ||
+        memcmp(di, kDesktopInitEntry, sizeof kDesktopInitEntry) != 0) return false;
+    BYTE* t1 = MakeTrampoline(lp, sizeof kLoadPcxEntry);
+    BYTE* t2 = t1 ? MakeTrampoline(di, sizeof kDesktopInitEntry) : nullptr;
+    if (!t2) {
+        if (t1) VirtualFree(t1, 0, MEM_RELEASE);
+        return false;
+    }
+    g_load = reinterpret_cast<FLoadPcx>(t1);
+    g_desktopInit = reinterpret_cast<FDesktopInit>(t2);
+    if (!WriteEntryJump(lp, sizeof kLoadPcxEntry, reinterpret_cast<const void*>(&LoadPcxHook))) return false;
+    if (!WriteEntryJump(di, sizeof kDesktopInitEntry, reinterpret_cast<const void*>(&DesktopInitHook))) {
+        DWORD old;                                       // put Buffer_load_pcx's entry back: all or nothing
+        if (VirtualProtect(lp, sizeof kLoadPcxEntry, PAGE_EXECUTE_READWRITE, &old)) {
+            memcpy(lp, kLoadPcxEntry, sizeof kLoadPcxEntry);
+            DWORD ignored;
+            VirtualProtect(lp, sizeof kLoadPcxEntry, old, &ignored);
+            FlushInstructionCache(GetCurrentProcess(), lp, sizeof kLoadPcxEntry);
+        }
+        return false;
+    }
     return true;
 }
 
@@ -611,8 +689,14 @@ void InstallMenuHd()
         Log("[menuhd] unexpected bytes at Buffer_load_pcx's entry -> HD menu NOT installed\n");
         return;
     }
+    if (memcmp(At(kVA_DesktopInit), kDesktopInitEntry, sizeof kDesktopInitEntry) != 0 ||
+        memcmp(At(kVA_BufferClose), kBufferCloseEntry, sizeof kBufferCloseEntry) != 0) {
+        Log("[menuhd] unexpected bytes at desktop_init's or Buffer_close's entry -> HD menu NOT installed\n");
+        return;
+    }
     // every strip and moon: its header and size now, its full proof at its first use
     int have = 0, bad = 0, n = 0;
+    char missing[30 * 8] = "";
     for (int s = 1; s <= 3; ++s)
         for (int l = 1; l <= 3; ++l)
             for (int c = 1; c <= 3; ++c)
@@ -629,10 +713,15 @@ void InstallMenuHd()
             Log("[menuhd] menu\\hd\\%s is not an 8-bit %dx%d RLE PCX -> not shown\n", strrchr(path, '\\') + 1, w, h);
         }
         have += p.state > 0;
+        if (p.state == 0) {
+            if (missing[0]) strcat_s(missing, " ");
+            strcat_s(missing, p.stem);
+        }
     }
+    if (missing[0]) Log("[menuhd] not in the pack (left empty): %s\n", missing);
     g_on = GetPrivateProfileIntA("UIMod", "MenuHD", kMenuHdDefault, ini) != 0 ? 1 : 0;
-    if (!DetourLoadPcx()) {
-        Log("[menuhd] could not detour Buffer_load_pcx -> HD menu NOT installed\n");
+    if (!Detours()) {
+        Log("[menuhd] could not detour Buffer_load_pcx / desktop_init -> HD menu NOT installed\n");
         return;
     }
     g_copy = reinterpret_cast<FCopy3>(At(kVA_Copy3));
@@ -641,5 +730,6 @@ void InstallMenuHd()
     for (uint32_t site : kDrawItemSites) Retarget(site, reinterpret_cast<const void*>(&DrawItemHook));
     g_installed = true;
     Log("[menuhd] installed: HD main menu + planet setup from menu\\hd\\ (%d of 30 pieces, %d unusable; Buffer_load_pcx "
-        "entry + 2 stretches + 5 draw_item calls), %s\n", have, bad, g_on ? "on" : "off ([UIMod] MenuHD=0)");
+        "and desktop_init entries + 2 stretches + 5 draw_item calls), %s\n", have, bad,
+        g_on ? "on" : "off ([UIMod] MenuHD=0)");
 }
