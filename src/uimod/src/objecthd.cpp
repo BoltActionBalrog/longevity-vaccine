@@ -40,9 +40,10 @@
 //    line);
 //  * per object and size: a cut that fails (an empty rect, no memory) is remembered and never retried.
 // The engine's fatal exit on an allocation failure is bounded, not gone: the scratch Buffer the cut goes through
-// (Buffer_init; grow-only, at most kMaxCut x the cell, its address room probed first) and the HD sprite itself
-// (Sprite_extract_2's allocator) are engine allocations of at most about 1 MB, as in basehd.cpp. Everything else is
-// plain memory and its failure is stock.
+// (Buffer_init; grow-only, at most kMaxCut x the cell, its address room probed first; ReleaseAll's Buffer_init(4, 4)
+// is the same call at 16 bytes) and the HD sprite itself (Sprite_extract_2's allocator) are engine allocations of at
+// most about 1 MB, as in basehd.cpp. Only a failed CreateDIBSection in Buffer_init exits; its other failure returns
+// with the Buffer closed, and that is stock. Everything else is plain memory and its failure is stock.
 //
 // Memory budget: each usable sheet is its RLE stream (~3.5 MB) while the row is on -- read and scanned once; an
 // object at a new size expands only its own cell's scanlines. Cut objects cost about w x h bytes each and are kept
@@ -323,10 +324,13 @@ Slot* Find(Entry& e, int w, int h)
 }
 
 // The scratch Buffer at least w x h. Grow-only, at most kMaxCut x the cell; the address room for its DIB section is
-// probed first, because Buffer_init's own failure is the engine's fatal exit.
+// probed first, because a failed CreateDIBSection in Buffer_init is the engine's fatal exit. Buffer_init's other
+// failure is not: on a size change it closes the Buffer first (pixels, width, height and pitch zeroed) and returns 1
+// when CreateCompatibleDC fails. So the recorded size is cleared on any failure, and the early return also needs
+// pixels: the next cut resizes again instead of writing through a closed Buffer.
 bool Scratch(int w, int h)
 {
-    if (g_scratchReady && w <= g_scratchW && h <= g_scratchH) return true;
+    if (g_scratchReady && Pixels(g_scratch) && w <= g_scratchW && h <= g_scratchH) return true;
     const int nw = w > g_scratchW ? w : g_scratchW, nh = h > g_scratchH ? h : g_scratchH;
     const size_t need = static_cast<size_t>((nw + 3) & ~3) * nh;
     void* probe = VirtualAlloc(nullptr, need * 2 + (1 << 20), MEM_RESERVE, PAGE_READWRITE);
@@ -337,7 +341,10 @@ bool Scratch(int w, int h)
         g_scratchReady = true;
     }
     g_eng.bufferInit(g_scratch, nw, nh, 0, nullptr);
-    if (!Pixels(g_scratch) || Field(g_scratch, kBufW) != nw || Field(g_scratch, kBufPitch) < nw) return false;
+    if (!Pixels(g_scratch) || Field(g_scratch, kBufW) != nw || Field(g_scratch, kBufPitch) < nw) {
+        g_scratchW = g_scratchH = 0;
+        return false;
+    }
     g_scratchW = nw;
     g_scratchH = nh;
     return true;
@@ -493,7 +500,8 @@ void RepaintObjectScreens()
 }
 
 // The row is off: hold nothing -- every cut object, both sheets' bytes (proven again when the row is switched on), the
-// cell buffer; the scratch Buffer shrinks to 4x4 (Buffer_init closes the old surface first).
+// cell buffer; the scratch Buffer shrinks to 4x4 (Buffer_init closes the old surface first; if the new one is not
+// made, the size recorded is 0 and the next cut resizes).
 void ReleaseAll()
 {
     for (int i = 0; i < g_count; ++i) {
@@ -508,7 +516,7 @@ void ReleaseAll()
     g_cell = nullptr;
     if (g_scratchReady && (g_scratchW > 4 || g_scratchH > 4)) {
         g_eng.bufferInit(g_scratch, 4, 4, 0, nullptr);
-        g_scratchW = g_scratchH = 4;
+        g_scratchW = g_scratchH = Pixels(g_scratch) ? 4 : 0;
     }
 }
 

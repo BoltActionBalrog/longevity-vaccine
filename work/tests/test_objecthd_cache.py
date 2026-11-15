@@ -1,6 +1,7 @@
 """objecthd.cpp's own bookkeeping, run: the remembered failure per (object, size), the blank cells found when a sheet
-is proven, the size cache, the budget trim, the Datalinks size, and that the row switched off (or off from the ini)
-holds nothing and is proven again when switched on.
+is proven, the size cache, the budget trim, the Datalinks size, the popup picture on the patched exe (thunk_art_draw
+in a fake .pcave2, and a call there that is not it), Sprite_draw_dest, a scratch resize that fails without the fatal
+exit, and that the row switched off (or off from the ini) holds nothing and is proven again when switched on.
 
 tests/objecthd_cache_selftest.cpp compiles objecthd.cpp itself (OBJECTHD_SELFTEST: a fake exe image and fake engine
 functions, real sheets on disk read by the real hdpack reader, a 60,000-byte budget) and runs one scenario per
@@ -19,7 +20,8 @@ sys.path.insert(0, str(ROOT / "tests"))
 import cpp_harness  # noqa: E402
 
 SCENARIOS = ["off_holds_nothing", "on_again_fails_stock", "failure_memory_and_size_cache", "blank_cell", "budget_trim",
-             "datalinks_scale"]
+             "datalinks_scale", "popup_thunk", "popup_wrong_offset", "popup_wrong_entry", "draw_dest",
+             "scratch_resize_fails"]
 
 
 @pytest.fixture(scope="module")

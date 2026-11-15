@@ -22,7 +22,15 @@ static std::vector<std::string> g_log;
 void UimodLog(const char* msg) { g_log.push_back(std::string("LOG ") + msg); }
 void UimodDbg(const char* msg) { g_log.push_back(std::string("DBG ") + msg); }
 bool PrefsTabInstalled() { return true; }
-bool UimodPcave2Range(uintptr_t*, uintptr_t*) { return false; }   // the unpatched exe: the popup draws Sprite_draw_2
+// The patched exe's .pcave2, when a scenario makes one; otherwise the unpatched exe (the popup draws Sprite_draw_2).
+static uintptr_t g_caveLo = 0, g_caveHi = 0;
+bool UimodPcave2Range(uintptr_t* lo, uintptr_t* hi)
+{
+    if (!g_caveLo) return false;
+    *lo = g_caveLo;
+    *hi = g_caveHi;
+    return true;
+}
 
 // ---- the fake engine -------------------------------------------------------------------------------------------
 
@@ -32,6 +40,8 @@ static int g_liveSprites = 0;            // HD sprite pixel blocks held
 static void* g_lastDrawn = nullptr;
 static int g_lastNum = 0, g_lastDen = 0; // the num / den the drawn sprite got (args for Sprite_draw_2, globals otherwise)
 static int g_bufW = 0, g_bufH = 0;
+static bool g_failBufInit = false;       // Buffer_init fails the way the engine's does when CreateCompatibleDC fails
+static int g_popupCalls = 0;             // calls that reached the popup picture's own target (thunk_art_draw)
 
 static void*& SprData(void* spr) { return *reinterpret_cast<void**>(static_cast<uint8_t*>(spr) + 4); }
 
@@ -57,6 +67,13 @@ static int __fastcall FakeDraw2(void* spr, void*, void*, int, int, int, int num,
     return 0;
 }
 
+static int __fastcall FakePopupArt(void* spr, void*, void*, int, int, int, int num, int den)
+{
+    ++g_popupCalls;
+    g_lastDrawn = spr; g_lastNum = num; g_lastDen = den;
+    return 0;
+}
+
 static int __fastcall FakeBlitCore(void* spr, void*, void*, int, int, int)
 {
     g_lastDrawn = spr; g_lastNum = Global(kVA_ScaleNum); g_lastDen = Global(kVA_ScaleDen);
@@ -74,6 +91,16 @@ static void __fastcall FakeBufferCtor(void* buf, void*) { memset(buf, 0, kBufSiz
 static int __fastcall FakeBufferInit(void* buf, void*, int w, int h, int, void*)
 {
     uint8_t* b = static_cast<uint8_t*>(buf);
+    if (g_failBufInit && (w != g_bufW || h != g_bufH)) {
+        // 0x5D76D8: a size change closes the Buffer first (pixels, width, pitch zeroed); then the DC call fails and
+        // Buffer_init returns 1 without the fatal exit.
+        free(*reinterpret_cast<void**>(b + kBufData));
+        *reinterpret_cast<void**>(b + kBufData) = nullptr;
+        *reinterpret_cast<int*>(b + kBufW) = 0;
+        *reinterpret_cast<int*>(b + kBufPitch) = 0;
+        g_bufW = g_bufH = 0;
+        return 1;
+    }
     free(*reinterpret_cast<void**>(b + kBufData));
     const int pitch = (w + 3) & ~3;
     *reinterpret_cast<void**>(b + kBufData) = malloc(static_cast<size_t>(pitch) * h);
@@ -205,7 +232,7 @@ static void Install()
 {
     g_eng.extract = reinterpret_cast<decltype(g_eng.extract)>(&FakeExtract);
     g_eng.draw2 = reinterpret_cast<FDraw2>(&FakeDraw2);
-    g_eng.popupArt = reinterpret_cast<FDraw2>(&FakeDraw2);
+    g_eng.popupArt = reinterpret_cast<FDraw2>(&FakePopupArt);
     g_eng.blitCore = reinterpret_cast<decltype(g_eng.blitCore)>(&FakeBlitCore);
     g_eng.drawDest = reinterpret_cast<decltype(g_eng.drawDest)>(&FakeDrawDest);
     g_eng.spriteClose = reinterpret_cast<decltype(g_eng.spriteClose)>(&FakeClose);
@@ -217,16 +244,32 @@ static void Install()
     InstallObjectHd();
 }
 
+// An E8 call at site to an absolute address.
+static void CallAbs(uint32_t site, uintptr_t to)
+{
+    BYTE* p = At(site);
+    p[0] = 0xE8;
+    const int32_t rel = static_cast<int32_t>(to - (reinterpret_cast<uintptr_t>(p) + 5));
+    memcpy(p + 1, &rel, 4);
+}
+
+// The patched exe's popup picture: a .pcave2 with thunk_art_draw's entry at kOffArtDraw, the popup site calling
+// offset into it. entryFlip >= 0 changes that byte of the entry.
+static void MakeCave(uintptr_t offset = kOffArtDraw, int entryFlip = -1)
+{
+    BYTE* cave = static_cast<BYTE*>(VirtualAlloc(nullptr, 0x30000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    g_caveLo = reinterpret_cast<uintptr_t>(cave);
+    g_caveHi = g_caveLo + 0x30000;
+    memcpy(cave + kOffArtDraw, kArtDrawEntry, sizeof kArtDrawEntry);
+    if (entryFlip >= 0) cave[kOffArtDraw + entryFlip] ^= 0xFF;
+    CallAbs(kPopupArtSite, g_caveLo + offset);
+}
+
 // Every call site InstallObjectHd checks, as the unpatched exe has them.
 static void MakeImage()
 {
     g_testImage = static_cast<BYTE*>(VirtualAlloc(nullptr, 0x600000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-    const auto call = [](uint32_t site, uintptr_t target) {
-        BYTE* p = At(site);
-        p[0] = 0xE8;
-        const int32_t rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(At(target)) - (reinterpret_cast<uintptr_t>(p) + 5));
-        memcpy(p + 1, &rel, 4);
-    };
+    const auto call = [](uint32_t site, uintptr_t target) { CallAbs(site, reinterpret_cast<uintptr_t>(At(target))); };
     for (uint32_t site : kExtractSites) call(site, kVA_Extract2);
     for (int i = 0; i < kBlitCoreCalls; ++i) call(kTerrainLo + 0x10 + i * 0x40, kVA_BlitCore);
     for (int i = 0; i < kDrawDestCalls; ++i) call(kTerrainLo + 0x1000 + i * 0x40, kVA_DrawDest);
@@ -358,6 +401,88 @@ static void DatalinksScale()
     Check(g_lastDrawn == other && g_lastNum == 7 && g_lastDen == 3, "another sprite: the original call");
 }
 
+// The patched exe: the popup site calls thunk_art_draw in .pcave2. The hook installs, takes the site, draws a table
+// object's HD copy through thunk_art_draw at 1 / 1 and passes any other sprite through with its own num / den.
+static void PopupThunk()
+{
+    MakeCave();
+    WriteSheet(0);
+    WriteIni(1);
+    Install();
+    Check(g_installed, "installed on the patched exe");
+    Check(Logged("picture via thunk_art_draw") == 1, "the log names thunk_art_draw", Num(Logged("picture via")));
+    Check(CallTarget(kPopupArtSite) == reinterpret_cast<uintptr_t>(&PopupArtHook), "the popup site calls PopupArtHook");
+    g_lastDrawn = nullptr;
+    PopupArtHook(Spr(4), nullptr, nullptr, kKey, 5, 5, 5, 2);
+    Check(g_popupCalls == 1 && g_lastDrawn && g_lastDrawn != Spr(4), "a table object: HD, through thunk_art_draw");
+    Check(g_lastNum == 1 && g_lastDen == 1, "at 1 / 1", Num(g_lastNum) + "/" + Num(g_lastDen));
+    uint8_t other[0x2C] = {};
+    PopupArtHook(other, nullptr, nullptr, kKey, 1, 1, 7, 3);
+    Check(g_popupCalls == 2 && g_lastDrawn == other && g_lastNum == 7 && g_lastDen == 3,
+          "another sprite: thunk_art_draw with its own num / den");
+    ObjectHdSet(0);
+    PopupArtHook(Spr(4), nullptr, nullptr, kKey, 5, 5, 5, 2);
+    Check(g_lastDrawn == Spr(4) && g_lastNum == 5 && g_lastDen == 2, "off: the stock sprite, as handed in");
+}
+
+// The popup site calls into .pcave2, but not thunk_art_draw as checked: nothing is installed.
+static void PopupUnknownTarget(uintptr_t offset, int flip, const char* what)
+{
+    MakeCave(offset, flip);
+    WriteSheet(0);
+    WriteIni(1);
+    const uintptr_t before = CallTarget(kPopupArtSite);
+    Install();
+    Check(!g_installed, what);
+    Check(Logged("unexpected bytes at popup picture draw") == 1, "and it is logged");
+    Check(CallTarget(kPopupArtSite) == before && !g_pack[0].bytes, "nothing patched, nothing read");
+}
+
+// A terrain-pass draw through Sprite_draw_dest: HD, unscaled, with the scale globals put back.
+static void DrawDest()
+{
+    WriteSheet(0);
+    WriteIni(1);
+    Install();
+    SetScale(25, 16);
+    g_lastDrawn = nullptr;
+    DrawDestHook(Spr(3), nullptr, nullptr, kKey, 5, 5, nullptr);
+    Check(g_lastDrawn && g_lastDrawn != Spr(3), "HD through Sprite_draw_dest");
+    Check(g_lastNum == g_lastDen, "drawn unscaled", Num(g_lastNum) + "/" + Num(g_lastDen));
+    Check(Global(kVA_ScaleNum) == 25 && Global(kVA_ScaleDen) == 16, "the scale globals are put back");
+    uint8_t other[0x2C] = {};
+    DrawDestHook(other, nullptr, nullptr, kKey, 1, 1, nullptr);
+    Check(g_lastDrawn == other && g_lastNum == 25, "another sprite: the original call at the game's scale");
+}
+
+// Buffer_init closes the scratch and then fails without exiting: that cut is stock, the next cut at the earlier size
+// is stock too (not a write through the closed Buffer), and once Buffer_init works again the cuts are HD. The same
+// for the 4x4 shrink when the row goes off.
+static void ScratchResizeFails()
+{
+    WriteSheet(0);
+    WriteIni(1);
+    Install();
+    SetScale(16, 16);
+    Check(Blit(0), "HD at 16/16: the scratch holds one cell");
+    g_failBufInit = true;
+    SetScale(25, 16);
+    Check(!Blit(1), "the failed resize draws stock");
+    Check(g_scratchW == 0 && g_scratchH == 0, "no size is recorded for the closed Buffer",
+          Num(g_scratchW) + "x" + Num(g_scratchH));
+    SetScale(16, 16);
+    Check(!Blit(2), "the next cut at the earlier size is stock, not a write through the closed Buffer");
+    g_failBufInit = false;
+    Check(Blit(3), "Buffer_init works again: HD");
+    g_failBufInit = true;
+    ObjectHdSet(0);
+    Check(g_scratchW == 0 && g_scratchH == 0, "off with a failed 4x4 shrink: no size recorded",
+          Num(g_scratchW) + "x" + Num(g_scratchH));
+    g_failBufInit = false;
+    ObjectHdSet(1);
+    Check(Blit(5), "on again: HD");
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 3) return 2;
@@ -373,6 +498,11 @@ int main(int argc, char** argv)
     else if (s == "blank_cell") BlankCell();
     else if (s == "budget_trim") BudgetTrim();
     else if (s == "datalinks_scale") DatalinksScale();
+    else if (s == "popup_thunk") PopupThunk();
+    else if (s == "popup_wrong_offset") PopupUnknownTarget(kOffArtDraw + 0x10, -1, "a call elsewhere in .pcave2: not installed");
+    else if (s == "popup_wrong_entry") PopupUnknownTarget(kOffArtDraw, 10, "thunk_art_draw's entry bytes differ: not installed");
+    else if (s == "draw_dest") DrawDest();
+    else if (s == "scratch_resize_fails") ScratchResizeFails();
     else return 2;
     return g_fails ? 1 : 0;
 }
