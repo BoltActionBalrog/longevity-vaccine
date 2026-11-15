@@ -58,6 +58,8 @@ extern int  g_cursor_cut_guard;                // addr: 0x009BC494  observed  lo
 extern void load_fixed_sprites(void);         // addr: 0x00455E80  thinker   parent UI bootstrap; sole caller of load_interface
 extern void load_menu(void);                  // addr: 0x00402F40  guess     menu.pcx (main menu)
 extern void load_faction_art(int faction);    // addr: 0x00453710  thinker   cdecl; <faction>.pcx -> 37 Sprites at g_faction_sprites[faction]
+extern void load_terrain(void);                // addr: 0x00451C50  thinker   TER1.PCX / TER1WRECK.PCX / TEXTURE.PCX -> the terrain sprites and textures
+extern void load_vehicles(void);               // addr: 0x00454270  thinker   UNITS.PCX -> the unit sprites
 extern void show_credits(void);               // addr: 0x00428DF0  thinker   View Credits entry: new CreditsWin(0x2D6C) + load_credits_a; callers top_menu/Console_menu_proc/Console_on_key_click/end_of_game
 extern void CreditsWin_ctor(void* self);      // addr: 0x00428780  observed  thiscall; 2x GraphicWin + Font + Buffer + FlatButton + Time subobjects
 extern void load_credits_a(struct CreditsWin* self); // addr: 0x004289F0  observed  thiscall; View Credits modal: fullscreen win + credits[2].pcx via GraphicWin_load_pcx + 400x400 scroller subwin @(30,200|100) + Font 14 + 30ms timer
