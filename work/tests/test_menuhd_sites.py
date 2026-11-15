@@ -199,7 +199,10 @@ def test_the_menu_is_released_where_a_game_begins(pe, which, request):
     hi = lo + text.Misc_VirtualSize
     assert calls(img, lo, hi, DESKTOP_INIT) == DESKTOP_INIT_CALLERS
     assert rd(img, 0x5D76D8, 5)[0] == 0xE8 and calls(img, 0x5D76D8, 0x5D76DD, BUFFER_CLOSE) == [0x5D76D8]
-    assert "ReleaseMenu();\n    return g_desktopInit(a);" in HD.replace("\r\n", "\n")
+    # a naked stub that jumps: the stock function runs with its real caller's return address at [ebp+4]
+    stub = re.search(r"void __declspec\(naked\) DesktopInitHook\(\)\s*\{\s*__asm \{([^}]*)\}", HD)
+    assert stub, "DesktopInitHook must be a naked stub"
+    assert stub.group(1).split() == "pushad pushfd call ReleaseMenu popfd popad jmp dword ptr [g_desktopInit]".split()
     assert '"TEXTURE"' not in HD and "32-bit process had" not in HD
 
 

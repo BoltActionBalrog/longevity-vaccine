@@ -996,6 +996,7 @@ extern void Buffer_fill_3(struct Buffer* self, RECT* rect, int color);         /
 extern void Buffer_write_cent_l_7(struct Buffer* self, const char* str, RECT* rect, int len); // addr: 0x005DD130  thinker  RET 0x0C; centered text in rect
 extern void Buffer_write_cent_l_5(struct Buffer* self, const char* str, int x, int y, int w, int len); // addr: 0x005DD020  thinker  centered text at (x,y) in width w; box-6 cell label writer @0x4B8715; -> wmfr_l
 extern int  Buffer_init(struct Buffer* self, int w, int h, int flags, void* surf); // addr: 0x005D7670  observed  thiscall; same-dims early-out ret 0; W->+0x80, -H->+0x84 (= embedded BITMAPINFO @+0x7C), CreateCompatibleDC->+0x64 + CreateDIBSection->+0x78/bits +0x54, stride (w+3)&~3 ->+0x4A8; GDI-mode fail ret 1/3 silent
+extern void Buffer_close(struct Buffer* self);                                 // addr: 0x005D7470  observed  thiscall; frees the Buffer's surface (DIB section, DC) and records it empty; Buffer_init calls it first (@0x5D76D8)
 extern int  point_in_rect(int x, int y, RECT* r);                              // addr: 0x005FA7E0  observed  cdecl; 1 = inside
 extern void Buffer_wrap_cent_4(struct Buffer* self, const char* str, int x, int y, int width); // addr: 0x005DD920  thinker  wrapped+centered text at (x,y) in width; FlatButton label writer @0x608441; -> write_cent_l_5
 extern void Buffer_write_l(struct Buffer* self, struct Font* f, const char* str, int x, int y, int len); // addr: 0x005DB580  thinker  explicit-Font left text; -> wmfr_l

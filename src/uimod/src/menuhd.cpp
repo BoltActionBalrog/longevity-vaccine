@@ -32,7 +32,7 @@
 //    record of which picture the Buffer now holds (the opening, a strip, a moon) when it loaded. One lever for both
 //    paths: the exe's callers and Thinker's.
 //  * desktop_init's entry (0x58EE60, an 8-byte detour, entry bytes checked) -> DesktopInitHook: the menu's memory is
-//    released, then the stock function. Both flows call it after the menu and never at it: the engine's control_game
+//    released, then a jump (not a call) into the stock function, so it runs with its real caller on the stack. Both flows call it after the menu and never at it: the engine's control_game
 //    (0x52ACC0) and Thinker's (game.cpp), game_reload and the in-game loads.
 //  * the two opening stretches (@0x589AE8, @0x589CCB) -> CopyHook: for xopeninga.pcx, the composed menu copied 1:1.
 //  * the 5 SetupWin_draw_item calls -> DrawItemHook: on a composed menu, the highlighted item's preview slot is
@@ -449,11 +449,20 @@ int __fastcall LoadPcxHook(void* buf, void* /*edx*/, const char* name, void* pal
     return rc;
 }
 
-// Stands in for desktop_init (entry detour, same contract): a game begins.
-int __cdecl DesktopInitHook(int a)
+// desktop_init's entry jumps here: a game begins. A naked stub that releases the menu and JUMPS to the trampoline, so
+// the stock function runs with its real caller's return address on the stack, as if never detoured: code inside it
+// may read [ebp+4] to tell its callers apart. Registers and flags are as the caller left them; the argument count
+// does not matter.
+void __declspec(naked) DesktopInitHook()
 {
-    ReleaseMenu();
-    return g_desktopInit(a);
+    __asm {
+        pushad
+        pushfd
+        call ReleaseMenu
+        popfd
+        popad
+        jmp dword ptr [g_desktopInit]
+    }
 }
 
 const char* HeldBy(const void* buf)
