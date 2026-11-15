@@ -41,7 +41,9 @@
 // install (header, size, file length); its full proof is at its first use; a file that fails either is logged once
 // and stays unshown for the session. An allocation failure anywhere is that picture not shown (plain malloc, no
 // exceptions). The engine's fatal exit is bounded, not gone: the scratch Buffer the pictures go through (Buffer_init;
-// its address room probed first) is the one engine allocation.
+// its address room probed first; ReleaseMenu's Buffer_init(4, 4) is the same call at 16 bytes) is the one engine
+// allocation. Only a failed CreateDIBSection in Buffer_init exits; its other failure returns with the Buffer closed,
+// and that picture is not shown.
 //
 // Memory: the composed menu (w x h bytes, 8.3 MB at 4K) and up to kCache previews at their drawn size (about 17 MB
 // at 4K for a step's three, the previous step's three and one spare), least recently drawn first out, a good entry
@@ -354,10 +356,12 @@ bool ComposeMenu(int w, int h)
     return true;
 }
 
-// The scratch Buffer at w x h. Its address room is probed first: Buffer_init's own failure is the engine's fatal exit.
+// The scratch Buffer at w x h. Its address room is probed first: a failed CreateDIBSection in Buffer_init is the
+// engine's fatal exit. Its other failure is not: on a size change it closes the Buffer first and returns 1 when
+// CreateCompatibleDC fails. Then no size is recorded, and the next picture tries again.
 void* Scratch(int w, int h)
 {
-    if (!g_scratchReady || w != g_scratchW || h != g_scratchH) {
+    if (!g_scratchReady || !Pixels(g_scratch) || w != g_scratchW || h != g_scratchH) {
         void* probe = VirtualAlloc(nullptr, static_cast<size_t>((w + 3) & ~3) * h * 2 + (1 << 20), MEM_RESERVE,
                                    PAGE_READWRITE);
         if (!probe) return nullptr;
@@ -370,7 +374,10 @@ void* Scratch(int w, int h)
         g_scratchW = w;
         g_scratchH = h;
     }
-    if (Field(g_scratch, kBufW) != w || !Pixels(g_scratch) || Field(g_scratch, kBufPitch) < w) return nullptr;
+    if (Field(g_scratch, kBufW) != w || !Pixels(g_scratch) || Field(g_scratch, kBufPitch) < w) {
+        g_scratchW = g_scratchH = 0;
+        return nullptr;
+    }
     return g_scratch;
 }
 
@@ -397,7 +404,7 @@ void ReleaseMenu()
     for (Cached& c : g_cache) { free(c.px); c = Cached{}; }
     if (g_scratchReady && (g_scratchW > 4 || g_scratchH > 4)) {
         reinterpret_cast<FBufferInit>(At(kVA_BufferInit))(g_scratch, 4, 4, 0, nullptr);   // closes the old surface
-        g_scratchW = g_scratchH = 4;
+        g_scratchW = g_scratchH = Pixels(g_scratch) ? 4 : 0;
     }
 }
 
