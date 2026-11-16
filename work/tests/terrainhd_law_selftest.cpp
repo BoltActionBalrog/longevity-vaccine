@@ -22,6 +22,7 @@ int main()
         if (got < 3) { std::printf("?\n"); continue; }
         if (!std::strcmp(mode, "zoom")) std::printf("%d\n", terrainhd::MaxZoom(a, b));
         else if (!std::strcmp(mode, "level")) std::printf("%d\n", terrainhd::Level(a, b));
+        else if (!std::strcmp(mode, "tile")) std::printf("%d\n", terrainhd::TilePx(a));
         else if (!std::strcmp(mode, "uv")) std::printf("%d\n", terrainhd::Uv(a, b));
         else if (!std::strcmp(mode, "nearest") && got == 4) {
             const int n = a, k = b;

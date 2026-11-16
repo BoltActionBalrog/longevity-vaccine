@@ -15263,7 +15263,7 @@ def menu_hd_resample(rows: List[bytes], sw: int, sh: int, pal: bytes, key: int, 
 
 TERRAIN_HD_TILE = 56          # a stock terrain texture is 56 x 56 texels; the UV tables and immediates are in 0..55
 TERRAIN_HD_MASTER = 8         # the pack: TEXTURE.PCX at 8x (terrain/texture_x8.pcx)
-TERRAIN_HD_MAX_LEVEL = 4      # the most the session level ever is (terrain_hd_level)
+TERRAIN_HD_MAX_LEVEL = 8      # the most the session level ever is (terrain_hd_level): the pack's own size
 PRACX_HUD_ROWS = 213          # PRACX ZoomInit: the map's height is the screen's minus the 213-row console
 
 
@@ -15304,16 +15304,24 @@ def terrain_hd_max_zoom(w: int, h: int) -> int:
             return z
 
 
+def terrain_hd_tile_px(z: int) -> int:
+    """LAW (the engine's) -- a map tile's width in pixels at zoom z: 8i with i = (50 (z + 16) / 16 + 1) / 4
+    (ZoomFactorToPt; the tile is 8i x 4i, its vertices at 0x4633F6..0x46343A). 96 at the default zoom 0, 448 at the
+    deepest zoom at 3840x1080 (56; measured in game under PRACX + Thinker, by wheel and by key), 552 at 3840x2160."""
+    return 8 * ((50 * (z + 16) // 16 + 1) // 4)
+
+
 def terrain_hd_level(w: int, h: int) -> int:
     """LAW -- the ONE level k every terrain texture is cut at for the session (every console samples the same art, so
-    a screen never looks different because of where the main map was last zoomed): the smallest k in {2, 4} that
-    keeps at least a texel per pixel across a tile at the deepest zoom. A tile is 56 (z + 16) / 16 px wide and shows
-    the texture's diagonal, 56k * sqrt(2) texels: (k*16)^2 * 2 >= (z + 16)^2. Capped at 4 (3.9 is needed at 4K;
-    level 8 would cut ~32 MB of textures in a 2 GB process)."""
-    z = terrain_hd_max_zoom(w, h) + 16
+    a screen never looks different because of where the main map was last zoomed): the smallest k in {2, 4, 8} that
+    keeps at least a texel per pixel across a tile at the deepest zoom the player can reach. The tile's width
+    (terrain_hd_tile_px) shows the texture's diagonal, 55k * sqrt(2) texel steps: 2 (55k)^2 >= tile_px^2. Capped at 8,
+    the pack's own size (a cell used as painted). 2x at 1024x768; 4x from 1280x1024 to 1920x1080; 8x from 2560x1440 up
+    (3840x1080 needs 5.76, 3840x2160 7.10)."""
+    t = terrain_hd_tile_px(terrain_hd_max_zoom(w, h))
     k = 2
     while k < TERRAIN_HD_MAX_LEVEL:
-        if 2 * (k * 16) ** 2 >= z * z:
+        if 2 * (55 * k) ** 2 >= t * t:
             return k
         k *= 2
     return TERRAIN_HD_MAX_LEVEL

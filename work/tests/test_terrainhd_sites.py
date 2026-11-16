@@ -34,7 +34,7 @@ HD = (SRC_DIR / "terrainhd.cpp").read_text(encoding="utf-8")
 PREFS = (SRC_DIR / "prefs.cpp").read_text(encoding="utf-8")
 
 EXTRACT2, TEX_CTOR, TEX_CLOSE, DRAW2 = 0x619710, 0x619650, 0x619690, 0x6233C0
-GEN, BUFFER_CTOR, BUFFER_INIT = 0x4632D0, 0x5D7210, 0x5D7670
+GEN, MEM_ALLOC, FREE = 0x4632D0, 0x5D4510, 0x644EF2
 LOAD_TERRAIN, LOAD_TERRAIN_END = 0x451C50, 0x453710
 TERRAIN_PASS, TERRAIN_PASS_END = 0x4632D0, 0x466CA0
 DATALINK, DATALINK_END = 0x431180, 0x431800
@@ -46,7 +46,7 @@ GEN_SITES = [0x40F35F, 0x468C73, 0x46927C, 0x469308, 0x469E47, 0x47130C, 0x4B6B9
 UV_IMMS = [0x46485D, 0x4649BB, 0x464AF8, 0x464FD8, 0x465561, 0x465C81, 0x465D43, 0x4311B2]
 UV_TABLES = {0x685CA8: 32, 0x686090: 56}
 PRACX_SWAP_SITES = [0x464215, 0x464353]
-ENGINE_FNS = ("kVA_Extract2", "kVA_TexCtor", "kVA_TexClose", "kVA_BufferCtor", "kVA_BufferInit", "kVA_GenTerrainPoly")
+ENGINE_FNS = ("kVA_Extract2", "kVA_TexCtor", "kVA_TexClose", "kVA_MemAlloc", "kVA_Free", "kVA_GenTerrainPoly")
 STOCK_UV = {
     0x685CA8: [27, 27, 27, 55, 0, 55, 0, 0, 27, 27, 27, 0, 55, 0, 55, 55, 27, 27, 55, 27, 55, 55, 27, 55, 27, 27, 0, 27,
                0, 0, 27, 0],
@@ -157,10 +157,36 @@ def test_no_patch_site_overlaps_what_the_hook_checks_or_writes(pe):
     assert hits == []
 
 
+def test_the_hook_gives_bits_the_way_texture_extract_2_does(img):
+    """GiveBits stands in for Texture_extract_2 without a Buffer: the engine's own cut allocates a Texture's bits with
+    mem_alloc (its only allocation when no TexHeap is passed), frees the old ones with free when +0x6C is 0, and sets
+    exactly bits +0, width +4, height +8 and +0x6C; Texture_close frees with the same free. mem_alloc shows a message
+    box and exits when malloc returns null, so it never returns null."""
+    assert calls(img, EXTRACT2, EXTRACT2 + 0x1C0, MEM_ALLOC) == [0x6197E2]
+    assert calls(img, EXTRACT2, EXTRACT2 + 0x1C0, FREE) == [0x61973C]
+    assert calls(img, TEX_CLOSE, TEX_CLOSE + 0x3A, FREE) == [0x6196A5]
+    import capstone
+    from capstone import x86_const as X
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    stores = set()
+    for ins in md.disasm(rd(img, EXTRACT2, 0x1C0), EXTRACT2):     # esi = the Texture (mov esi, ecx at 0x61971C)
+        if ins.mnemonic == "mov" and ins.operands[0].type == X.X86_OP_MEM and ins.operands[0].mem.base == X.X86_REG_ESI:
+            stores.add(ins.operands[0].mem.disp)
+        if ins.address >= 0x6198D2 and ins.mnemonic == "ret":
+            break
+    # bits, width, height, the corner coordinates (+0x0C..+0x68: TexCorners, compared with this code run under
+    # emulation in test_terrainhd_cache.py) and the heap flag; nothing else
+    assert stores == {0, 4, 8, 0x6C} | set(range(0x0C, 0x6C, 4)), sorted(stores)
+    a = rd(img, MEM_ALLOC, 0x2C)
+    assert a[0x0F:0x11] == b"\x75\x1A" and a[0x26] == 0xE8                  # jne past the box; exit(4) after it
+    assert "GiveBits" in HD and "bufferInit" not in HD and "FillScratch" not in HD
+
+
 def test_source_constants():
     for name, va in (("kVA_Extract2", EXTRACT2), ("kVA_TexCtor", TEX_CTOR), ("kVA_TexClose", TEX_CLOSE),
-                     ("kVA_Draw2", DRAW2), ("kVA_GenTerrainPoly", GEN), ("kVA_BufferCtor", BUFFER_CTOR),
-                     ("kVA_BufferInit", BUFFER_INIT), ("kVA_LoadingCanvas", 0x798668), ("kVA_ScreenW", 0x9B7B1C),
+                     ("kVA_Draw2", DRAW2), ("kVA_GenTerrainPoly", GEN), ("kVA_MemAlloc", MEM_ALLOC),
+                     ("kVA_Free", FREE), ("kVA_LoadingCanvas", 0x798668), ("kVA_ScreenW", 0x9B7B1C),
                      ("kVA_ScreenH", 0x9B7B20)):
         assert src_const(name) == va, name
     assert '"HD Terrain", &TerrainHdAvailable' in PREFS

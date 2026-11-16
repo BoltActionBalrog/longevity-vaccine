@@ -24,24 +24,29 @@ SCREENS = [(640, 480), (800, 600), (1024, 768), (1280, 720), (1280, 1024), (1366
            (3840, 1600), (3840, 2160), (5120, 1440), (5120, 2880), (7680, 4320)]
 
 
-def test_pracx_zoom_and_level_at_known_screens():
+def test_pracx_zoom_tile_and_level_at_known_screens():
     assert SL.terrain_hd_max_zoom(3840, 2160) == 72          # the review's figure (PRACX stops at 72 at 4K)
     assert SL.terrain_hd_max_zoom(1920, 1080) == 30
-    assert SL.terrain_hd_level(3840, 2160) == 4
-    assert SL.terrain_hd_level(1920, 1080) == 4               # 46 / (16 sqrt 2) = 2.03: just past 2
-    assert SL.terrain_hd_level(1280, 1024) == 2
-    assert SL.terrain_hd_level(1024, 768) == 2
+    assert SL.terrain_hd_max_zoom(3840, 1080) == 56
+    # the tile is 8i px wide: 96 at the default zoom; 448 at 3840x1080's deepest zoom, measured in game (PRACX +
+    # Thinker, wheel and key alike); the review's table for the rest
+    assert SL.terrain_hd_tile_px(0) == 96
+    screens = ((1024, 768), (1280, 1024), (1600, 1200), (1920, 1080), (2560, 1440), (3440, 1440), (3840, 1080),
+               (3840, 2160))
+    assert [SL.terrain_hd_tile_px(SL.terrain_hd_max_zoom(w, h)) for w, h in screens] == \
+        [152, 184, 232, 288, 376, 496, 448, 552]
+    assert [SL.terrain_hd_level(w, h) for w, h in screens] == [2, 4, 4, 4, 8, 8, 8, 8]
 
 
-def test_level_keeps_a_texel_per_pixel_or_is_capped():
+def test_level_keeps_a_texel_per_pixel_across_the_real_tile_or_is_capped():
     for w, h in SCREENS:
-        z = SL.terrain_hd_max_zoom(w, h)
+        t = SL.terrain_hd_tile_px(SL.terrain_hd_max_zoom(w, h))
         k = SL.terrain_hd_level(w, h)
-        assert k in (2, 4)
-        need = (z + 16) / (16 * 2 ** 0.5)
-        assert k >= need or k == SL.TERRAIN_HD_MAX_LEVEL, (w, h, z, k)
-        if k == 4:
-            assert need > 2, (w, h)                           # the smallest level that covers it
+        assert k in (2, 4, 8)
+        need = t / (55 * 2 ** 0.5)                            # texel steps across the tile's diagonal per pixel
+        assert k >= need or k == SL.TERRAIN_HD_MAX_LEVEL, (w, h, t, k)
+        if k > 2:
+            assert need > k // 2, (w, h)                      # the smallest level that covers it
 
 
 def test_uv_law_is_even_and_inside_the_texture():
@@ -79,6 +84,9 @@ def test_port_matches_the_python(port):
     for w, h in SCREENS + [(w, h) for w in range(320, 8000, 97) for h in (240, 600, 1080, 2160, 4320)]:
         cases += [f"zoom {w} {h}", f"level {w} {h}"]
         want += [str(SL.terrain_hd_max_zoom(w, h)), str(SL.terrain_hd_level(w, h))]
+    for z in range(-14, 402, 2):
+        cases.append(f"tile {z} 0")
+        want.append(str(SL.terrain_hd_tile_px(z)))
     for k in (1, 2, 4, 8):
         for u in range(56):
             cases.append(f"uv {u} {k}")
