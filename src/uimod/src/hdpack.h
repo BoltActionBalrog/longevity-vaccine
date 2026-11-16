@@ -132,8 +132,9 @@ inline Result Scan(const uint8_t* b, size_t n, int wantW, int wantH, uint32_t* r
     return kOk;
 }
 
-// Load and prove a pack. stockPal (768 bytes, optional): the pack's palette must equal it.
-inline Result Load(Pack* p, const char* path, int wantW, int wantH, const uint8_t* stockPal)
+// Load and prove a pack. stockPal (768 bytes, optional): the pack's palette must equal it. palOut (768 bytes,
+// optional): receives the pack's own palette (the trailer is not kept).
+inline Result Load(Pack* p, const char* path, int wantW, int wantH, const uint8_t* stockPal, uint8_t* palOut = nullptr)
 {
     Free(p);
     const size_t maxLen = MaxFile(wantW, wantH);
@@ -148,6 +149,7 @@ inline Result Load(Pack* p, const char* path, int wantW, int wantH, const uint8_
     Result r = Scan(b, n, wantW, wantH, row, &used);
     if (r == kOk && stockPal && memcmp(b + n - kTrailer + 1, stockPal, 768) != 0) r = kWrongPalette;
     if (r != kOk) { free(b); free(row); return r; }
+    if (palOut) memcpy(palOut, b + n - kTrailer + 1, 768);
     if (used < n) {                                      // keep the stream only: any slack and the trailer go back
         if (uint8_t* shrunk = static_cast<uint8_t*>(realloc(b, used))) b = shrunk;
         n = used;

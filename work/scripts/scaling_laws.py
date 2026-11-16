@@ -15096,3 +15096,166 @@ def palette_box_shrink(src: List[List[int]], dw: int, dh: int, rgb: List[Tuple[i
             row.append(best)
         out.append(row)
     return out
+
+
+# ---- HD main menu (src/uimod/src/menuhd_law.h is the port) -------------------------------------------------------
+
+
+def menu_hd_layout(w: int, h: int, pic_w: int, pic_h: int, strip_w: int,
+                   pano_w: int) -> Tuple[int, int, int, int, int, int, int, int]:
+    """LAW (PROPORTIONATE, UNIFORM) -- a full-screen picture of pic_w x pic_h native pixels (the stock opening) with a
+    strip_w-wide right-aligned part (custom_planet's planet strips), composed on a w x h screen at one scale num/den,
+    from a panorama pano_w native pixels wide (its left part is the stock opening's, then starfield).
+    The opening fills the screen, so its scale comes from the screen, not from g (g is floored and capped; it would
+    leave gaps). Screens at least as wide as the picture's shape scale by height (num/den = h/pic_h): the left part
+    stays left-aligned and the strip right-aligned, the panorama's starfield fills the width between them. Narrower
+    screens scale by width (w/pic_w); the picture is anchored to the BOTTOM of the screen (the engine anchors the menu
+    there, so its last bar meets the picture's bottom edge) with black above.
+    The widest shape the panorama covers is (pano_w + strip_w) : pic_h (2804:768, about 32.9:9). A wider screen gets
+    the picture at that shape, RIGHT-aligned, with a plain black bar on the left: the engine anchors the menu bars to
+    the screen's right edge, so they stay on the planet strip (centred, at 5760x1080 the bars stood at x 5274 past the
+    strip's end at 4851). The art is never mirrored or repeated, and its edges stay its own.
+    Returns (num, den, x0, y0, core_w, core_h, strip_px, strip_x): core_h = fl(pic_h num/den), core_w = min(w,
+    fl((pano_w + strip_w) num/den)), x0 = w - core_w, y0 = h - core_h, strip_px = fl(strip_w num/den),
+    strip_x = x0 + core_w - strip_px. Identity at w x h = pic_w x pic_h: (n, n, 0, 0, pic_w, pic_h, strip_w,
+    pic_w - strip_w)."""
+    num, den = (h, pic_h) if w * pic_h >= h * pic_w else (w, pic_w)
+    core_h = pic_h * num // den
+    core_w = min(w, (pano_w + strip_w) * num // den)
+    x0 = w - core_w
+    strip_px = strip_w * num // den
+    return (num, den, x0, h - core_h, core_w, core_h, strip_px, x0 + core_w - strip_px)
+
+
+def menu_hd_moon_rect(layout: Tuple[int, ...], moon_w: int) -> Tuple[int, int, int, int]:
+    """custom_planet's erosive-forces moon (moon_w x moon_w native, at the picture's top-left corner in the stock
+    layout) on the composed screen: (x0, y0, fl(moon_w num/den), fl(moon_w num/den))."""
+    num, den, x0, y0 = layout[:4]
+    s = moon_w * num // den
+    return (x0, y0, s, s)
+
+
+def menu_hd_step(art: int, num: int, den: int) -> Tuple[int, int]:
+    """The resampler's step for art drawn `art` times the native size at scale num/den: sn/sd source pixels per screen
+    pixel, exactly (art * den / num, as integers -- never a float)."""
+    return art * den, num
+
+
+# The resampler (photographic: the menu's panorama, planet strips and moons). Separable and integer throughout, so
+# menuhd_law.h ports it exactly. Per axis, each screen pixel i takes integer weights summing to 256 (MENU_HD_ONE):
+#  * shrinking or 1:1 (sn >= sd): the area of each source pixel inside the footprint [i sn, (i+1) sn) (units 1/sd),
+#    weight = round(256 area / sn), the rounding remainder added to the largest (first) weight; a source index past
+#    the picture is OUTSIDE (-1);
+#  * enlarging (sn < sd): the mod's rule for enlarging photographic art -- mon_resample's Lanczos-3 taps and weights
+#    (mon_phase_weights; phase from c64 = ((2i+1) 32 sn + 32 sd) // sd - 64, mon_axis_taps' formula with the exact
+#    step), source indices clamped to the picture.
+# Each source pixel is (r, g, b) from ITS file's palette with coverage a = 1, or a = 0 when it is the key (moons:
+# file 255) or OUTSIDE a keyed picture; OUTSIDE an unkeyed one is black with a = 1. The horizontal pass sums
+# w (r a, g a, b a, a); the vertical pass sums those with the row weights: R, G, B, A at scale 256 x 256.
+# A keyed picture's screen pixel is the key (loaded 9) when 2 A < 65536 (more than half see-through) and takes no
+# error. Otherwise its colour is c = min(255, (C + A // 2) // A) for C > 0 and A > 0, else 0; then Floyd-Steinberg in
+# 1/16 units as mon_resample (7/16 right, 3/16 5/16 1/16 below; v = clamp(c + (e >> 4))) into the CANVAS colours
+# lo..hi-1 (the destination Buffer's synced RGBQUAD table): a colour that IS one of them takes that index exactly
+# (the lowest such index), any other mon_nearest_lut(canvas, lo, hi) -- so art already in the screen's colours is
+# reproduced exactly at 1:1 and at whole-number shrinks.
+MENU_HD_ONE = 256
+MENU_HD_KEY = 9
+
+
+def menu_hd_axis(n_dst: int, sn: int, sd: int, n_src: int) -> List[Tuple[Tuple[int, int], ...]]:
+    """Per screen pixel i in 0..n_dst-1: its ((source index or -1, weight), ...), weights summing to MENU_HD_ONE."""
+    out = []
+    if sn >= sd:
+        for i in range(n_dst):
+            a, b = i * sn, (i + 1) * sn
+            taps = []
+            for k in range(a // sd, (b - 1) // sd + 1):
+                ov = min(b, (k + 1) * sd) - max(a, k * sd)
+                taps.append([k if k < n_src else -1, (2 * MENU_HD_ONE * ov + sn) // (2 * sn)])
+            big = max(range(len(taps)), key=lambda t: (taps[t][1], -t))
+            taps[big][1] += MENU_HD_ONE - sum(t[1] for t in taps)
+            out.append(tuple((k, wt) for k, wt in taps))
+    else:
+        W = mon_phase_weights()
+        for i in range(n_dst):
+            c64 = ((2 * i + 1) * 32 * sn + 32 * sd) // sd - 64
+            ci, q = c64 >> 6, c64 & 63
+            out.append(tuple((min(n_src - 1, max(0, ci - 2 + t)), W[q][t]) for t in range(MON_TAPS)))
+    return out
+
+
+def menu_hd_resample(rows: List[bytes], sw: int, sh: int, pal: bytes, key: int, sn: int, sd: int, dw: int, dh: int,
+                     canvas: bytes, lo: int, hi: int, lut: Optional[List[int]] = None) -> List[bytearray]:
+    """REFERENCE of menuhd_law::Resample: the source (rows of sw indices, sh of them, colours pal = 768 RGB bytes;
+    key = the see-through index or -1) drawn dw x dh at sn/sd source pixels per screen pixel, from the source's
+    top-left, into canvas indices (canvas = 1024-byte RGBQUAD table, colours lo..hi-1). Returns dh rows."""
+    if lut is None:
+        lut = mon_nearest_lut(canvas, lo, hi)
+    exact = {}
+    for k in range(lo, hi):
+        exact.setdefault((canvas[k * 4 + 2], canvas[k * 4 + 1], canvas[k * 4]), k)
+    cols = menu_hd_axis(dw, sn, sd, sw)
+    taps_y = menu_hd_axis(dh, sn, sd, sh)
+    hcache: dict = {}
+
+    def hrow(r: int) -> List[int]:
+        o = hcache.get(r)
+        if o is None:
+            o = []
+            src = rows[r] if r >= 0 else None
+            for taps in cols:
+                R = G = B = A = 0
+                for k, wt in taps:
+                    if src is None or k < 0:
+                        if key < 0:
+                            A += wt                         # outside an unkeyed picture: black
+                        continue
+                    v = src[k]
+                    if v == key:
+                        continue
+                    p = v * 3
+                    R += wt * pal[p]
+                    G += wt * pal[p + 1]
+                    B += wt * pal[p + 2]
+                    A += wt
+                o += [R, G, B, A]
+            hcache[r] = o
+        return o
+
+    out = []
+    e0 = [0] * ((dw + 2) * 3)
+    e1 = [0] * ((dw + 2) * 3)
+    full = MENU_HD_ONE * MENU_HD_ONE
+    for j in range(dh):
+        line = bytearray(dw)
+        acc = [0] * (dw * 4)
+        for r, wt in taps_y[j]:
+            h_ = hrow(r)
+            for i in range(dw * 4):
+                acc[i] += wt * h_[i]
+        for i in range(len(e1)):
+            e1[i] = 0
+        for i in range(dw):
+            R, G, B, A = acc[i * 4:i * 4 + 4]
+            if key >= 0 and 2 * A < full:
+                line[i] = MENU_HD_KEY
+                continue
+            v = []
+            for ch, C in enumerate((R, G, B)):
+                c = min(255, (C + A // 2) // A) if C > 0 and A > 0 else 0
+                c += e0[(i + 1) * 3 + ch] >> 4
+                v.append(0 if c < 0 else 255 if c > 255 else c)
+            idx = exact.get((v[0], v[1], v[2]))
+            if idx is None:
+                idx = lut[((v[0] >> 3) << 10) | ((v[1] >> 3) << 5) | (v[2] >> 3)]
+            line[i] = idx
+            q = (canvas[idx * 4 + 2], canvas[idx * 4 + 1], canvas[idx * 4])
+            for ch in range(3):
+                d = v[ch] - q[ch]
+                e0[(i + 2) * 3 + ch] += d * 7
+                e1[i * 3 + ch] += d * 3
+                e1[(i + 1) * 3 + ch] += d * 5
+                e1[(i + 2) * 3 + ch] += d
+        e0, e1 = e1, e0
+        out.append(line)
+    return out
