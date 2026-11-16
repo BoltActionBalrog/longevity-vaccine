@@ -26,7 +26,8 @@ sys.path.insert(0, str(ROOT / "tests"))
 import cpp_harness  # noqa: E402
 
 SCENARIOS = ["off_holds_nothing", "new_game_and_levels", "overlays", "pack_damaged_later", "no_room",
-             "failed_after_a_level", "restore_from_every_level", "bad_pack", "rain_art", "rain_composites_only"]
+             "failed_after_a_level", "restore_from_every_level", "bad_pack", "rain_art", "rain_composites_only",
+             "bad_span_bytes"]
 
 
 @pytest.fixture(scope="module")

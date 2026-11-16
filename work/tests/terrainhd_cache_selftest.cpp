@@ -567,6 +567,17 @@ static void BadPack()
     Check(At(kExtractSites[0])[0] == 0xE8 && CallsTo(kExtractSites[0], kVA_Extract2), "nothing patched");
 }
 
+// A span store that is not the one the hook knows: not installed, nothing patched, no row, logged once.
+static void BadSpanBytes()
+{
+    WriteStock(); WriteIni(1);
+    At(kSpanSites[57])[0] = 0x90;
+    Install();
+    Check(!g_installed && Logged("unexpected bytes at a span store") == 1, "a changed span store: not installed");
+    Check(CallsTo(kExtractSites[0], kVA_Extract2) && CallsTo(kGenSites[0], kVA_GenTerrainPoly),
+          "nothing patched");
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 3) return 2;
@@ -627,6 +638,7 @@ int main(int argc, char** argv)
     else if (s == "failed_after_a_level") FailedAfterALevel();
     else if (s == "restore_from_every_level") RestoreFromEveryLevel();
     else if (s == "bad_pack") BadPack();
+    else if (s == "bad_span_bytes") BadSpanBytes();
     else if (s == "rain_art") RainArt();
     else if (s == "rain_composites_only") RainCompositesOnly();
     else return 2;

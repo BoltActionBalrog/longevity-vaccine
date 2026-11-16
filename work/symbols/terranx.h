@@ -1044,6 +1044,41 @@ extern int  Buffer_sync_to_palette(struct Buffer* self, struct Palette* pal);   
 extern int  Palette_get_rgbquad(/*ecx*/ struct Palette* self, void* dst, int start, int count); // addr: 0x005FE560  observed  thiscall RET 0xC; PALETTEENTRY (r,g,b,flags) -> RGBQUAD (b,g,r,0); ret 3 dst NULL / 7 HPALETTE 0x9B8178 NULL
 
 // ============================================================================
+// Textures and their rasterizers (terrainhd.cpp)
+// ============================================================================
+extern void Texture_ctor(struct Texture* self);                                // addr: 0x00619650  thinker   thiscall; bits +0, w +4, h +8, +0x6C heap flag = 0
+extern void Texture_close(struct Texture* self);                               // addr: 0x00619690  thinker   thiscall; frees bits (free 0x644EF2) unless +0x6C (TexHeap); zeroes +0/+4/+8/+0x6C
+extern int  Texture_extract_2(struct Texture* self, struct Buffer* src, int x, int y, int w, int h, void* heap); // addr: 0x00619710  thinker   thiscall RET 0x18; bits by mem_alloc (stride w), +0x0C..+0x68 corner coords from w/h; quiet returns 0x10 (no Buffer), 3 (rect outside), 7 (lock)
+extern void* mem_alloc(size_t n);                                              // addr: 0x005D4510  observed  cdecl; malloc, on null a message box + exit(4): never returns null
+extern void free(void* p);                                                     // addr: 0x00644EF2  observed  cdecl; CRT free (Texture_close's)
+extern void Texture_draw_trans(struct Texture* self, struct Buffer* dst, struct Vert* pts, int n, struct Vert* uvs);      // addr: 0x006198E0  thinker   thiscall; no caller in the exe
+extern int  Texture_draw_trans_2(struct Buffer* dst, struct Vert* pts, int octagon);                                    // addr: 0x0061A240  thinker   thiscall (ecx = Texture); UVs = the texture's own corners (+0x0C quad / +0x2C octagon)
+extern int  Texture_draw_upper_threshold_trans(struct Buffer* dst, struct Vert* pts, int n, struct Vert* uvs);         // addr: 0x0061A760  thinker   thiscall (ecx = Texture); fungus / Monsoon Jungle; edges from Texture_setup_edge
+extern int  Texture_draw(struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs);                    // addr: 0x0061B1F0  thinker   thiscall (ecx = Texture) RET 0x14; the visible ground (Texture_draw_2 mode -1)
+extern int  Texture_draw_trans_3(struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs);            // addr: 0x0061C090  thinker   thiscall (ecx = Texture) RET 0x14; quarter tiles
+extern int  Texture_draw_mask_dest(struct Buffer* dst, struct Vert* pts, uint8_t* code_layer, uint8_t* layer_tables, int n, struct Vert* uvs); // addr: 0x0061E540  thinker   thiscall (ecx = Texture); the territory border: a code's layer blends the destination
+extern int  Texture_draw_coast(struct Buffer* dst, struct Vert* pts, int* light, struct Texture* composite, uint8_t* coast_table, int n, struct Vert* uvs); // addr: 0x0061EAD0  thinker   thiscall (ecx = ocean Texture); one UV array for both textures
+extern int  Texture_setup_edge_gouraud(struct EdgeScan* e, int vert);          // addr: 0x0061FC90  thinker   cdecl; edge u << 16 + 0x8000 .. raw u1 << 16 (UVs at [0x9BB490])
+extern void Texture_draw_trans_dispatch(struct Texture* self, struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs, int mode); // addr: 0x00622DB0  observed  thiscall; Texture_draw_2's shape (mode -1 -> Texture_draw_trans_3); the terrain pass: modes 3, 9
+extern void Texture_draw_2(struct Texture* self, struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs, int mode); // addr: 0x006233C0  thinker   thiscall RET 0x18; mode -1 -> Texture_draw, else its own fog path (even rows flat)
+extern void Texture_draw_fungus(struct Texture* self, struct Buffer* dst, struct Vert* pts, int n, struct Vert* uvs, int mode); // addr: 0x006239E0  observed  thiscall; mode -1 -> Texture_draw_upper_threshold_trans
+extern int  Texture_draw_coast_2(struct Texture* self, struct Buffer* dst, struct Vert* pts, int* light, struct Texture* composite, uint8_t* coast_table, int n, struct Vert* uvs, int mode); // addr: 0x00623F80  thinker   thiscall RET 0x20; mode -1 -> Texture_draw_coast
+extern void Texture_draw_coast_dispatch(struct Texture* self, struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs, int a6, int mode); // addr: 0x00624670  observed  thiscall RET 0x1C; mode -1 -> 0x61AC60, else its own path
+extern int  Texture_setup_edge(struct EdgeScan* e, int vert);                  // addr: 0x00624D80  thinker   cdecl; edge raw u << 16 (no half texel)
+extern int32_t g_tex_span_u;                                                   // addr: 0x009BB4F8  observed  16.16 u of a span's left edge (captured per row; + du * clip)
+extern int32_t g_tex_span_v;                                                   // addr: 0x009BB53C  observed  16.16 v of a span's left edge
+extern int32_t g_tex_span_du;                                                  // addr: 0x009BB4E4  observed  16.16 u step per pixel (fistp from an FPU divide, per row)
+extern int32_t g_tex_span_dv;                                                  // addr: 0x009BB4C8  observed  16.16 v step per pixel
+extern uint8_t* g_tex_bits;                                                    // addr: 0x009BB544  observed  the drawn Texture's bits (each rasterizer sets it first)
+extern int32_t* g_tex_uvs;                                                     // addr: 0x009BB490  observed  the polygon's UV list (an argument, or the texture's own corners)
+extern int32_t g_terrain_uv_quads[32];                                         // addr: 0x00685CA8  observed  terrain pass UVs: quarter-tile quads (0..55)
+extern int32_t g_terrain_uv_polys[56];                                         // addr: 0x00686090  observed  terrain pass UVs: triangles and quads (0..55)
+extern uint8_t g_coast_colours[53];                                            // addr: 0x006846F8  observed  RAINFALL.PCX colours -> coast codes 0..52 (load_terrain remap)
+extern struct Texture g_coast_composite;                                       // addr: 0x0076E8A0  observed  56x56 code map from RAINFALL.PCX (2,333); sampled with the ocean tile through one UV array
+extern struct Texture g_coast_composite_2;                                     // addr: 0x0076E910  observed  56x56 code map from RAINFALL.PCX (59,333); no reader outside load_terrain
+extern struct Texture g_territory_border;                                      // addr: 0x0078DD80  observed  60x60 code map from RAINFALL.PCX (2,254), 9 colours, background 9; UV square 0..0x3B
+
+// ============================================================================
 // GraphicWin (window draw surface)
 // ============================================================================
 extern void GraphicWin_ctor(struct GraphicWin* self);                          // addr: 0x005D4CF0  thinker   on malloc(0xA14) block

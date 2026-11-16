@@ -2,6 +2,11 @@
 
 UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
+## Unreleased
+
+### HD art
+- HD terrain textures: a pack in the game's `terrain` folder (`texture_x8.pcx`, and optionally `rainfall_x8.pcx` for coastlines and territory borders) replaces the map's ground, rivers, forests, fungus, roads and coasts with high-resolution art, everywhere the terrain is drawn. Switch it with HD Terrain in Longevity Mod Preferences.
+
 ## 1.0.0 -- 2026-11-08
 
 ### High-resolution UI scaling
