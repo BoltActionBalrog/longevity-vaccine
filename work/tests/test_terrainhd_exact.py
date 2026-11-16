@@ -168,6 +168,8 @@ class Raster:
             args = (self.dst, pa, la, n, ua, 0x10, mode & 0xFFFFFFFF)
         elif fn == TEX_DRAW_TRANS_2:                               # (dst, pts, octagon): its UVs are the texture's
             args = (self.dst, pa, mode)                            # own corners (+0x0C quad, +0x2C octagon)
+        elif fn == TEX_DRAW_MASK_DEST:                             # (dst, pts, code -> layer, layer tables, n,
+            args = (self.dst, pa, self.layers, self.blend, n, ua)  # uvs): the territory border, 0x465340
         elif fn == TEX_DRAW_COAST_2:                               # (dst, pts, light, composite, coast table, n,
             args = (self.dst, pa, la, self.composite, self.table, n, ua, mode & 0xFFFFFFFF)   # uvs, mode): 0x46547C
         else:
@@ -190,6 +192,17 @@ TEX_DRAW_COAST_DISPATCH, TEX_DRAW_TRANS_2, TEX_DRAW_COAST_2 = 0x624670, 0x61A240
 # the coast: an ocean texture and a RAINFALL composite through ONE UV array, the composite's texel picking land (0),
 # the shaded ocean texel (1) or a flat shore colour through the per-coast-type table
 DRAWS += [("coast (0x623F80 mode -1)", TEX_DRAW_COAST_2, -1), ("coast (0x623F80 mode 0x41)", TEX_DRAW_COAST_2, 0x41)]
+# the territory border: a 60x60 code texture (RAINFALL's, codes 0..9), each code a layer (0: not drawn) blending the
+# destination through that layer's 256-byte table
+TEX_DRAW_MASK_DEST = 0x61E540
+DRAWS += [("border (0x61E540)", TEX_DRAW_MASK_DEST, 0)]
+
+
+def textures(r, fn, k):
+    """The stock texture and the level-k one a draw uses: the border has its own."""
+    if fn == TEX_DRAW_MASK_DEST:
+        return r.border[1], r.border.get(k)
+    return r.stock, (r.hd[k] if k != 1 else None)
 
 
 def shapes(fn, mode, polys):
@@ -219,8 +232,15 @@ def world(stubs):
     r.table = r.e.alloc(256)
     r.e.uc.mem_write(r.table, bytes((0, 1, 200 + v % 40)[v % 3] if v % 3 < 2 else 200 + v % 40 for v in range(256)))
     r.composite = comp_stock
+    border_img = rnd.integers(0, 10, (60, 60), dtype=np.uint8)
+    r.border = {1: r.texture(border_img)}
+    r.layers = r.e.alloc(256)
+    r.e.uc.mem_write(r.layers, bytes(v % 3 for v in range(256)))       # codes 0, 3, 6, 9: not drawn
+    r.blend = r.e.alloc(512)
+    r.e.uc.mem_write(r.blend, bytes((v * 7 + 13) & 255 for v in range(256)) + bytes((v * 11 + 101) & 255 for v in range(256)))
     polys = polygons()
-    before = {(name, i): r.draw(fn, stock, pts, uv, mode)
+    r.stock = stock
+    before = {(name, i): r.draw(fn, textures(r, fn, 1)[0], pts, uv, mode)
               for name, fn, mode in DRAWS for i, (pts, uv) in enumerate(shapes(fn, mode, polys)[:24])}
     hd = {}
     corners = bytes(r.e.uc.mem_read(stock + 0x0C, 0x60))
@@ -228,6 +248,11 @@ def world(stubs):
         big = np.array(SL.terrain_hd_nearest(stock_img.tolist(), k), np.uint8)
         hd[k] = r.texture(big)
         r.e.uc.mem_write(hd[k] + 0x0C, corners)                    # as GiveBits: the stock corner coordinates
+    border60 = bytes(r.e.uc.mem_read(r.border[1] + 0x0C, 0x60))
+    for k in (2, 4, 8):
+        r.border[k] = r.texture(np.array(SL.terrain_hd_nearest(border_img.tolist(), k), np.uint8))
+        r.e.uc.mem_write(r.border[k] + 0x0C, border60)                # as GiveBits: a 60x60 cut's corners
+    r.hd = hd
     r.patch(stubs, 2, [])
     r.comp = {1: comp_stock}
     for k in (2, 4, 8):
@@ -239,11 +264,11 @@ def world(stubs):
 
 def test_a_texture_not_ours_draws_as_before_the_stubs(world):
     r, stock, hd, polys, before = world
-    r.set_ours(4, [hd[4], r.comp[4]])
+    r.set_ours(4, [hd[4], r.comp[4], r.border[4]])
     r.composite = r.comp[1]
     for name, fn, mode in DRAWS:
         for i, (pts, uv) in enumerate(shapes(fn, mode, polys)[:24]):
-            assert (r.draw(fn, stock, pts, uv, mode) == before[(name, i)]).all(), (name, i)
+            assert (r.draw(fn, textures(r, fn, 1)[0], pts, uv, mode) == before[(name, i)]).all(), (name, i)
 
 
 @pytest.mark.parametrize("k", [2, 4, 8])
@@ -251,13 +276,14 @@ def test_a_texture_not_ours_draws_as_before_the_stubs(world):
 def test_switching_the_level_moves_no_pixel(world, k, draw):
     r, stock, hd, polys, _ = world
     name, fn, mode = draw
-    r.set_ours(k, [hd[k], r.comp[k]])
+    r.set_ours(k, [hd[k], r.comp[k], r.border[k]])
     covered = 0
+    lo, hi = textures(r, fn, k)
     for i, (pts, uv) in enumerate(shapes(fn, mode, polys)):
         r.composite = r.comp[1]
-        a = r.draw(fn, stock, pts, uv, mode)
+        a = r.draw(fn, lo, pts, uv, mode)
         r.composite = r.comp[k]
-        b = r.draw(fn, hd[k], pts, uv, mode)
+        b = r.draw(fn, hi, pts, uv, mode)
         covered += int((a != 255).sum())
         diff = int((a != b).sum())
         assert diff == 0, (name, k, i, diff, int((a != 255).sum()))

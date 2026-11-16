@@ -90,6 +90,9 @@ static std::string Num(long long v) { return std::to_string(v); }
 
 constexpr int kSheetTex = 6, kRainTex = 2, kAll = kSheetTex + kRainTex;
 alignas(16) static uint8_t g_tex[kAll][kTexSize];      // the "static" Textures load_terrain cuts into
+alignas(16) static uint8_t g_borderTex[kTexSize];       // the territory border (60x60, from its own Buffer)
+alignas(16) static uint8_t g_borderBuf[kBufSize + 0x80];
+static uint8_t g_borderPx[60][60];
 alignas(16) static uint8_t g_rainBuf[kBufSize + 0x80];  // the local buffer the RAINFALL composites come from
 static uint8_t g_stockSheet[768][1024];                 // TEXTURE.PCX as loaded (file + 10)
 static uint8_t g_rainPx[56][112];
@@ -132,10 +135,31 @@ static std::string PackPathT() { return g_root + "terrain\\texture_x8.pcx"; }
 
 static void WriteStock()
 {
+    for (const char* name : { "texture.pcx", "rainfall.pcx" }) {
+        FILE* f = nullptr;
+        fopen_s(&f, (g_root + name).c_str(), "wb");
+        Header(f, 1, 1);
+        fputc(0, f);
+        Trailer(f);
+        fclose(f);
+    }
+}
+
+// terrain\rainfall_x8.pcx: see-through (255) but for the composite region (both cells: colour kCompColours[5]) and
+// the border region (kBorderColours[3]), each when asked for
+static void WriteRainPack(bool comp, bool border)
+{
+    const int W = 640 * 8, H = 480 * 8;
     FILE* f = nullptr;
-    fopen_s(&f, (g_root + "texture.pcx").c_str(), "wb");
-    Header(f, 1, 1);
-    fputc(0, f);
+    fopen_s(&f, (g_root + "terrain\\rainfall_x8.pcx").c_str(), "wb");
+    Header(f, W, H);
+    std::vector<uint8_t> row(W);
+    for (int y = 0; y < H; ++y) {
+        memset(row.data(), 255, W);
+        if (comp && y >= 333 * 8 && y < 389 * 8) memset(row.data() + 2 * 8, kCompColours[5], 113 * 8);
+        if (border && y >= 254 * 8 && y < 314 * 8) memset(row.data() + 2 * 8, kBorderColours[3], 60 * 8);
+        WriteRle(f, row.data(), W);
+    }
     Trailer(f);
     fclose(f);
 }
@@ -212,6 +236,21 @@ static void LoadTerrain()
         ExtractRecorder(T(g_tex[i]), nullptr, At(kVA_LoadingCanvas), CellX(i), CellY(i), 56, 56, nullptr);
     for (int i = 0; i < kRainTex; ++i)
         ExtractRecorder(T(g_tex[kSheetTex + i]), nullptr, g_rainBuf, 56 * i, 0, 56, 56, nullptr);
+    ExtractRecorder(T(g_borderTex), nullptr, g_borderBuf, 0, 0, 60, 60, nullptr);
+}
+
+static bool BorderStock()
+{
+    const Texture* t = T(g_borderTex);
+    if (t->w != 60 || t->h != 60 || !t->data) return false;
+    for (int y = 0; y < 60; ++y) if (memcmp(t->data + y * 60, g_borderPx[y], 60) != 0) return false;
+    return true;
+}
+
+static bool BorderListed()
+{
+    for (uint32_t i = 0; i < g_span.count; ++i) if (g_span.ptrs[i] == T(g_borderTex)->data) return true;
+    return false;
 }
 
 static void Pass() { GenTerrainPolyHook(nullptr, nullptr, 0, 0, 0, 0, 0, 0, 0, 0); }
@@ -224,10 +263,11 @@ static void Screen(int w, int h)
 }
 
 // the span stubs' list of ours: the recorded textures' bits and log2 k at a level, empty at stock
+static bool BorderListed();
 static bool SpanListIs(int k)
 {
     if (k == 1) return g_span.count == 0 && g_span.levelShift == 0;
-    if (g_span.count != static_cast<uint32_t>(kAll) || g_span.levelShift != static_cast<uint32_t>(k == 2 ? 1 : k == 4 ? 2 : 3))
+    if (g_span.count != static_cast<uint32_t>(kAll + (BorderListed() ? 1 : 0)) || g_span.levelShift != static_cast<uint32_t>(k == 2 ? 1 : k == 4 ? 2 : 3))
         return false;
     for (int i = 0; i < kAll; ++i) if (g_span.ptrs[i] != T(g_tex[i])->data) return false;
     return true;
@@ -264,7 +304,7 @@ static bool StockPixels()
 // off / failed: the stock textures and UVs, no stock copy, no overlay copy, only the textures' own bits
 static bool HoldsNothing()
 {
-    return !g_stock && g_level == 1 && SpanListIs(1) && g_liveBits == kAll;
+    return !g_stock && g_level == 1 && SpanListIs(1) && g_liveBits == kAll + 1 && BorderStock();
 }
 
 static int Logged(const char* needle)
@@ -300,6 +340,14 @@ static void MakeImage()
     for (int y = 0; y < 56; ++y)
         for (int x = 0; x < 112; ++x) g_rainPx[y][x] = static_cast<uint8_t>(100 + (x + y) % 50);
     SetBuffer(g_rainBuf, g_rainPx, 112, 56, 112);
+    for (int y = 0; y < 60; ++y)
+        for (int x = 0; x < 60; ++x) g_borderPx[y][x] = static_cast<uint8_t>((x + y) % 10);
+    SetBuffer(g_borderBuf, g_borderPx, 60, 60, 60);
+    memcpy(At(kVA_CompColours), kCompColours, sizeof kCompColours);
+    for (int i = 0; i < 9; ++i) {
+        BYTE* m = At(kVA_BorderMovs) + 4 * i;
+        m[0] = 0xC6; m[1] = 0x45; m[2] = static_cast<BYTE>(0xE4 + i); m[3] = kBorderColours[i];
+    }
 }
 
 static void Install()
@@ -322,7 +370,7 @@ static void OffHoldsNothing()
     WriteStock(); WriteIni(0);
     Install();
     Check(g_installed && g_on == 0, "installed, off from the ini");
-    Check(Logged("installed: terrain\\texture_x8.pcx (21") == 1 && Logged(" for 0x0") == 0,
+    Check(Logged("installed: terrain\\texture_x8.pcx (22") == 1 && Logged(" for 0x0") == 0,
           "the install line names no level (the screen is not known yet)");
     LoadTerrain();
     Pass();
@@ -371,7 +419,7 @@ static void NewGameAndLevels()
     const uint8_t c = static_cast<uint8_t>(FileIndex(4) + 10), m = static_cast<uint8_t>(kMark + 10);
     Check(t->data[2 * 448 + 1] == m && t->data[2 * 448 + 0] == c && t->data[2 * 448 + 2] == c && t->data[448 + 1] == c,
           "8x: the cell as painted (its 1-px mark kept where it is)");
-    Check(g_liveBits == kAll, "one block of bits per texture", Num(g_liveBits));
+    Check(g_liveBits == kAll + 1, "one block of bits per texture", Num(g_liveBits));
 }
 
 // PRACX's Alt+T overlays (and every texture not cut by load_terrain) are never in the list of ours: the span stubs
@@ -391,7 +439,7 @@ static void Overlays()
     for (uint32_t i = 0; i < g_span.count; ++i) listed |= g_span.ptrs[i] == o->data;
     Check(g_level == 4 && SpanListIs(4) && !listed && o->data == g_overlayBits && o->w == 56,
           "at 4x: the overlay is not ours, untouched, nothing copied");
-    Check(g_liveBits == kAll, "no copy allocated", Num(g_liveBits));
+    Check(g_liveBits == kAll + 1, "no copy allocated", Num(g_liveBits));
 }
 
 // The pack damaged after install: the level is refused once (one read, one log line), then every later pass does no
@@ -457,6 +505,39 @@ static void FailedAfterALevel()
     TerrainHdSet(0);
     Check(HoldsNothing(), "off after the failure: nothing held");
     g_testNoRoom = false;
+}
+
+// RAINFALL art for both pieces: the composites and the border are code maps from it (the border 60k wide, in the list,
+// with a 60x60 cut's corner coordinates); off puts the border's stock pixels back. Without the border's piece the
+// border stays stock and is not ours; without rainfall_x8.pcx at all (every other scenario) the same.
+static void RainArt()
+{
+    WriteStock(); WriteRainPack(true, true); WriteIni(1);
+    Install();
+    LoadTerrain();
+    Pass();
+    const Texture* c = T(g_tex[kSheetTex]);
+    const Texture* b = T(g_borderTex);
+    bool comp5 = c->w == 224, bord3 = b->w == 240;
+    for (int i = 0; comp5 && i < 224 * 224; ++i) comp5 = c->data[i] == 5;
+    for (int i = 0; bord3 && i < 240 * 240; ++i) bord3 = b->data[i] == 3;
+    Check(g_level == 4 && comp5, "a composite is the art's code map (colour 5 of the list -> 5)");
+    Check(bord3 && BorderListed() && SpanListIs(4), "the border is the art's code map at 4x, and ours");
+    Check(reinterpret_cast<const int32_t*>(b)[0x14 / 4] == 59 && reinterpret_cast<const int32_t*>(b)[0x20 / 4] == 59,
+          "the border keeps a 60x60 cut's corner coordinates");
+    Check(Logged("2 from rainfall_x8.pcx") == 0 && Logged("3 from rainfall_x8.pcx") == 1, "logged: 3 from the art");
+    TerrainHdSet(0);
+    Check(BorderStock() && StockPixels() && HoldsNothing(), "off: the border's stock pixels back, nothing held");
+}
+
+static void RainCompositesOnly()
+{
+    WriteStock(); WriteRainPack(true, false); WriteIni(1);
+    Install();
+    LoadTerrain();
+    Pass();
+    Check(g_level == 4 && T(g_tex[kSheetTex])->data[0] == 5, "the composites from the art");
+    Check(BorderStock() && !BorderListed() && SpanListIs(4), "no border in the art: the border stock, not ours");
 }
 
 // Back to stock from every level never leaves a texture without bits, and each texture holds one block.
@@ -529,7 +610,7 @@ int main(int argc, char** argv)
         g_eng.free = &FakeFree;
         for (int side : { 56, 112, 224, 448 }) {
             alignas(16) uint8_t t[kTexSize] = {};
-            GiveBits(T(t), side, [](uint8_t*) {});
+            GiveBits(T(t), side, 56, [](uint8_t*) {});
             std::printf("%d", side);
             for (int off = 0; off < kTexSize; off += 4) if (off) std::printf(" %d", *reinterpret_cast<int32_t*>(t + off));
             std::printf("\n");
@@ -546,6 +627,8 @@ int main(int argc, char** argv)
     else if (s == "failed_after_a_level") FailedAfterALevel();
     else if (s == "restore_from_every_level") RestoreFromEveryLevel();
     else if (s == "bad_pack") BadPack();
+    else if (s == "rain_art") RainArt();
+    else if (s == "rain_composites_only") RainCompositesOnly();
     else return 2;
     return g_fails ? 1 : 0;
 }

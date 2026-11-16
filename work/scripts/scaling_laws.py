@@ -15321,6 +15321,26 @@ def terrain_hd_level(w: int, h: int) -> int:
     return TERRAIN_HD_MAX_LEVEL
 
 
+def terrain_hd_code(x8: List[List[int]], cols: List[int], bg: int, k: int) -> List[List[int]]:
+    """LAW (the engine's rule, at a level) -- a RAINFALL code map from the pack's 8x region of RAINFALL.PCX (file
+    indices). load_terrain cuts the coast composites (RAINFALL.PCX at 2,333 and 59,333, 56 x 56) and the territory
+    border (2,254, 60 x 60) by drawing that region through a remap table into a fresh Buffer: a texel is the index of
+    its colour in the list (53 at 0x6846F8 for the composites, 9 for the border), bg for the see-through 255 (0, and
+    9 for the border's Buffer_fill), 0 for any other colour -- measured: the rule rebuilds the engine's three textures
+    exactly (load_terrain's own code under emulation). A code is a class, not a colour, so a level k < 8 samples the
+    centre of each 8/k block instead of averaging."""
+    s = TERRAIN_HD_MASTER // k
+    m = len(x8) // s
+    out = []
+    for y in range(m):
+        row = []
+        for x in range(m):
+            v = x8[y * s + s // 2][x * s + s // 2]
+            row.append(bg if v == 255 else (cols.index(v) if v in cols else 0))
+        out.append(row)
+    return out
+
+
 def terrain_hd_nearest(src: List[List[int]], k: int) -> List[List[int]]:
     """LAW -- a texture the pack does not supply (the two RAINFALL composites, PRACX's Alt+T overlays) at level k:
     each stock texel a k x k block. Exactly the stock picture at the HD size, so it samples like stock."""

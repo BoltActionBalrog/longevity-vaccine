@@ -35,6 +35,22 @@ int main()
             terrainhd::Nearest(src.data(), n, k, dst.data());
             for (uint8_t v : dst) std::printf("%02x", v);
             std::printf("\n");
+        } else if (!std::strcmp(mode, "code") && got == 4) {   // hex: ncols, cols, bg, the 8n x 8n region
+            const int n = a, k = b;
+            std::vector<uint8_t> in(std::strlen(hex) / 2);
+            for (size_t i = 0; i < in.size(); ++i) {
+                unsigned v = 0;
+                std::sscanf(hex + 2 * i, "%2x", &v);
+                in[i] = static_cast<uint8_t>(v);
+            }
+            const int ncols = in[0];
+            const uint8_t* cols = in.data() + 1;
+            const uint8_t bg = in[1 + ncols];
+            const uint8_t* region = in.data() + 2 + ncols;
+            std::vector<uint8_t> dst(n * k * n * k);
+            terrainhd::Code(region, n * terrainhd::kMaster, n, cols, ncols, bg, k, dst.data());
+            for (uint8_t v : dst) std::printf("%02x", v);
+            std::printf("\n");
         } else std::printf("?\n");
         std::fflush(stdout);
     }

@@ -40,6 +40,24 @@ inline int Level(int w, int h)
     return kMaxLevel;
 }
 
+// scaling_laws.terrain_hd_code: a RAINFALL code map (the coast composites, the territory border) at level k from the
+// pack's 8x region of RAINFALL.PCX (file indices, row stride pitch): each texel samples the centre of its 8/k block and
+// takes the engine's rule -- the index of its colour in cols, bg for the see-through 255, 0 for any other colour.
+inline void Code(const uint8_t* x8, int pitch, int n, const uint8_t* cols, int ncols, uint8_t bg, int k, uint8_t* out)
+{
+    const int s = kMaster / k, m = n * k;
+    for (int y = 0; y < m; ++y)
+        for (int x = 0; x < m; ++x) {
+            const uint8_t v = x8[(y * s + s / 2) * pitch + x * s + s / 2];
+            uint8_t c = 0;
+            if (v == 255) c = bg;
+            else
+                for (int i = 0; i < ncols; ++i)
+                    if (cols[i] == v) { c = static_cast<uint8_t>(i); break; }
+            out[y * m + x] = c;
+        }
+}
+
 // scaling_laws.terrain_hd_nearest: an n x n index image at k x (each texel a k x k block).
 inline void Nearest(const uint8_t* src, int n, int k, uint8_t* dst)
 {

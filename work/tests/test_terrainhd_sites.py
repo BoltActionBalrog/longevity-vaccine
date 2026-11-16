@@ -102,10 +102,22 @@ def src_const(name):
     return int(m.group(1), 0)
 
 
-def test_load_terrains_cuts_are_the_hooked_21_and_the_60x60(img):
+def test_load_terrains_cuts_are_all_22_hooked(img):
+    """The 19 TEXTURE.PCX cuts, the 2 coast composites and the 60x60 territory border (mov ecx, 0x78DD80)."""
     assert calls(img, LOAD_TERRAIN, LOAD_TERRAIN_END, EXTRACT2) == SHEET_CUTS + RAIN_CUTS + [CUT_60]
-    assert rd(img, CUT_60 - 4, 4) == struct.pack("<I", 0x78DD80)          # mov ecx, 0x78DD80
-    assert src_list("kExtractSites") == SHEET_CUTS + RAIN_CUTS
+    assert rd(img, CUT_60 - 4, 4) == struct.pack("<I", 0x78DD80)
+    assert src_list("kExtractSites") == SHEET_CUTS + RAIN_CUTS + [CUT_60]
+
+
+def test_the_rainfall_code_maps_colour_lists_are_the_sources(img):
+    """load_terrain draws the coast composites through the 53 colours at 0x6846F8 and the border through 9 colours it
+    writes with `mov byte [ebp - 0x1C + i], c` at 0x452307; the hook builds its code maps with the same lists (and
+    turns the RAINFALL art off if they differ)."""
+    comp = re.search(r"kCompColours\[53\] = \{([^}]*)\}", HD).group(1)
+    assert rd(img, 0x6846F8, 53) == bytes(int(v) for v in re.findall(r"\d+", comp))
+    border = re.search(r"kBorderColours\[9\] = \{([^}]*)\}", HD).group(1)
+    cols = [int(v, 16) for v in re.findall(r"0x[0-9A-F]+", border)]
+    assert rd(img, 0x452307, 36) == b"".join(bytes([0xC6, 0x45, 0xE4 + i, c]) for i, c in enumerate(cols))
 
 
 def test_every_terrain_pass_call_is_hooked(img):
@@ -229,7 +241,8 @@ def test_pracx_swaps_its_overlays_into_texture_draw_2(pe):
 def test_no_patch_site_overlaps_what_the_hook_checks_or_writes(pe):
     sites, _g, _c, _sym = ap.load_patches(pathlib.Path(ap.DEFAULT_PATCHES))
     assert len(sites) > 1000
-    ours = [(s, 5) for s in SHEET_CUTS + RAIN_CUTS + GEN_SITES] + [(s, 6) for s in src_list("kSpanSites")]
+    ours = [(s, 5) for s in SHEET_CUTS + RAIN_CUTS + [CUT_60] + GEN_SITES] + [(s, 6) for s in src_list("kSpanSites")]
+    ours += [(0x6846F8, 53), (0x452307, 36)]                       # the RAINFALL colour lists the hook checks
     ours += [(src_const(n), 6) for n in ENGINE_FNS]
     span = {s["id"]: s.get("length") or len(s.get("original_bytes", "").split()) or 5 for s in sites}
     hits = [(s["id"], hex(s["virtual_addr"])) for s in sites for o, n in ours

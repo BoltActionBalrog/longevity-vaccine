@@ -62,6 +62,17 @@ def test_span_law_samples_the_block_of_the_stock_texel():
     assert SL.terrain_hd_span(56 << 16, 8) < 2 ** 31
 
 
+def test_code_map_follows_the_engine_rule_and_samples_block_centres():
+    cols = [7, 9, 11]
+    x8 = [[(7 if (x // 8 + y // 8) % 2 else 255) for x in range(16)] for y in range(16)]
+    x8[4][12] = 11                                                # the centre of 1x block (0, 1)
+    assert SL.terrain_hd_code(x8, cols, 9, 8)[0][0] == 9          # 8x: the region as painted; 255 -> background
+    assert SL.terrain_hd_code(x8, cols, 9, 1) == [[9, 2], [0, 9]]  # 1x: block centres; 11 -> 2, 7 -> 0
+    two = SL.terrain_hd_code(x8, cols, 9, 2)                      # 2x samples (2 + 4j): (4, 12) is not one
+    assert two[1][3] == 0 and two[0][0] == 9 and len(two) == 4
+    assert SL.terrain_hd_code([[3] * 8] * 8, cols, 9, 1) == [[0]]  # a colour not in the list -> 0
+
+
 def test_nearest_is_blocks_of_stock():
     src = [[1, 2], [3, 4]]
     assert SL.terrain_hd_nearest(src, 2) == [[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]]
@@ -99,6 +110,13 @@ def test_port_matches_the_python(port):
         img = [[rnd.randrange(256) for _ in range(n)] for _ in range(n)]
         cases.append(f"nearest {n} {k} " + "".join(f"{v:02x}" for row in img for v in row))
         want.append("".join(f"{v:02x}" for row in SL.terrain_hd_nearest(img, k) for v in row))
+    for n, k in ((2, 8), (3, 4), (5, 2), (6, 4)):
+        cols = rnd.sample(range(255), 9)
+        bg = rnd.choice((0, 9))
+        region = [[rnd.choice(cols + [255, 254, 3]) for _ in range(8 * n)] for _ in range(8 * n)]
+        blob = bytes([len(cols)] + cols + [bg] + [v for row in region for v in row])
+        cases.append(f"code {n} {k} " + blob.hex())
+        want.append("".join(f"{v:02x}" for row in SL.terrain_hd_code(region, cols, bg, k) for v in row))
     got = run(port, cases)
     bad = [(c[:40], g[:40], w[:40]) for c, g, w in zip(cases, got, want) if g != w]
     assert not bad, bad[:5]
