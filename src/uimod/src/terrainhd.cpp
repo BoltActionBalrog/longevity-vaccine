@@ -1,9 +1,9 @@
 // terrainhd.cpp -- drop-in HD terrain textures (GitHub issue #1: "the ability to drop-in their own custom terrain
 // packs", like the custom portrait files). First written by Nidhogg-chew-root (terrain-hd-hook); reworked for the
-// review of 2026-11-12.
+// reviews of 2026-11-12 and 2026-11-16.
 //
 // The pack: <game>\terrain\texture_x8.pcx, TEXTURE.PCX redrawn at 8x (8192 x 6144), 8-bit, in the STOCK file's
-// palette and indices -- the rasterizer shades by adding to the index (Texture_draw_2's `add al, ch`), so a pack in
+// palette and indices -- the rasterizer shades by adding to the index (Texture_draw's `add al, ch`), so a pack in
 // another palette layout shades into the wrong colours. hdpack::Load proves it (bounded scan, size, the stock
 // TEXTURE.PCX palette) and keeps only its RLE stream.
 //
@@ -19,41 +19,51 @@
 //    with Texture_extract_2 0x619710 from 19 call sites (0x451D0B..0x452171), 56x56, TexHeap 0: each Texture owns a
 //    w*h copy whose row stride is its width. Two more (0x4522CA / 0x4522E5) are composited from RAINFALL.PCX through
 //    a local buffer.
-//  * Every rasterizer steps rows by the texture's own width, so a 56k x 56k texture draws on the same polygon given
-//    UVs that span 56k texels. The terrain pass's UVs come from two .data tables -- 0x685CA8 (32 dwords: quarter-tile
-//    quads) and 0x686090 (56: triangles and quads) -- and eight `mov r32, 0x37` (seven in MapWin_gen_terrain_poly,
-//    one in DatalinkWin_draw_terraform 0x431180). Law: terrainhd::Uv (measured on Texture_draw_2 itself).
-//  * Some draws sample two textures through ONE UV array (the coast pass: a TEXTURE.PCX tile + a RAINFALL
-//    composite), so every 56x56 terrain texture is at the level together. The 60x60 texture 0x78DD80 has its own UV
-//    square (0x3B) and is left as it is.
-//  * PRACX's Alt+T views (faction / elevation / rainfall / rockiness) swap their own 56x56 images (cut from ICONS.PCX
-//    into prax.dll) into the call at 0x464215 / 0x464353 and draw them with the same UVs through Texture_draw_2.
+//  * Every textured draw goes through one of ten rasterizers. Each sets the drawn texture's bits pointer (0x9BB544)
+//    at its start and steps rows by the texture's own width; per span it captures the left edge's u, v (0x9BB4F8,
+//    0x9BB53C, from the edge walkers 0x61FC90 / 0x624D80) and stores the per-pixel steps du, dv (0x9BB4E4,
+//    0x9BB4C8, by fistp, from a floating-point divide). Those four stores are the only writes of a span's texture
+//    coordinates besides the clipping pre-step, which adds du * clip to them. There are 25 span setups, 4 stores
+//    each: kSpanSites.
+//  * The texture coordinates themselves (two UV tables, eight 0x37 immediates, the composites' UVs, PRACX's Alt+T
+//    images swapped into 0x464215 / 0x464353) stay stock.
 //
-// Levers, all byte-checked, all-or-nothing, cave-free:
+// Placement, exact: a texture at level k is the stock picture with each texel a k x k block (or the pack's redraw of
+// it). Each of the 100 span stores runs as stock and is then multiplied by k (shl log2 k) when the bits being drawn
+// are ours; the pre-step then adds k du * clip to k u. So every coordinate the rasterizer samples is exactly k times
+// the stock one -- the same integer texel at stock, the k x k block it became at the level -- and with the same
+// picture, switching the row changes no pixel (test_terrainhd_exact.py: the real rasterizers under emulation, every
+// span setup the exe can reach but the 60x60 border's; 13 of the 25 are in functions nothing calls). A texture's own
+// corner coordinates (+0x0C..+0x68: Texture_draw_trans_2's and the coast's UVs) stay a 56 x 56 cut's for the same
+// reason.
+// Everything not ours (PRACX's overlays, the 60x60 texture 0x78DD80, every non-terrain texture) is multiplied by 1:
+// drawn natively.
+//
+// Levers, all byte-checked, all-or-nothing:
 //  * the 21 extract calls -> ExtractRecorder: which Texture is which TEXTURE.PCX rect (or a RAINFALL composite).
 //  * the 8 calls of MapWin_gen_terrain_poly 0x4632D0 -> GenTerrainPolyHook: the level is cut (if the textures are
-//    stock and the row is on) before any texture is read, on the game thread; and the pass is marked for the next.
-//  * Texture_draw_2's entry (6 bytes, checked, moved to a trampoline) -> Draw2Hook: inside a terrain pass at a level,
-//    a 56x56 texture is one we did not cut (PRACX's overlays): it is drawn from a k x nearest copy, so it is read
-//    inside its bounds and looks exactly like stock.
-//  * a level is installed by giving every recorded Texture new bits at 56k x 56k, then rewriting the UV tables and
-//    immediates. The bits are allocated the way Texture_extract_2 allocates them (mem_alloc 0x5D4510; the old ones
-//    freed with free 0x644EF2, as Texture_close does) and filled directly: no Buffer, so no quiet failure in between.
-//    TEXTURE.PCX's textures come from the pack (each 8x cell shrunk to the level by basehd_law::PaletteBoxShrink, used
-//    as painted at 8x); the RAINFALL composites, which the pack does not carry, are terrainhd::Nearest of their own
-//    stock pixels. Back to stock the same way, texture by texture from the stock copy: a step that cannot fail
-//    quietly, so the textures are always all stock or all at the level, and every recorded texture always has bits.
+//    stock and the row is on) before any texture is read, on the game thread.
+//  * the 100 span stores -> a call into a stub (the store as it was, then the multiply; registers and flags kept):
+//    SpanStubs. A stub decides by the bits pointer: the last one is cached; a new one is looked up in the list of
+//    ours (repne scasd, no C, no FPU, so the rasterizer's floating-point stack is untouched).
+//  * a level is installed by giving every recorded Texture new bits at 56k x 56k. The bits are allocated the way
+//    Texture_extract_2 allocates them (mem_alloc 0x5D4510; the old ones freed with free 0x644EF2, as Texture_close
+//    does) and filled directly: no Buffer, so no quiet failure in between. TEXTURE.PCX's textures come from the pack
+//    (each 8x cell shrunk to the level by basehd_law::PaletteBoxShrink, used as painted at 8x); the RAINFALL
+//    composites, which the pack does not carry, are terrainhd::Nearest of their own stock pixels. Back to stock the
+//    same way, texture by texture from the stock copy: a step that cannot fail quietly, so the textures are always
+//    all stock or all at the level, and every recorded texture always has bits.
 //  * anything that stops a level (the pack unreadable or changed since startup, no address room for the level) is
 //    decided once: logged, stock for the session, no further work on later passes; switching the row off and on tries
 //    again once.
 //
 // Native no-op: no usable pack, no Longevity Preferences tab, or any unexpected byte -> nothing patched, no row.
 // "HD Terrain" in Longevity Mod Preferences ([UIMod] TerrainHD) switches it live. On, the hook holds the cut
-// textures (160 + 2 at 56k x 56k: 32.5 MB at 8x, 8.1 MB at 4x, 2 MB at 2x), the stock pixels to restore (0.5 MB) and
-// the overlay copies (at most kForeign); the pack's bytes are read for a cut and freed right after. Off, the stock
-// textures are back and nothing is held. The engine's fatal exit on an allocation failure is bounded, not gone: each
-// texture's bits are a mem_alloc (at most 448 x 448), as in Texture_extract_2, and the address room for the whole
-// level is probed before the first one.
+// textures (160 + 2 at 56k x 56k: 32.5 MB at 8x, 8.1 MB at 4x, 2 MB at 2x) and the stock pixels to restore (0.5 MB);
+// the pack's bytes are read for a cut and freed right after. Off, the stock textures are back, the list of ours is
+// empty (every stub multiplies by 1) and nothing is held. The engine's fatal exit on an allocation failure is
+// bounded, not gone: each texture's bits are a mem_alloc (at most 448 x 448), as in Texture_extract_2, and the
+// address room for the whole level is probed before the first one.
 
 #include "terrainhd.h"
 #include "terrainhd_law.h"
@@ -75,9 +85,6 @@ bool PrefsTabInstalled();
 namespace {
 
 constexpr uintptr_t kVA_Extract2       = 0x619710;   // Texture_extract_2: thiscall (Texture*, Buffer*, x, y, w, h, TexHeap*) RET 0x18
-constexpr uintptr_t kVA_TexCtor        = 0x619650;   // Texture_ctor: thiscall (Texture*)
-constexpr uintptr_t kVA_TexClose       = 0x619690;   // Texture_close: thiscall (Texture*) -- frees its bits
-constexpr uintptr_t kVA_Draw2          = 0x6233C0;   // Texture_draw_2: thiscall (Texture*, Buffer*, Vert*, int*, n, Vert*, mode) RET 0x18
 constexpr uintptr_t kVA_GenTerrainPoly = 0x4632D0;   // MapWin_gen_terrain_poly: cdecl, 10 args
 constexpr uintptr_t kVA_MemAlloc       = 0x5D4510;   // mem_alloc: cdecl (size) -- malloc; on null a message box + exit
 constexpr uintptr_t kVA_Free           = 0x644EF2;   // free: cdecl (p) -- what Texture_close frees a Texture's bits with
@@ -89,6 +96,7 @@ constexpr uintptr_t kVA_StatusWinRedraw = 0x4B9EA0; // StatusWin_redraw: thiscal
 constexpr uintptr_t kVA_StatusWin      = 0x8C5568;   // StatusWin_g
 constexpr uintptr_t kVA_GraphicWinRedraw = 0x5D5A70; // GraphicWin_redraw: thiscall (GraphicWin*)
 constexpr uintptr_t kVA_BaseWin        = 0x6A7628;   // BaseWin_g (+0x9C bit 0: on screen)
+constexpr uintptr_t kVA_TexBits        = 0x9BB544;   // the drawn texture's bits (each rasterizer sets it first)
 
 const uint32_t kExtractSites[] = {
     0x451D0B, 0x451D27, 0x451D50, 0x451D8F, 0x451DB6, 0x451DE0, 0x451E24, 0x451E86, 0x451EBF, 0x451EE9,
@@ -96,29 +104,33 @@ const uint32_t kExtractSites[] = {
     0x4522CA, 0x4522E5,                                                                         // RAINFALL composites
 };
 const uint32_t kGenSites[] = { 0x40F35F, 0x468C73, 0x46927C, 0x469308, 0x469E47, 0x47130C, 0x4B6B9C, 0x4BDF5C };
-const uint32_t kUvImmediates[] = { 0x46485D, 0x4649BB, 0x464AF8, 0x464FD8, 0x465561, 0x465C81, 0x465D43, 0x4311B2 };
-struct UvTable { uint32_t va; int count; };
-const UvTable kUvTables[] = { { 0x685CA8, 32 }, { 0x686090, 56 } };
-// the stock tables, exactly (a table that differs is not the one this hook knows: not installed)
-const int32_t kUvStock0[32] = { 27, 27, 27, 55, 0, 55, 0, 0, 27, 27, 27, 0, 55, 0, 55, 55,
-                                27, 27, 55, 27, 55, 55, 27, 55, 27, 27, 0, 27, 0, 0, 27, 0 };
-const int32_t kUvStock1[56] = { 27, 28, 0, 55, 0, 1, 27, 27, 0, 0, 54, 0, 28, 27, 55, 1, 55, 53, 28, 29, 55, 55,
-                                2, 55, 27, 27, 0, 27, 0, 0, 27, 0, 28, 27, 28, 0, 55, 0, 55, 27, 28, 28, 55, 28,
-                                55, 55, 28, 55, 27, 28, 27, 55, 0, 55, 0, 28 };
-const int32_t* const kUvStock[2] = { kUvStock0, kUvStock1 };
+
+// The 25 span setups' four coordinate stores: u (mov [0x9BB4F8], eax) and v (mov [0x9BB53C], edx / ecx) -- v first in
+// two setups -- then du (fistp dword [0x9BB4E4]) and dv (fistp dword [0x9BB4C8]). test_terrainhd_sites.py: the exe's
+// complete census.
+const uint32_t kSpanSites[] = {
+    0x619AF0, 0x619AF5, 0x619BC5, 0x619BD1, 0x619FB0, 0x619FB5, 0x61A085, 0x61A091, 0x61A465, 0x61A46A,
+    0x61A53A, 0x61A546, 0x61A965, 0x61A96A, 0x61AA3A, 0x61AA46, 0x61AE8B, 0x61AE90, 0x61AF78, 0x61AF84,
+    0x61B432, 0x61B437, 0x61B51F, 0x61B52B, 0x61B9BA, 0x61B9C9, 0x61BABC, 0x61BAC8, 0x61C2D2, 0x61C2D7,
+    0x61C3BF, 0x61C3CB, 0x61C8A6, 0x61C8AB, 0x61C97B, 0x61C987, 0x61CDE7, 0x61CDEC, 0x61CEBC, 0x61CEC8,
+    0x61D2C0, 0x61D2CF, 0x61D3C2, 0x61D3CE, 0x61DC32, 0x61DC41, 0x61DD34, 0x61DD40, 0x61E1FD, 0x61E20C,
+    0x61E2FF, 0x61E30B, 0x61E775, 0x61E784, 0x61E877, 0x61E883, 0x61ED2E, 0x61ED3D, 0x61EE30, 0x61EE3C,
+    0x620C6B, 0x620C7D, 0x620D52, 0x620D5E, 0x621552, 0x621557, 0x621649, 0x621655, 0x621B02, 0x621B11,
+    0x621C0C, 0x621C18, 0x6224D4, 0x6224E6, 0x6225D3, 0x6225DF, 0x622A88, 0x622A97, 0x622B92, 0x622B9E,
+    0x62302D, 0x623032, 0x62311A, 0x623126, 0x62363D, 0x623642, 0x62372A, 0x623736, 0x623C15, 0x623C1A,
+    0x623CEA, 0x623CF6, 0x624225, 0x624234, 0x624327, 0x624333, 0x6248DB, 0x6248E0, 0x6249C8, 0x6249D4,
+};
+static_assert(sizeof kSpanSites / sizeof kSpanSites[0] == 100, "25 span setups x 4 stores");
+constexpr uint32_t kSpanU = 0x9BB4F8, kSpanV = 0x9BB53C, kSpanDu = 0x9BB4E4, kSpanDv = 0x9BB4C8;
 
 // The entry bytes of every engine function the hook calls itself (the call sites prove the rest).
 struct Entry8 { uintptr_t va; BYTE b[6]; };
 const Entry8 kEntries[] = {
     { kVA_Extract2,   { 0x53, 0x55, 0x56, 0x57, 0x8B, 0x7C } },
-    { kVA_TexCtor,    { 0x8B, 0xC1, 0x33, 0xC9, 0x89, 0x08 } },
-    { kVA_TexClose,   { 0x56, 0x8B, 0xF1, 0x8B, 0x06, 0x85 } },
     { kVA_MemAlloc,   { 0x8B, 0x44, 0x24, 0x04, 0x50, 0xE8 } },
     { kVA_Free,       { 0x56, 0x8B, 0x74, 0x24, 0x08, 0x85 } },
     { kVA_GenTerrainPoly, { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68 } },
 };
-// Texture_draw_2's first three instructions (push ebp; mov ebp, esp; sub esp, 0x78): moved to the trampoline as is
-const BYTE kDraw2Entry[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x78 };
 
 // Texture (0x70 bytes): bits +0, width +4, height +8 (the row stride), +0x0C..+0x68 the corner and half-way texel
 // coordinates Texture_extract_2 sets from the size (TexCorners), +0x6C 1 = bits from a TexHeap (not freed).
@@ -134,7 +146,6 @@ void TexCorners(int32_t* f, int w, int h)              // f = the Texture as dwo
 }
 constexpr int kTex = terrainhd::kTile, kCell = kTex * terrainhd::kMaster;   // 56, 448
 constexpr int kMaxEntries = 192;                       // 162 in the stock load_terrain
-constexpr int kForeign = 32;                           // overlay copies kept (PRACX uses 18)
 constexpr size_t kStockBytes = static_cast<size_t>(kTex) * kTex;
 
 struct Texture { uint8_t* data; int w; int h; };
@@ -145,23 +156,96 @@ struct Entry {
     bool sheet;                                        // cut from TEXTURE.PCX (else a RAINFALL composite)
 };
 
-struct Foreign {
-    const Texture* src;                                // the overlay texture it stands in for
-    const uint8_t* bits;                               // ... with these stock bits (a reload makes a new copy)
-    int k;                                             // ... at this level
-    unsigned used;
-    alignas(16) uint8_t tex[kTexSize];                 // our Texture (cut by Texture_extract_2)
+// What the span stubs read: the bits pointers that are ours and the shift for them. Written only on the game thread,
+// between draws; `last` is reset whenever the list changes, so a freed pointer the allocator hands out again is
+// looked up afresh.
+struct SpanData {
+    const void* last;                                  // the bits pointer last looked up (1: none)
+    uint32_t shift;                                    // ... its shift: log2 k if ours, else 0
+    uint32_t count;                                    // entries in ptrs
+    uint32_t levelShift;                               // log2 of the installed level (0 at stock)
+    const void* ptrs[kMaxEntries];
 };
 
-typedef int (__thiscall* FDraw2)(void*, void*, void*, void*, int, void*, int);
+// The stubs: a lookup routine, then one stub per span store. Pure x86, generated from addresses only, so the test
+// can generate the same bytes for an emulated image (terrainhd_cache_selftest "stubs").
+constexpr size_t kLookupBytes = 64, kStubBytes = 48, kStubArea = kLookupBytes + kStubBytes * 100;   // 51 and 42 used
+
+void Put32(uint8_t*& p, uint32_t v) { memcpy(p, &v, 4); p += 4; }
+
+// The length of a span store: mov [g], eax is 5 bytes; mov [g], edx / ecx and fistp dword [g] are 6.
+size_t SpanStoreBytes(const uint8_t* o) { return o[0] == 0xA3 ? 5 : 6; }
+
+// Writes the lookup routine and the 100 stubs at out (which runs at outVa), reading `site` bytes from `orig` (the 5 or
+// 6 original bytes of each site, back to back as in kSpanSites order: the caller copies them from the image).
+// patch[i] receives the 6 bytes to write over site i (E8 rel32 to its stub, then a nop if the store was 6 bytes).
+// Returns false if a site's bytes are not one of the four known stores.
+bool BuildSpanStubs(uint8_t* out, uint32_t outVa, uint32_t dataVa, const uint8_t (*orig)[6], uint8_t (*patch)[6])
+{
+    const uint32_t last = dataVa + offsetof(SpanData, last), shift = dataVa + offsetof(SpanData, shift),
+                   count = dataVa + offsetof(SpanData, count), level = dataVa + offsetof(SpanData, levelShift),
+                   ptrs = dataVa + offsetof(SpanData, ptrs);
+    // lookup: ecx = bits. last = ecx; shift = (ecx in ptrs[0..count)) ? levelShift : 0. Keeps every register.
+    uint8_t* p = out;
+    *p++ = 0x50; *p++ = 0x57; *p++ = 0x51;                         // push eax; push edi; push ecx
+    *p++ = 0x89; *p++ = 0x0D; Put32(p, last);                      // mov [last], ecx
+    *p++ = 0x8B; *p++ = 0xC1;                                      // mov eax, ecx
+    *p++ = 0xBF; Put32(p, ptrs);                                   // mov edi, ptrs
+    *p++ = 0x8B; *p++ = 0x0D; Put32(p, count);                     // mov ecx, [count]
+    *p++ = 0xFC;                                                   // cld
+    *p++ = 0x85; *p++ = 0xC9;                                      // test ecx, ecx
+    *p++ = 0x74; *p++ = 0x0C;                                      // jz notfound
+    *p++ = 0xF2; *p++ = 0xAF;                                      // repne scasd
+    *p++ = 0x75; *p++ = 0x08;                                      // jne notfound
+    *p++ = 0x8B; *p++ = 0x0D; Put32(p, level);                     // mov ecx, [levelShift]
+    *p++ = 0xEB; *p++ = 0x02;                                      // jmp store
+    *p++ = 0x33; *p++ = 0xC9;                                      // notfound: xor ecx, ecx
+    *p++ = 0x89; *p++ = 0x0D; Put32(p, shift);                     // store: mov [shift], ecx
+    *p++ = 0x59; *p++ = 0x5F; *p++ = 0x58;                         // pop ecx; pop edi; pop eax
+    *p++ = 0xC3;                                                   // ret
+    if (static_cast<size_t>(p - out) > kLookupBytes) return false;
+    const uint32_t lookupVa = outVa;
+    for (int i = 0; i < 100; ++i) {
+        const uint8_t* o = orig[i];
+        int n = 0;
+        uint32_t g = 0;
+        bool fistp = false;
+        if (o[0] == 0xA3) { n = 5; memcpy(&g, o + 1, 4); }                                  // mov [g], eax
+        else if (o[0] == 0x89 && (o[1] == 0x15 || o[1] == 0x0D)) { n = 6; memcpy(&g, o + 2, 4); }   // mov [g], edx/ecx
+        else if (o[0] == 0xDB && o[1] == 0x1D) { n = 6; memcpy(&g, o + 2, 4); fistp = true; }   // fistp dword [g]
+        else return false;
+        // u and v are moved from the edge, du and dv come from the divide (two setups store v before u)
+        if (fistp ? (g != kSpanDu && g != kSpanDv) : (g != kSpanU && g != kSpanV)) return false;
+        uint8_t* s = out + kLookupBytes + kStubBytes * i;
+        const uint32_t sVa = outVa + static_cast<uint32_t>(kLookupBytes + kStubBytes * i);
+        uint8_t* q = s;
+        memcpy(q, o, n); q += n;                                    // the store, as it was
+        *q++ = 0x9C;                                               // pushfd
+        *q++ = 0x51;                                               // push ecx
+        *q++ = 0x8B; *q++ = 0x0D; Put32(q, kVA_TexBits);           // mov ecx, [0x9BB544]
+        *q++ = 0x3B; *q++ = 0x0D; Put32(q, last);                  // cmp ecx, [last]
+        *q++ = 0x74; *q++ = 0x05;                                  // je +5
+        *q++ = 0xE8; Put32(q, lookupVa - (sVa + static_cast<uint32_t>(q - s) + 4));   // call lookup
+        *q++ = 0x8B; *q++ = 0x0D; Put32(q, shift);                 // mov ecx, [shift]
+        *q++ = 0xD3; *q++ = 0x25; Put32(q, g);                     // shl dword [g], cl
+        *q++ = 0x59;                                               // pop ecx
+        *q++ = 0x9D;                                               // popfd
+        *q++ = 0xC3;                                               // ret
+        if (static_cast<size_t>(q - s) > kStubBytes) return false;
+        uint8_t* w = patch[i];
+        const uint32_t siteVa = kSpanSites[i];
+        w[0] = 0xE8;
+        const uint32_t rel = sVa - (siteVa + 5);
+        memcpy(w + 1, &rel, 4);
+        w[5] = n == 6 ? 0x90 : o[5];                                // (a 5-byte store: only 5 are written)
+    }
+    return true;
+}
 
 // The engine functions the module calls (bound from the exe at install; a fake engine under TERRAINHD_SELFTEST).
 struct Engine {
     int (__thiscall* extract)(void*, void*, int, int, int, int, void*);
     int (__cdecl* gen)(void*, void*, int, int, int, int, int, int, int, int);
-    FDraw2 draw2;                                      // the trampoline (Texture_draw_2's moved entry + a jmp back)
-    void (__thiscall* texCtor)(void*);
-    void (__thiscall* texClose)(void*);
     void* (__cdecl* alloc)(size_t);                   // mem_alloc: never returns null (the engine exits instead)
     void (__cdecl* free)(void*);
     void (__cdecl* drawMap)(int);
@@ -173,16 +257,13 @@ Engine g_eng = {};
 Entry g_entries[kMaxEntries];
 int g_count = 0;
 uint8_t* g_stock = nullptr;                            // the entries' stock pixels while a level is installed
-Foreign g_foreign[kForeign];
-unsigned g_clock = 0;
 int g_level = 1;                                       // installed level; 1 = stock
 bool g_dirty = false;                                  // load_terrain cut stock textures since the last install
 bool g_failed = false;                                 // a level could not be made: stock until the row is switched
-bool g_inPass = false;                                 // inside a MapWin_gen_terrain_poly call
 bool g_installed = false;
 int g_on = kTerrainHdDefault;
 uint8_t g_pal[768];                                    // TEXTURE.PCX's palette (the pack must match it)
-BYTE* g_tramp = nullptr;                               // Texture_draw_2's trampoline
+SpanData g_span = { reinterpret_cast<const void*>(1), 0, 0, 0, {} };
 char g_dir[MAX_PATH];
 
 #ifdef TERRAINHD_SELFTEST
@@ -227,29 +308,20 @@ void Retarget(uint32_t site, const void* fn)
     FlushInstructionCache(GetCurrentProcess(), p, 5);
 }
 
-void WriteUv(int k)
+// The list of ours for the span stubs: the recorded textures' bits at level k (count 0 at stock). The cached pointer
+// is dropped, so the next span looks its bits up again.
+void SetSpanList(int k)
 {
-    for (int t = 0; t < 2; ++t) {
-        int32_t* p = reinterpret_cast<int32_t*>(At(kUvTables[t].va));
-        DWORD old;
-        VirtualProtect(p, kUvTables[t].count * 4, PAGE_READWRITE, &old);
-        for (int i = 0; i < kUvTables[t].count; ++i) p[i] = terrainhd::Uv(kUvStock[t][i], k);
-        VirtualProtect(p, kUvTables[t].count * 4, old, &old);
-    }
-    const uint32_t imm = static_cast<uint32_t>(terrainhd::Uv(55, k));
-    for (uint32_t site : kUvImmediates) {
-        BYTE* p = At(site);
-        DWORD old;
-        VirtualProtect(p + 1, 4, PAGE_EXECUTE_READWRITE, &old);
-        memcpy(p + 1, &imm, 4);
-        VirtualProtect(p + 1, 4, old, &old);
-        FlushInstructionCache(GetCurrentProcess(), p, 5);
-    }
+    g_span.count = 0;
+    g_span.levelShift = k == 8 ? 3 : k == 4 ? 2 : k == 2 ? 1 : 0;
+    if (k != 1)
+        for (int i = 0; i < g_count; ++i) g_span.ptrs[g_span.count++] = g_entries[i].tex->data;
+    g_span.last = reinterpret_cast<const void*>(1);
 }
 
 // New engine bits of side x side for t, filled by fill(bits), then the old bits freed: what Texture_extract_2 does
-// (mem_alloc, its rows at stride side, the size, the corner coordinates, the heap flag 0), without a Buffer in
-// between. mem_alloc does not return null (the engine exits instead), so this cannot fail quietly and t never holds
+// (mem_alloc, its rows at stride side, the size, the heap flag 0), without a Buffer in between; the corner
+// coordinates are a 56 x 56 cut's, as for every coordinate of ours (stock, scaled by the span stubs). mem_alloc does not return null (the engine exits instead), so this cannot fail quietly and t never holds
 // a texture without bits.
 template <class Fill>
 void GiveBits(Texture* t, int side, Fill fill)
@@ -262,7 +334,9 @@ void GiveBits(Texture* t, int side, Fill fill)
     t->data = bits;
     t->w = side;
     t->h = side;
-    TexCorners(reinterpret_cast<int32_t*>(t), side, side);
+    // the corner coordinates stay the STOCK texture's: Texture_draw_trans_2 (0x61A240) draws from them as its UVs,
+    // and the span stubs multiply every coordinate of our textures by k
+    TexCorners(reinterpret_cast<int32_t*>(t), kTex, kTex);
     *heap = 0;
     if (old && ours) g_eng.free(old);
 }
@@ -312,18 +386,9 @@ bool LoadPack(hdpack::Pack* p)
     return false;
 }
 
-void FreeForeign()
-{
-    for (Foreign& f : g_foreign) {
-        if (f.src) g_eng.texClose(f.tex);
-        f.src = nullptr;
-        f.bits = nullptr;
-    }
-}
-
-// Every recorded texture back to its stock pixels (texture by texture, from the stock copy, while the level's UVs
-// still stand), then the UVs back to stock; the stock copy and the overlays freed. Nothing in it can fail quietly
-// (GiveBits), so the result is all stock.
+// Every recorded texture back to its stock pixels, texture by texture from the stock copy, then the list of ours
+// emptied (the span stubs multiply by 1 again); the stock copy freed. Nothing in it can fail quietly (GiveBits), so
+// the result is all stock.
 void RestoreStock()
 {
     if (g_stock)
@@ -331,11 +396,10 @@ void RestoreStock()
             const uint8_t* px = g_stock + i * kStockBytes;
             GiveBits(g_entries[i].tex, kTex, [px](uint8_t* b) { memcpy(b, px, kStockBytes); });
         }
-    WriteUv(1);
     g_level = 1;
+    SetSpanList(1);
     free(g_stock);
     g_stock = nullptr;
-    FreeForeign();
 }
 
 // The colours of the loaded indices (loaded = file + 10): what PaletteBoxShrink compares.
@@ -442,8 +506,8 @@ bool InstallLevel(int k)
         RestoreStock();                                  // the textures cut so far go back: all stock
         return false;
     }
-    WriteUv(k);
     g_level = k;
+    SetSpanList(k);
     unsigned privMb = 0, peakMb = 0;
 #ifndef TERRAINHD_SELFTEST
     PROCESS_MEMORY_COUNTERS_EX pmc = {};
@@ -463,42 +527,19 @@ int WantLevel()
     return terrainhd::Level(*reinterpret_cast<int*>(At(kVA_ScreenW)), *reinterpret_cast<int*>(At(kVA_ScreenH)));
 }
 
-// A level copy of an overlay texture the pack does not know (PRACX's Alt+T images): its stock pixels at level k
-// (terrainhd::Nearest) in engine bits (GiveBits), so it is always made. The least recently used slot is reused.
-const void* ForeignFor(const Texture* t)
-{
-    Foreign* slot = nullptr;
-    for (Foreign& f : g_foreign) {
-        if (f.src == t && f.bits == t->data && f.k == g_level) { f.used = ++g_clock; return f.tex; }
-        if (!slot || (slot->src && (!f.src || f.used < slot->used))) slot = &f;
-    }
-    if (!slot->src) {
-        memset(slot->tex, 0, sizeof slot->tex);
-        g_eng.texCtor(slot->tex);
-    }
-    const int k = g_level;
-    const uint8_t* px = t->data;
-    GiveBits(reinterpret_cast<Texture*>(slot->tex), kTex * k, [px, k](uint8_t* b) { terrainhd::Nearest(px, kTex, k, b); });
-    slot->src = t;
-    slot->bits = t->data;
-    slot->k = k;
-    slot->used = ++g_clock;
-    return slot->tex;
-}
-
 // --- hooks ------------------------------------------------------------------------------------------------------
 
 // Stands in for Texture_extract_2 at load_terrain's 21 sites: same contract (thiscall, RET 0x18).
 int __fastcall ExtractRecorder(Texture* tex, void* /*edx*/, void* src, int x, int y, int w, int h, void* heap)
 {
-    const int rc = g_eng.extract(tex, src, x, y, w, h, heap);
-    if (rc != 0 || w != kTex || h != kTex || !tex->data) return rc;
-    if (g_level != 1) {                                  // a new load_terrain: the textures are cut at stock again
-        WriteUv(1);
+    if (g_level != 1 || g_span.count) {                  // a new load_terrain: the textures are cut at stock again
         g_level = 1;
+        SetSpanList(1);                                  // before the engine frees the level's bits
         free(g_stock);
         g_stock = nullptr;
     }
+    const int rc = g_eng.extract(tex, src, x, y, w, h, heap);
+    if (rc != 0 || w != kTex || h != kTex || !tex->data) return rc;
     int i = 0;
     while (i < g_count && g_entries[i].tex != tex) ++i;
     if (i == g_count) {
@@ -521,22 +562,7 @@ int __cdecl GenTerrainPolyHook(void* buf, void* win, int zoom, int a4, int a5, i
             if (!InstallLevel(want)) g_failed = true;    // decided once: no more work until the row is switched
         }
     }
-    const bool outer = !g_inPass;
-    g_inPass = true;
-    const int r = g_eng.gen(buf, win, zoom, a4, a5, a6, a7, a8, a9, a10);
-    if (outer) g_inPass = false;
-    return r;
-}
-
-// Texture_draw_2's entry: inside a terrain pass at a level, every texture we cut is 56k wide, so a 56x56 one is an
-// overlay the engine's UVs would read past -- drawn from its level copy instead (always made: ForeignFor).
-void __fastcall Draw2Hook(Texture* tex, void* /*edx*/, void* dst, void* pts, void* light, int n, void* uvs, int mode)
-{
-    if (g_inPass && g_level != 1 && tex && tex->w == kTex && tex->h == kTex && tex->data) {
-        g_eng.draw2(const_cast<void*>(ForeignFor(tex)), dst, pts, light, n, uvs, mode);
-        return;
-    }
-    g_eng.draw2(tex, dst, pts, light, n, uvs, mode);
+    return g_eng.gen(buf, win, zoom, a4, a5, a6, a7, a8, a9, a10);
 }
 
 void RepaintTerrainScreens()
@@ -546,30 +572,52 @@ void RepaintTerrainScreens()
     if (*reinterpret_cast<int*>(At(kVA_BaseWin + 0x9C)) & 1) g_eng.graphicRedraw(At(kVA_BaseWin));
 }
 
-// Texture_draw_2's first 6 bytes -> a trampoline (those bytes, then jmp 0x6233C6); the entry -> jmp Draw2Hook.
-bool DetourDraw2()
+// The 100 span stores -> calls into their stubs (generated into one execute-read page). False if a site's bytes are
+// not the store this hook knows, or the page cannot be made.
+bool InstallSpanScaling()
+{
+    uint8_t orig[100][6], patch[100][6];
+    for (int i = 0; i < 100; ++i) memcpy(orig[i], At(kSpanSites[i]), 6);
+#ifdef TERRAINHD_SELFTEST
+    static uint8_t area[kStubArea];
+    return BuildSpanStubs(area, 0x20000000, 0x20100000, orig, patch);
+#else
+    uint8_t* area = static_cast<uint8_t*>(VirtualAlloc(nullptr, kStubArea, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    if (!area) return false;
+    if (!BuildSpanStubs(area, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(area)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_span)), orig, patch)) {
+        VirtualFree(area, 0, MEM_RELEASE);
+        return false;
+    }
+    DWORD old;
+    if (!VirtualProtect(area, kStubArea, PAGE_EXECUTE_READ, &old)) {
+        VirtualFree(area, 0, MEM_RELEASE);
+        return false;
+    }
+    FlushInstructionCache(GetCurrentProcess(), area, kStubArea);
+    for (int i = 0; i < 100; ++i) {
+        BYTE* p = At(kSpanSites[i]);
+        const size_t n = SpanStoreBytes(orig[i]);           // 5 for mov [g], eax: the next byte is another store's
+        if (!VirtualProtect(p, n, PAGE_EXECUTE_READWRITE, &old)) return false;   // (SpanPagesWritable checked first)
+        memcpy(p, patch[i], n);
+        VirtualProtect(p, n, old, &old);
+        FlushInstructionCache(GetCurrentProcess(), p, n);
+    }
+    return true;
+#endif
+}
+
+// Every page the span sites are on can be made writable (checked before the first one is written: all or nothing).
+bool SpanPagesWritable()
 {
 #ifdef TERRAINHD_SELFTEST
     return true;
 #else
-    BYTE* e = At(kVA_Draw2);
-    g_tramp = static_cast<BYTE*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-    if (!g_tramp) return false;
-    memcpy(g_tramp, e, sizeof kDraw2Entry);
-    g_tramp[sizeof kDraw2Entry] = 0xE9;
-    const int32_t back = static_cast<int32_t>(reinterpret_cast<uintptr_t>(e + sizeof kDraw2Entry) -
-                                              reinterpret_cast<uintptr_t>(g_tramp + sizeof kDraw2Entry + 5));
-    memcpy(g_tramp + sizeof kDraw2Entry + 1, &back, 4);
-    FlushInstructionCache(GetCurrentProcess(), g_tramp, 32);
-    g_eng.draw2 = reinterpret_cast<FDraw2>(g_tramp);
-    DWORD old;
-    VirtualProtect(e, sizeof kDraw2Entry, PAGE_EXECUTE_READWRITE, &old);
-    e[0] = 0xE9;
-    const int32_t rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&Draw2Hook) - reinterpret_cast<uintptr_t>(e + 5));
-    memcpy(e + 1, &rel, 4);
-    e[5] = 0x90;
-    VirtualProtect(e, sizeof kDraw2Entry, old, &old);
-    FlushInstructionCache(GetCurrentProcess(), e, sizeof kDraw2Entry);
+    for (uint32_t s : kSpanSites) {
+        DWORD old;
+        if (!VirtualProtect(At(s), 6, PAGE_EXECUTE_READWRITE, &old)) return false;
+        VirtualProtect(At(s), 6, old, &old);
+    }
     return true;
 #endif
 }
@@ -578,8 +626,6 @@ void BindEngine()
 {
     g_eng.extract = reinterpret_cast<decltype(g_eng.extract)>(At(kVA_Extract2));
     g_eng.gen = reinterpret_cast<decltype(g_eng.gen)>(At(kVA_GenTerrainPoly));
-    g_eng.texCtor = reinterpret_cast<decltype(g_eng.texCtor)>(At(kVA_TexCtor));
-    g_eng.texClose = reinterpret_cast<decltype(g_eng.texClose)>(At(kVA_TexClose));
     g_eng.alloc = reinterpret_cast<decltype(g_eng.alloc)>(At(kVA_MemAlloc));
     g_eng.free = reinterpret_cast<decltype(g_eng.free)>(At(kVA_Free));
     g_eng.drawMap = reinterpret_cast<decltype(g_eng.drawMap)>(At(kVA_DrawMap));
@@ -601,7 +647,7 @@ void TerrainHdSet(int on)
         g_failed = false;                                // tried again, once; the next terrain pass cuts the level
         g_dirty = g_count != 0;
     } else {
-        RestoreStock();                                  // off holds nothing (overlay copies included, at any level)
+        RestoreStock();                                  // off holds nothing
     }
     RepaintTerrainScreens();
 }
@@ -632,29 +678,20 @@ void InstallTerrainHd()
         Log("[terrainhd] unexpected bytes at terrain pass call %X -> HD terrain NOT installed\n", s);
         return;
     }
-    for (uint32_t s : kUvImmediates) {
-        const BYTE* p = At(s);
-        uint32_t imm;
-        memcpy(&imm, p + 1, 4);
-        if ((p[0] != 0xB8 && p[0] != 0xB9) || imm != 0x37) {
-            Log("[terrainhd] unexpected bytes at UV immediate %X -> HD terrain NOT installed\n", s);
-            return;
-        }
-    }
-    for (int t = 0; t < 2; ++t)
-        if (memcmp(At(kUvTables[t].va), kUvStock[t], kUvTables[t].count * 4) != 0) {
-            Log("[terrainhd] UV table %X is not the stock one -> HD terrain NOT installed\n", kUvTables[t].va);
-            return;
-        }
     for (const Entry8& f : kEntries)
         if (memcmp(At(f.va), f.b, sizeof f.b) != 0) {
             Log("[terrainhd] unexpected bytes at engine function %X -> HD terrain NOT installed\n",
                 static_cast<unsigned>(f.va));
             return;
         }
-    if (memcmp(At(kVA_Draw2), kDraw2Entry, sizeof kDraw2Entry) != 0) {
-        Log("[terrainhd] unexpected bytes at Texture_draw_2's entry -> HD terrain NOT installed\n");
-        return;
+    {
+        uint8_t orig[100][6], patch[100][6];
+        static uint8_t probe[kStubArea];
+        for (int i = 0; i < 100; ++i) memcpy(orig[i], At(kSpanSites[i]), 6);
+        if (!BuildSpanStubs(probe, 0x20000000, 0x20100000, orig, patch)) {
+            Log("[terrainhd] unexpected bytes at a span store -> HD terrain NOT installed\n");
+            return;
+        }
     }
 
     // usable art decides it: prove the pack against TEXTURE.PCX's palette, then let its bytes go
@@ -676,14 +713,24 @@ void InstallTerrainHd()
 #ifndef TERRAINHD_SELFTEST
     BindEngine();
 #endif
-    if (!DetourDraw2()) {
-        Log("[terrainhd] could not detour Texture_draw_2 -> HD terrain NOT installed\n");
+    if (!SpanPagesWritable() || !InstallSpanScaling()) {
+        Log("[terrainhd] could not patch the span stores -> HD terrain NOT installed\n");
         return;
     }
     for (uint32_t s : kExtractSites) Retarget(s, reinterpret_cast<const void*>(&ExtractRecorder));
     for (uint32_t s : kGenSites) Retarget(s, reinterpret_cast<const void*>(&GenTerrainPolyHook));
     g_installed = true;
     // the level is logged when it is cut (the screen size is not known yet here)
-    Log("[terrainhd] installed: terrain\\texture_x8.pcx (21 texture cuts + 8 terrain-pass sites + Texture_draw_2's "
-        "entry), %s\n", g_on ? "on" : "off ([UIMod] TerrainHD=0)");
+    Log("[terrainhd] installed: terrain\\texture_x8.pcx (21 texture cuts + 8 terrain-pass sites + 100 span stores), "
+        "%s\n", g_on ? "on" : "off ([UIMod] TerrainHD=0)");
 }
+
+#ifdef TERRAINHD_SELFTEST
+// for the emulation test: the stub area and the 6 patch bytes per site, for stubs at stubVa and SpanData at dataVa
+bool TerrainHdTestStubs(uint32_t stubVa, uint32_t dataVa, uint8_t* area, uint8_t (*patch)[6])
+{
+    uint8_t orig[100][6];
+    for (int i = 0; i < 100; ++i) memcpy(orig[i], At(kSpanSites[i]), 6);
+    return BuildSpanStubs(area, stubVa, dataVa, orig, patch);
+}
+#endif

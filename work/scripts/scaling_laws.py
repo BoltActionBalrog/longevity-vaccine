@@ -15267,27 +15267,21 @@ TERRAIN_HD_MAX_LEVEL = 8      # the most the session level ever is (terrain_hd_l
 PRACX_HUD_ROWS = 213          # PRACX ZoomInit: the map's height is the screen's minus the 213-row console
 
 
-def terrain_hd_uv_offset(k: int) -> int:
-    """LAW (MEASURED, 2026-11-15) -- the whole-texel offset c(k) of terrain_hd_uv.
+def terrain_hd_span(c: int, k: int) -> int:
+    """LAW (EXACT, 2026-11-16) -- a span's texture coordinate at level k: the stock one times k.
 
-    Texture_draw_2 (0x6233C0) walks each polygon edge from u0 << 16 + 0x8000 to raw u1 << 16 (0x61FD04 / 0x61FD1A)
-    with half-open spans, so a vertex's UV lands half a texel in when it starts an edge and on the texel edge when it
-    ends one. At level k the stock content sits at k*u + (k-1)/2 for a starting vertex and at k*u for an ending one;
-    one table value per vertex can only split that: c = round((k - 1) / 4) -> 0, 1, 2 for k = 2, 4, 8.
-
-    Measured on the real image under Unicorn (Texture_draw_2 drawing the stock UV tables' 12 polygons over a tile
-    diamond 32..250 px wide, with a texture whose texels hold their own u / v): the share of drawn samples whose HD
-    texel lies outside the stock texel stock drew there is, for k = 2: c=0 6.2 %, c=1 18.4 %; for k = 4: c=0 9.3 %,
-    c=1 4.9 %, c=2 15.2 %, c=3 27.7 %. (round(u * (56k - 1) / 55), the hook's first law, gave 9.6 % and 12.4 %.)
-    The rest is the start / end split itself: worst 0.75 / 0.63 stock texels at k = 2 / 4."""
-    return (k - 1 + 2) // 4
-
-
-def terrain_hd_uv(u: int, k: int) -> int:
-    """LAW (PROPORTIONATE) -- a stock terrain UV u (0..55) at level k: k*u + c(k) (terrain_hd_uv_offset).
-    Identity at k = 1. Every interval of the stock tables (27 -> 28 included) becomes exactly k HD texels, so the
-    density is even; the largest value 55k + c stays inside the 56k-texel texture (c <= k - 1)."""
-    return u if k == 1 else k * u + terrain_hd_uv_offset(k)
+    Every textured draw is one of ten rasterizers; each span's coordinates are four 16.16 values -- u and v captured
+    from the left edge, du and dv from a floating-point divide (fistp) -- and the clipping pre-step adds du * clip to
+    u (and dv * clip to v). The texture coordinates of the polygon (two UV tables, eight 0x37 immediates) stay stock
+    and every one of the four stores is multiplied by k after the stock computation, so each sample is exactly
+    k * (u0 + n du): the HD texel k*U + floor(k * frac) lies inside the k x k block of the stock texel U. With a
+    texture that is the stock one with each texel a k x k block (terrain_hd_nearest), every pixel is stock's.
+    The texture's own corner coordinates (+0x0C..+0x68, the UVs of Texture_draw_trans_2 and the coast) stay stock too.
+    Measured: test_terrainhd_exact.py draws on the real rasterizers under emulation, both edge families, at 2x / 4x /
+    8x: zero pixels differ. It runs 11 of the 25 span setups -- every one the exe can reach except the 60x60 border's
+    (0x61E540, a texture that is not ours); the other 13 are in functions nothing calls. (The UV-table law it replaces,
+    k*u + round((k - 1) / 4), moved 11-15 % of a ground tile's pixels at 4x.)"""
+    return c * k
 
 
 def terrain_hd_max_zoom(w: int, h: int) -> int:

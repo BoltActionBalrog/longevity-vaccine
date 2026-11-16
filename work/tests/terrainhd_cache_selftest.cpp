@@ -31,7 +31,6 @@ bool PrefsTabInstalled() { return true; }
 constexpr int kBufLock = 0x50, kBufBits = 0x54, kBufW = 0x80, kBufH = 0x84, kBufPitch = 0x4A8, kBufSize = 0x588;
 
 static int g_liveBits = 0;               // engine bit blocks held (every Texture's)
-static const Texture* g_drawn = nullptr; // what the last Texture_draw_2 drew
 static void (*g_inGen)() = nullptr;      // what a terrain pass draws
 
 static Texture* T(void* t) { return static_cast<Texture*>(t); }
@@ -65,19 +64,6 @@ static int __fastcall FakeExtract(void* tex, void*, void* src, int x, int y, int
     for (int r = 0; r < h; ++r) memcpy(t->data + r * w, p + (y + r) * pitch + x, w);
     return 0;
 }
-
-static void __fastcall FakeTexCtor(void* tex, void*)
-{
-    T(tex)->data = nullptr; T(tex)->w = 0; T(tex)->h = 0; Heap(tex) = 0;
-}
-
-static void __fastcall FakeTexClose(void* tex, void*)
-{
-    if (T(tex)->data && Heap(tex) == 0) FakeFree(T(tex)->data);
-    T(tex)->data = nullptr; T(tex)->w = 0; T(tex)->h = 0; Heap(tex) = 0;
-}
-
-static void __fastcall FakeDraw2(void* tex, void*, void*, void*, void*, int, void*, int) { g_drawn = T(tex); }
 
 static int __cdecl FakeGen(void*, void*, int, int, int, int, int, int, int, int)
 {
@@ -237,8 +223,15 @@ static void Screen(int w, int h)
     *reinterpret_cast<int*>(At(kVA_ScreenH)) = h;
 }
 
-static int Uv0() { return reinterpret_cast<int32_t*>(At(0x685CA8))[1]; }          // stock 27
-static int Imm() { int32_t v; memcpy(&v, At(0x46485D) + 1, 4); return v; }       // stock 55
+// the span stubs' list of ours: the recorded textures' bits and log2 k at a level, empty at stock
+static bool SpanListIs(int k)
+{
+    if (k == 1) return g_span.count == 0 && g_span.levelShift == 0;
+    if (g_span.count != static_cast<uint32_t>(kAll) || g_span.levelShift != static_cast<uint32_t>(k == 2 ? 1 : k == 4 ? 2 : 3))
+        return false;
+    for (int i = 0; i < kAll; ++i) if (g_span.ptrs[i] != T(g_tex[i])->data) return false;
+    return true;
+}
 
 static bool AllAt(int side)
 {
@@ -268,16 +261,10 @@ static bool StockPixels()
     return true;
 }
 
-static bool NoOverlayCopies()
-{
-    for (const Foreign& f : g_foreign) if (f.src) return false;
-    return true;
-}
-
 // off / failed: the stock textures and UVs, no stock copy, no overlay copy, only the textures' own bits
 static bool HoldsNothing()
 {
-    return !g_stock && g_level == 1 && NoOverlayCopies() && g_liveBits == kAll && Uv0() == 27 && Imm() == 55;
+    return !g_stock && g_level == 1 && SpanListIs(1) && g_liveBits == kAll;
 }
 
 static int Logged(const char* needle)
@@ -298,10 +285,14 @@ static void MakeImage()
     };
     for (uint32_t s : kExtractSites) call(s, kVA_Extract2);
     for (uint32_t s : kGenSites) call(s, kVA_GenTerrainPoly);
-    for (uint32_t s : kUvImmediates) { At(s)[0] = 0xB8; const uint32_t v = 0x37; memcpy(At(s) + 1, &v, 4); }
-    for (int t = 0; t < 2; ++t) memcpy(At(kUvTables[t].va), kUvStock[t], kUvTables[t].count * 4);
+    for (int i = 0; i < 100; ++i) {                         // the span stores: u, v, du, dv as in the exe
+        static const uint8_t st[4][6] = { { 0xA3, 0xF8, 0xB4, 0x9B, 0x00, 0x00 }, { 0x89, 0x15, 0x3C, 0xB5, 0x9B, 0x00 },
+                                          { 0xDB, 0x1D, 0xE4, 0xB4, 0x9B, 0x00 }, { 0xDB, 0x1D, 0xC8, 0xB4, 0x9B, 0x00 } };
+        int kind = i % 4;
+        if (i / 4 == 15 || i / 4 == 18) kind = kind < 2 ? 1 - kind : kind;    // v before u, as in the exe
+        memcpy(At(kSpanSites[i]), st[kind], kind == 0 ? 5 : 6);
+    }
     for (const Entry8& f : kEntries) memcpy(At(f.va), f.b, sizeof f.b);
-    memcpy(At(kVA_Draw2), kDraw2Entry, sizeof kDraw2Entry);
     Screen(1920, 1080);
     for (int y = 0; y < 768; ++y)
         for (int x = 0; x < 1024; ++x) g_stockSheet[y][x] = static_cast<uint8_t>(10 + (x * 3 + y * 5) % 200);
@@ -315,9 +306,6 @@ static void Install()
 {
     g_eng.extract = reinterpret_cast<decltype(g_eng.extract)>(&FakeExtract);
     g_eng.gen = &FakeGen;
-    g_eng.draw2 = reinterpret_cast<FDraw2>(&FakeDraw2);
-    g_eng.texCtor = reinterpret_cast<decltype(g_eng.texCtor)>(&FakeTexCtor);
-    g_eng.texClose = reinterpret_cast<decltype(g_eng.texClose)>(&FakeTexClose);
     g_eng.alloc = &FakeAlloc;
     g_eng.free = &FakeFree;
     g_eng.drawMap = &FakeDrawMap;
@@ -342,7 +330,7 @@ static void OffHoldsNothing()
     TerrainHdSet(1);
     Pass();
     Check(g_level == 4 && AllAt(224), "on: every texture at 4x (1920x1080)", Num(g_level));
-    Check(Uv0() == terrainhd::Uv(27, 4) && Imm() == terrainhd::Uv(55, 4), "on: the UVs at 4x", Num(Uv0()));
+    Check(SpanListIs(4), "on: the span stubs' list is the 8 textures' bits, shift 2");
     Check(T(g_tex[2])->data[0] == static_cast<uint8_t>(FileIndex(2) + 10), "a sheet texture is the pack's cell",
           Num(T(g_tex[2])->data[0]));
     Check(T(g_tex[kSheetTex])->data[0] == g_rainPx[0][0] && T(g_tex[kSheetTex])->data[3] == g_rainPx[0][0] &&
@@ -366,19 +354,19 @@ static void NewGameAndLevels()
     Pass();
     Check(g_level == 4, "game 1 at 4x");
     LoadTerrain();
-    Check(g_level == 1 && Uv0() == 27 && !g_stock && AllAt(56) && EveryTextureHasBits(),
+    Check(g_level == 1 && SpanListIs(1) && !g_stock && AllAt(56) && EveryTextureHasBits(),
           "load_terrain: stock textures, stock UVs");
     Pass();
     Check(g_level == 4 && AllAt(224), "game 2 at 4x");
     Screen(1024, 768);
     Pass();
-    Check(g_level == 2 && AllAt(112) && Uv0() == terrainhd::Uv(27, 2), "1024x768: 2x", Num(g_level));
+    Check(g_level == 2 && AllAt(112) && SpanListIs(2), "1024x768: 2x", Num(g_level));
     Screen(1280, 1024);
     Pass();
     Check(g_level == 4 && AllAt(224), "1280x1024: 4x (the real tile is 184 px)", Num(g_level));
     Screen(2560, 1440);
     Pass();
-    Check(g_level == 8 && AllAt(448) && Uv0() == terrainhd::Uv(27, 8), "2560x1440: 8x", Num(g_level));
+    Check(g_level == 8 && AllAt(448) && SpanListIs(8), "2560x1440: 8x", Num(g_level));
     const Texture* t = T(g_tex[4]);
     const uint8_t c = static_cast<uint8_t>(FileIndex(4) + 10), m = static_cast<uint8_t>(kMark + 10);
     Check(t->data[2 * 448 + 1] == m && t->data[2 * 448 + 0] == c && t->data[2 * 448 + 2] == c && t->data[448 + 1] == c,
@@ -386,42 +374,24 @@ static void NewGameAndLevels()
     Check(g_liveBits == kAll, "one block of bits per texture", Num(g_liveBits));
 }
 
-// PRACX's Alt+T overlays: a 56x56 texture drawn in a pass at a level is drawn from a nearest copy; outside a pass, or
-// at stock, the texture itself; one copy per (texture, bits); a reload of the bits makes a new copy.
+// PRACX's Alt+T overlays (and every texture not cut by load_terrain) are never in the list of ours: the span stubs
+// multiply their coordinates by 1, so they draw natively at any level, with no copy made.
 alignas(16) static uint8_t g_overlay[kTexSize];
-static uint8_t g_overlayBits[56 * 56], g_overlayBits2[56 * 56];
-static void DrawOverlay() { Draw2Hook(T(g_overlay), nullptr, nullptr, nullptr, nullptr, 4, nullptr, 3); }
+static uint8_t g_overlayBits[56 * 56];
 
 static void Overlays()
 {
     WriteStock(); WriteIni(1);
     Install();
     LoadTerrain();
-    for (int i = 0; i < 56 * 56; ++i) { g_overlayBits[i] = static_cast<uint8_t>(i % 56); g_overlayBits2[i] = 77; }
     Texture* o = T(g_overlay);
-    o->data = g_overlayBits; o->w = 56; o->h = 56; Heap(o) = 1;   // prax.dll's own bits: never ours to free
-    g_inGen = &DrawOverlay;
-    Pass();                                              // the level is cut first, then the pass draws
-    Check(g_level == 4 && g_drawn && g_drawn != o && g_drawn->w == 224, "in a pass at 4x: a 224 copy is drawn");
-    Check(g_drawn->data[0] == 0 && g_drawn->data[3] == 0 && g_drawn->data[4] == 1 && g_drawn->data[224 * 3 + 4] == 1,
-          "the copy is the overlay at 4x nearest");
-    const Texture* first = g_drawn;
+    o->data = g_overlayBits; o->w = 56; o->h = 56; Heap(o) = 1;   // prax.dll's own bits
     Pass();
-    Check(g_drawn == first, "the copy is reused");
-    o->data = g_overlayBits2;
-    Pass();
-    Check(g_drawn->w == 224 && g_drawn->data[0] == 77, "new bits: a new copy");
-    g_inGen = nullptr;
-    DrawOverlay();
-    Check(g_drawn == o, "outside a pass: the overlay itself");
-    Draw2Hook(T(g_tex[0]), nullptr, nullptr, nullptr, nullptr, 4, nullptr, 3);
-    Check(g_drawn == T(g_tex[0]), "our own textures pass through");
-    TerrainHdSet(0);
-    Check(NoOverlayCopies() && HoldsNothing(), "off: the overlay copies are freed, nothing held", Num(g_liveBits));
-    g_inGen = &DrawOverlay;
-    Pass();
-    Check(g_drawn == o, "at stock, in a pass: the overlay itself");
-    g_inGen = nullptr;
+    bool listed = false;
+    for (uint32_t i = 0; i < g_span.count; ++i) listed |= g_span.ptrs[i] == o->data;
+    Check(g_level == 4 && SpanListIs(4) && !listed && o->data == g_overlayBits && o->w == 56,
+          "at 4x: the overlay is not ours, untouched, nothing copied");
+    Check(g_liveBits == kAll, "no copy allocated", Num(g_liveBits));
 }
 
 // The pack damaged after install: the level is refused once (one read, one log line), then every later pass does no
@@ -469,25 +439,20 @@ static void NoRoom()
     Check(g_level == 4 && AllAt(224), "room again, the row switched: 4x");
 }
 
-// At a level with overlay copies, a new level that cannot be made (the screen changes, no room): everything back to
-// stock, the copies freed, nothing held, no work on later passes; and off after it holds nothing.
+// At a level, a new level that cannot be made (the screen changes, no room): everything back to stock, the list of
+// ours empty, nothing held, no work on later passes; and off after it holds nothing.
 static void FailedAfterALevel()
 {
     WriteStock(); WriteIni(1);
     Install();
     LoadTerrain();
-    for (int i = 0; i < 56 * 56; ++i) g_overlayBits[i] = 9;
-    Texture* o = T(g_overlay);
-    o->data = g_overlayBits; o->w = 56; o->h = 56; Heap(o) = 1;
-    g_inGen = &DrawOverlay;
     Pass();
-    g_inGen = nullptr;
-    Check(g_level == 4 && !NoOverlayCopies(), "at 4x with an overlay copy");
+    Check(g_level == 4 && SpanListIs(4), "at 4x");
     Screen(2560, 1440);
     g_testNoRoom = true;
     Passes(4);
     Check(g_failed && g_level == 1 && StockPixels() && HoldsNothing() && EveryTextureHasBits(),
-          "the 8x level refused: every texture stock with bits, the copy freed, nothing held", Num(g_liveBits));
+          "the 8x level refused: every texture stock with bits, the list empty, nothing held", Num(g_liveBits));
     Check(Logged("no address room for the 8x level") == 1, "logged once");
     TerrainHdSet(0);
     Check(HoldsNothing(), "off after the failure: nothing held");
@@ -530,6 +495,35 @@ int main(int argc, char** argv)
     strcpy_s(g_testDir, g_root.c_str());
     const std::string s = argv[2];
     if (s == "make_pack") { WritePack(); return 0; }
+    if (s.rfind("stubs ", 0) == 0) {                     // stubs <stubVa hex> <dataVa hex>: the generated bytes
+        MakeImage();
+        for (int i = 0; i < 100; ++i) {                  // the real exe's bytes at each site, one hex line each (stdin)
+            char line[64] = {};
+            if (!fgets(line, sizeof line, stdin)) return 2;
+            for (int j = 0; j < 6 && line[2 * j] && line[2 * j] != '\n'; ++j) {
+                unsigned v = 0;
+                sscanf_s(line + 2 * j, "%2x", &v);
+                At(kSpanSites[i])[j] = static_cast<uint8_t>(v);
+            }
+        }
+        unsigned stubVa = 0, dataVa = 0;
+        if (sscanf_s(s.c_str() + 6, "%x %x", &stubVa, &dataVa) != 2) return 2;
+        static uint8_t area[kStubArea];
+        uint8_t patch[100][6];
+        if (!TerrainHdTestStubs(stubVa, dataVa, area, patch)) return 1;
+        std::printf("area ");
+        for (size_t i = 0; i < kStubArea; ++i) std::printf("%02x", area[i]);
+        std::printf("\n");
+        for (int i = 0; i < 100; ++i) {
+            std::printf("site %x ", kSpanSites[i]);
+            for (size_t j = 0; j < SpanStoreBytes(At(kSpanSites[i])); ++j) std::printf("%02x", patch[i][j]);
+            std::printf("\n");
+        }
+        std::printf("data last %u shift %u count %u level %u ptrs %u\n", static_cast<unsigned>(offsetof(SpanData, last)),
+                    static_cast<unsigned>(offsetof(SpanData, shift)), static_cast<unsigned>(offsetof(SpanData, count)),
+                    static_cast<unsigned>(offsetof(SpanData, levelShift)), static_cast<unsigned>(offsetof(SpanData, ptrs)));
+        return 0;
+    }
     if (s == "corners") {                                // GiveBits' Texture fields after a cut at each size
         g_eng.alloc = &FakeAlloc;
         g_eng.free = &FakeFree;

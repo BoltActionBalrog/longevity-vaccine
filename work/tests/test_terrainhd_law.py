@@ -49,14 +49,17 @@ def test_level_keeps_a_texel_per_pixel_across_the_real_tile_or_is_capped():
             assert need > k // 2, (w, h)                      # the smallest level that covers it
 
 
-def test_uv_law_is_even_and_inside_the_texture():
+def test_span_law_samples_the_block_of_the_stock_texel():
+    """k * (u0 + n du) lies in the k x k block of stock's texel for every sample, and fits 32 bits: the largest span
+    coordinate at 8x is 56 * 8 << 16 (u, v) and |du| is at most a texture width per pixel."""
+    rnd = random.Random(3)
     for k in (1, 2, 4, 8):
-        c = SL.terrain_hd_uv(0, k)
-        assert 0 <= c <= max(k - 1, 0)
-        assert SL.terrain_hd_uv(55, k) <= 56 * k - 1
-        for u in range(55):
-            assert SL.terrain_hd_uv(u + 1, k) - SL.terrain_hd_uv(u, k) == k      # 27 -> 28 included
-    assert [SL.terrain_hd_uv_offset(k) for k in (2, 4, 8)] == [0, 1, 2]
+        for _ in range(20000):
+            u0, du, n = rnd.randrange(0, 56 << 16), rnd.randrange(-(56 << 16), 56 << 16), rnd.randrange(0, 600)
+            stock = u0 + n * du
+            hd = SL.terrain_hd_span(u0, k) + n * SL.terrain_hd_span(du, k)
+            assert hd >> 16 >> (k.bit_length() - 1) == stock >> 16
+    assert SL.terrain_hd_span(56 << 16, 8) < 2 ** 31
 
 
 def test_nearest_is_blocks_of_stock():
@@ -88,9 +91,9 @@ def test_port_matches_the_python(port):
         cases.append(f"tile {z} 0")
         want.append(str(SL.terrain_hd_tile_px(z)))
     for k in (1, 2, 4, 8):
-        for u in range(56):
-            cases.append(f"uv {u} {k}")
-            want.append(str(SL.terrain_hd_uv(u, k)))
+        for c in (0, 1, 0x8000, 27 << 16, (55 << 16) + 0x8000, -(3 << 16), 56 << 16):
+            cases.append(f"span {c} {k}")
+            want.append(str(SL.terrain_hd_span(c, k)))
     rnd = random.Random(7)
     for n, k in ((1, 2), (3, 4), (56, 2), (56, 4)):
         img = [[rnd.randrange(256) for _ in range(n)] for _ in range(n)]

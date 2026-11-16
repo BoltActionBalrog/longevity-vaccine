@@ -10,11 +10,9 @@ constexpr int kMaster = 8;                               // the pack: TEXTURE.PC
 constexpr int kStockSheetW = 1024, kStockSheetH = 768;   // TEXTURE.PCX
 constexpr int kMaxLevel = 8;                             // the pack's own size (terrain_hd_level)
 
-// scaling_laws.terrain_hd_uv_offset: c(k) = round((k - 1) / 4), measured on the engine's own Texture_draw_2.
-inline int UvOffset(int k) { return (k - 1 + 2) / 4; }
-
-// scaling_laws.terrain_hd_uv: a stock UV (0..55, the tables' and immediates' unit) at level k.
-inline int Uv(int u, int k) { return k == 1 ? u : k * u + UvOffset(k); }
+// scaling_laws.terrain_hd_span: a span coordinate (16.16 texels: u, v, du, dv) at level k -- exactly k times the stock
+// one, so it samples the k x k block of the stock texel stock samples. The span stubs do it with a shift (k = 2^s).
+inline int32_t Span(int32_t c, int k) { return c * k; }
 
 // scaling_laws.terrain_hd_max_zoom: PRACX's deepest zoom for a w x h screen (ZoomInit's iZoomFactorMax loop).
 inline int MaxZoom(int w, int h)

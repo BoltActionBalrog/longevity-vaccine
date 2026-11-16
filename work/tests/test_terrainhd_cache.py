@@ -1,8 +1,9 @@
-"""terrainhd.cpp's own bookkeeping, run: the row off from the ini (nothing cut) and live (the exact stock textures and
-UVs back, nothing held); a new game at a level and the level per screen (2x / 4x / 8x, 8x the cell as painted);
-PRACX's Alt+T overlays drawn from level copies; a pack damaged after install and no address room for a level (each
-decided once: several passes, one read at most, one log line, nothing held, tried again only by switching the row);
-a failed level after a level with overlay copies; back to stock from every level with every texture keeping bits.
+"""terrainhd.cpp's own bookkeeping, run: the row off from the ini (nothing cut) and live (the exact stock textures
+back, the span stubs' list of ours empty, nothing held); a new game at a level and the level per screen (2x / 4x / 8x,
+8x the cell as painted), the list following each; PRACX's Alt+T overlays never in the list (drawn natively, nothing
+copied); a pack damaged after install and no address room for a level (each decided once: several passes, one read
+at most, one log line, nothing held, tried again only by switching the row); a failed level after a level; back to
+stock from every level with every texture keeping bits.
 
 tests/terrainhd_cache_selftest.cpp compiles terrainhd.cpp itself (TERRAINHD_SELFTEST: a fake exe image and fake
 engine functions that follow the engine where the hook depends on it -- mem_alloc never returns null, a Buffer's
@@ -44,9 +45,10 @@ def pack(exe, tmp_path_factory):
 
 
 def test_give_bits_writes_the_texture_as_texture_extract_2_does(exe, tmp_path):
-    """GiveBits stands in for Texture_extract_2: every field it writes after a cut (+4..+0x6C) equals what the
-    engine's own code writes for that size, run under emulation on the pristine exe (the tail 0x61985F..0x6198C9 that
-    fills the size's corner coordinates, after the bits; +4 / +8 / +0x6C as the function stores them)."""
+    """GiveBits stands in for Texture_extract_2: after a cut at any level, width and height (+4 / +8) are the level's
+    size and every other field (+0x0C..+0x6C) equals what the engine's own code writes for a 56 x 56 cut, run under
+    emulation on the pristine exe (the tail 0x61985F..0x6198C9). The corner coordinates stay stock because
+    Texture_draw_trans_2 (0x61A240) draws from them as its UVs and the span stubs multiply them by the level."""
     sys.path.insert(0, str(ROOT / "scripts"))
     import config
     import pefile
@@ -68,13 +70,14 @@ def test_give_bits_writes_the_texture_as_texture_extract_2_does(exe, tmp_path):
             mu.mem_write(ib + s.VirtualAddress, s.get_data())
         mu.mem_map(0x0F000000, 0x100000)
         tex, sp = 0x0F010000, 0x0F080000
-        mu.mem_write(tex, struct.pack("<3i", 0x1234, side, side) + b"\xEE" * (0x70 - 12))
+        mu.mem_write(tex, struct.pack("<3i", 0x1234, 56, 56) + b"\xEE" * (0x70 - 12))
         mu.reg_write(UC_X86_REG_ESI, tex)
         mu.reg_write(UC_X86_REG_EBX, 0)                      # ebx = 0 through the function (xor ebx, ebx)
         mu.reg_write(UC_X86_REG_ESP, sp)
         mu.emu_start(0x61985F, 0x6198C9)
         eng = list(struct.unpack("<27i", bytes(mu.mem_read(tex + 4, 0x6C))))
         eng[-1] = 0                                          # +0x6C: 0 for bits not from a TexHeap (0x61980E)
+        eng[0], eng[1] = side, side                          # +4 / +8: the level's size (the row stride)
         assert got == eng, (side, got, eng)
 
 
