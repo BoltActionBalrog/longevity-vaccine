@@ -1,12 +1,12 @@
 """uimod's HD terrain textures (src/uimod/src/terrainhd.cpp), against the pristine and the patched exe.
 
-terrainhd retargets load_terrain's 21 Texture_extract_2 calls (19 TEXTURE.PCX cuts + 2 RAINFALL composites) and the
-8 calls of MapWin_gen_terrain_poly, and turns the 100 span stores of the rasterizers (u, v, du, dv in each of 25 span
-setups) into calls of stubs that multiply them by the level for its own textures. What is pinned here, on both
-images: each list is the exe's complete census of that call / store (load_terrain's one other cut, 0x4523A6, is the
-60x60 texture 0x78DD80, left alone); every texture coordinate the hook used to rewrite is stock and untouched; no
-branch lands inside a store's bytes and no store runs while a rasterizer borrows esp; the engine functions' entry
-bytes are the source's; nothing in patches.yaml writes a byte the hook checks or rewrites; the source's constants
+terrainhd retargets load_terrain's 22 Texture_extract_2 calls (19 TEXTURE.PCX cuts, 2 RAINFALL composites and the
+60x60 territory border 0x78DD80 at 0x4523A6) and the 8 calls of MapWin_gen_terrain_poly, and turns the 100 span
+stores of the rasterizers (u, v, du, dv in each of 25 span setups) into calls of stubs that multiply them by the
+level for its own textures. What is pinned here, on both images: each list is the exe's complete census of that
+call / store; every texture coordinate the hook used to rewrite is stock and untouched; no branch lands inside a
+store's bytes and no store runs while a rasterizer borrows esp; the engine functions' entry bytes are the source's;
+nothing in patches.yaml writes a byte the hook checks or rewrites; the source's constants
 are these. That the stores scale exactly is test_terrainhd_exact.py.
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ HD = (SRC_DIR / "terrainhd.cpp").read_text(encoding="utf-8")
 PREFS = (SRC_DIR / "prefs.cpp").read_text(encoding="utf-8")
 
 EXTRACT2, TEX_CTOR, TEX_CLOSE, DRAW2 = 0x619710, 0x619650, 0x619690, 0x6233C0
-GEN, MEM_ALLOC, FREE = 0x4632D0, 0x5D4510, 0x644EF2
+GEN, MEM_GET, MEM_FREE = 0x4632D0, 0x5D4510, 0x644EF2
 RASTER_LO, RASTER_HI = 0x6198E0, 0x625200                 # the ten rasterizers and their helpers
 SPAN_GLOBALS = {0x9BB4F8: "u", 0x9BB53C: "v", 0x9BB4E4: "du", 0x9BB4C8: "dv"}
 TEX_BITS = 0x9BB544
@@ -45,12 +45,12 @@ DATALINK, DATALINK_END = 0x431180, 0x431800
 SHEET_CUTS = [0x451D0B, 0x451D27, 0x451D50, 0x451D8F, 0x451DB6, 0x451DE0, 0x451E24, 0x451E86, 0x451EBF, 0x451EE9,
               0x451F32, 0x451F76, 0x451FBF, 0x452000, 0x452030, 0x452081, 0x4520E1, 0x452128, 0x452171]
 RAIN_CUTS = [0x4522CA, 0x4522E5]
-CUT_60 = 0x4523A6                                          # mov ecx, 0x78DD80 (the 60x60 texture); not hooked
+CUT_60 = 0x4523A6                                          # mov ecx, 0x78DD80: the territory border (60x60)
 GEN_SITES = [0x40F35F, 0x468C73, 0x46927C, 0x469308, 0x469E47, 0x47130C, 0x4B6B9C, 0x4BDF5C]
 UV_IMMS = [0x46485D, 0x4649BB, 0x464AF8, 0x464FD8, 0x465561, 0x465C81, 0x465D43, 0x4311B2]
 UV_TABLES = {0x685CA8: 32, 0x686090: 56}
 PRACX_SWAP_SITES = [0x464215, 0x464353]
-ENGINE_FNS = ("kVA_Extract2", "kVA_MemAlloc", "kVA_Free", "kVA_GenTerrainPoly")
+ENGINE_FNS = ("kVA_Extract2", "kVA_MemGet", "kVA_MemFree", "kVA_GenTerrainPoly")
 STOCK_UV = {
     0x685CA8: [27, 27, 27, 55, 0, 55, 0, 0, 27, 27, 27, 0, 55, 0, 55, 55, 27, 27, 55, 27, 55, 55, 27, 55, 27, 27, 0, 27,
                0, 0, 27, 0],
@@ -252,12 +252,12 @@ def test_no_patch_site_overlaps_what_the_hook_checks_or_writes(pe):
 
 def test_the_hook_gives_bits_the_way_texture_extract_2_does(img):
     """GiveBits stands in for Texture_extract_2 without a Buffer: the engine's own cut allocates a Texture's bits with
-    mem_alloc (its only allocation when no TexHeap is passed), frees the old ones with free when +0x6C is 0, and sets
-    exactly bits +0, width +4, height +8 and +0x6C; Texture_close frees with the same free. mem_alloc shows a message
+    mem_get (its only allocation when no TexHeap is passed), frees the old ones with mem_free when +0x6C is 0, and sets
+    exactly bits +0, width +4, height +8 and +0x6C; Texture_close frees with the same mem_free. mem_get shows a message
     box and exits when malloc returns null, so it never returns null."""
-    assert calls(img, EXTRACT2, EXTRACT2 + 0x1C0, MEM_ALLOC) == [0x6197E2]
-    assert calls(img, EXTRACT2, EXTRACT2 + 0x1C0, FREE) == [0x61973C]
-    assert calls(img, TEX_CLOSE, TEX_CLOSE + 0x3A, FREE) == [0x6196A5]
+    assert calls(img, EXTRACT2, EXTRACT2 + 0x1C0, MEM_GET) == [0x6197E2]
+    assert calls(img, EXTRACT2, EXTRACT2 + 0x1C0, MEM_FREE) == [0x61973C]
+    assert calls(img, TEX_CLOSE, TEX_CLOSE + 0x3A, MEM_FREE) == [0x6196A5]
     import capstone
     from capstone import x86_const as X
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
@@ -271,14 +271,14 @@ def test_the_hook_gives_bits_the_way_texture_extract_2_does(img):
     # bits, width, height, the corner coordinates (+0x0C..+0x68: TexCorners, compared with this code run under
     # emulation in test_terrainhd_cache.py) and the heap flag; nothing else
     assert stores == {0, 4, 8, 0x6C} | set(range(0x0C, 0x6C, 4)), sorted(stores)
-    a = rd(img, MEM_ALLOC, 0x2C)
+    a = rd(img, MEM_GET, 0x2C)
     assert a[0x0F:0x11] == b"\x75\x1A" and a[0x26] == 0xE8                  # jne past the box; exit(4) after it
     assert "GiveBits" in HD and "bufferInit" not in HD and "FillScratch" not in HD
 
 
 def test_source_constants():
-    for name, va in (("kVA_Extract2", EXTRACT2), ("kVA_GenTerrainPoly", GEN), ("kVA_MemAlloc", MEM_ALLOC),
-                     ("kVA_Free", FREE), ("kVA_LoadingCanvas", 0x798668), ("kVA_ScreenW", 0x9B7B1C),
+    for name, va in (("kVA_Extract2", EXTRACT2), ("kVA_GenTerrainPoly", GEN), ("kVA_MemGet", MEM_GET),
+                     ("kVA_MemFree", MEM_FREE), ("kVA_LoadingCanvas", 0x798668), ("kVA_ScreenW", 0x9B7B1C),
                      ("kVA_ScreenH", 0x9B7B20), ("kVA_TexBits", TEX_BITS)):
         assert src_const(name) == va, name
     assert '"HD Terrain", &TerrainHdAvailable' in PREFS

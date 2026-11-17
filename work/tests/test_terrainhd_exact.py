@@ -11,13 +11,27 @@ terrain_hd_nearest) in a texture the stubs know as ours. Every pixel of the two 
     texel)
 
 over the stock UV tables' polygons at tile widths up to the deepest zoom at 4K, and random polygons, some partly off
-the buffer so the clipping pre-step runs. And a texture that is not ours draws byte-for-byte as it did before the
-stubs were patched in. Skipped when the pristine exe or Visual Studio is absent.
+the buffer so the clipping pre-step runs, with lights that shade every vertex differently and, on every other
+polygon, a clip rect inside the buffer. The territory border gives each of its codes 1..9 its own layer table, so
+every code is told apart. And a texture that is not ours draws byte-for-byte as it did before the stubs were patched
+in. The stubs are written into the image before any patched draw, and Unicorn's translated-code cache is flushed
+right after (on Unicorn 2.1 code already translated keeps running from that cache after a plain mem_write); every
+draw that is meant to run the stubs is checked to have executed stub instructions.
+
+And the code-map rule itself: load_terrain's own code (0x4521AD..0x4523AB, from the RAINFALL.PCX colour changes to
+the border's cut) run on the stock RAINFALL.PCX, against terrain_hd_code of the same file.
+
+The module takes about 45 s serially (measured here), almost all of it in Unicorn: 16 draw kinds x 3 levels x 108
+polygons (30 for Texture_draw_trans_2), each a full rasterizer run under emulation. That is the price of drawing every
+reachable span setup for real; the polygon count is the smallest that still covers every table polygon at every tile
+width and the random clipped ones.
+Skipped when the pristine exe or Visual Studio is absent.
 """
 from __future__ import annotations
 
 import pathlib
 import random
+import struct
 import subprocess
 import sys
 
@@ -36,7 +50,9 @@ pytestmark = pytest.mark.skipif(not BAK or not pathlib.Path(BAK).exists(), reaso
 
 TEX_DRAW_2, FUNGUS_DRAW, EXTRACT_2, BUFFER_CTOR, BUFFER_INIT = 0x6233C0, 0x6239E0, 0x619710, 0x5D7210, 0x5D7670
 BUF_DATA, BUF_BITS, BUF_W, BUF_PITCH = 0x50, 0x54, 0x80, 0x4A8
+BUF_CLIP = 0x20                                 # stRect[0]: left, top, right, bottom -- what the rasterizers clip to
 W, H = 640, 400
+CLIP_IN = (37, 23, W - 41, H - 29)
 STUB_VA, DATA_VA = 0x30000000, 0x30100000
 
 QUADS = [(27, 27), (27, 55), (0, 55), (0, 0), (27, 27), (27, 0), (55, 0), (55, 55), (27, 27), (55, 27), (55, 55),
@@ -130,12 +146,18 @@ class Raster:
     def patch(self, stubs, k, ours):
         area, sites, data = stubs
         uc = self.e.uc
-        from unicorn import UC_PROT_ALL
+        from unicorn import UC_HOOK_CODE, UC_PROT_ALL
         uc.mem_map(STUB_VA, 0x10000, UC_PROT_ALL)
         uc.mem_map(DATA_VA, 0x1000, UC_PROT_ALL)
         uc.mem_write(STUB_VA, area)
         for va, b in sites:
             uc.mem_write(va, b)
+        uc.ctl_flush_tb()                                          # the rasterizers ran before: drop their translations
+        self.stub_steps = 0
+
+        def step(uc_, a, s, u):
+            self.stub_steps += 1
+        uc.hook_add(UC_HOOK_CODE, step, begin=STUB_VA, end=STUB_VA + len(area) - 1)
         self.data = data
         self.set_ours(k, ours)
 
@@ -152,6 +174,9 @@ class Raster:
         e = self.e
         p, pitch = self.pixels(self.dst), e.r32(self.dst + BUF_PITCH)
         e.uc.mem_write(p, b"\xff" * (pitch * H))
+        # every other polygon (by its points, so both draws of a pair agree) clipped to a rect inside the buffer
+        inner = sum(x + y for x, y in pts) % 2
+        e.uc.mem_write(self.dst + BUF_CLIP, struct.pack("<4i", *(CLIP_IN if inner else (0, 0, W, H))))
         n = len(pts)
         pa, ua, la = e.alloc(8 * n), e.alloc(8 * n), e.alloc(4 * n)
         for i, ((x, y), (u, v)) in enumerate(zip(pts, uvs)):
@@ -159,7 +184,7 @@ class Raster:
             e.w32(pa + 8 * i + 4, y & 0xFFFFFFFF)
             e.w32(ua + 8 * i, u)
             e.w32(ua + 8 * i + 4, v)
-            e.w32(la + 4 * i, 0)
+            e.w32(la + 4 * i, (((x * 7 + y * 13 + i * 5) % 11) - 4) & 0xFFFFFFFF)   # lights -4..6, added to the index
         if fn in (TEX_DRAW_2, TEX_DRAW_TRANS):                     # (dst, pts, light, n, uvs, mode)
             args = (self.dst, pa, la, n, ua, mode & 0xFFFFFFFF)
         elif fn in DIRECT:                                         # the rasterizers' own (dst, pts, light, n, uvs)
@@ -235,9 +260,9 @@ def world(stubs):
     border_img = rnd.integers(0, 10, (60, 60), dtype=np.uint8)
     r.border = {1: r.texture(border_img)}
     r.layers = r.e.alloc(256)
-    r.e.uc.mem_write(r.layers, bytes(v % 3 for v in range(256)))       # codes 0, 3, 6, 9: not drawn
-    r.blend = r.e.alloc(512)
-    r.e.uc.mem_write(r.blend, bytes((v * 7 + 13) & 255 for v in range(256)) + bytes((v * 11 + 101) & 255 for v in range(256)))
+    r.e.uc.mem_write(r.layers, bytes(range(10)) + bytes(246))            # code c -> layer c; 0: not drawn
+    r.blend = r.e.alloc(11 * 256)                                       # a table per layer, all different
+    r.e.uc.mem_write(r.blend, rnd.integers(0, 256, 11 * 256, dtype=np.uint8).tobytes())
     polys = polygons()
     r.stock = stock
     before = {(name, i): r.draw(fn, textures(r, fn, 1)[0], pts, uv, mode)
@@ -263,12 +288,15 @@ def world(stubs):
 
 
 def test_a_texture_not_ours_draws_as_before_the_stubs(world):
+    """`before` was drawn by the unpatched code; these draws run the stubs (counted), which multiply by 1."""
     r, stock, hd, polys, before = world
     r.set_ours(4, [hd[4], r.comp[4], r.border[4]])
     r.composite = r.comp[1]
     for name, fn, mode in DRAWS:
+        steps = r.stub_steps
         for i, (pts, uv) in enumerate(shapes(fn, mode, polys)[:24]):
             assert (r.draw(fn, textures(r, fn, 1)[0], pts, uv, mode) == before[(name, i)]).all(), (name, i)
+        assert r.stub_steps > steps, (name, "no stub instruction ran")
 
 
 @pytest.mark.parametrize("k", [2, 4, 8])
@@ -279,6 +307,7 @@ def test_switching_the_level_moves_no_pixel(world, k, draw):
     r.set_ours(k, [hd[k], r.comp[k], r.border[k]])
     covered = 0
     lo, hi = textures(r, fn, k)
+    steps = r.stub_steps
     for i, (pts, uv) in enumerate(shapes(fn, mode, polys)):
         r.composite = r.comp[1]
         a = r.draw(fn, lo, pts, uv, mode)
@@ -288,3 +317,46 @@ def test_switching_the_level_moves_no_pixel(world, k, draw):
         diff = int((a != b).sum())
         assert diff == 0, (name, k, i, diff, int((a != 255).sum()))
     assert covered > 30000, covered                               # the polygons really drew
+    assert r.stub_steps > steps, "no stub instruction ran"        # ... through the patched code
+
+
+def test_the_code_maps_are_load_terrains_own_on_the_stock_file():
+    """terrain_hd_code (the rule the hook builds its code maps by) gives exactly the engine's three code-map textures
+    for the stock RAINFALL.PCX: load_terrain's own code run from the colour changes after RAINFALL.PCX is loaded
+    (0x4521AD: 252 and 253 made see-through) to the border's cut (0x4523AB), the loading canvas holding the file as
+    Buffer_load_pcx(.., 10, 236) loads it. At k = 1 the rule samples pixel (4, 4) of each 8 x 8 block of the 8x
+    picture: the stock pixel itself."""
+    import image_emu as ie
+    from PIL import Image
+    from unicorn.x86_const import UC_X86_REG_EBP, UC_X86_REG_ESP
+    rain = pathlib.Path(ie.GAME) / "rainfall.pcx"
+    if not rain.exists():
+        pytest.skip("no rainfall.pcx")
+    px = np.array(Image.open(rain))
+    assert px.shape == (480, 640)
+    e = ie.Emu(str(BAK), 1920, 1080)
+    ie.crt_stubs(e)
+    canvas = 0x798668
+    e.call(BUFFER_CTOR, ecx=canvas)
+    e.call(BUFFER_INIT, ecx=canvas, args=(640, 480, 0, 0))
+    bits = e.r32(canvas + BUF_DATA) or e.r32(canvas + BUF_BITS)
+    pitch = e.r32(canvas + BUF_PITCH)
+    loaded = ((px.astype(np.int32) + 10) & 255).astype(np.uint8)
+    for y in range(480):
+        e.uc.mem_write(bits + y * pitch, loaded[y].tobytes())
+    ebp = ie.STACK + ie.STACK_SZ - 0x4000
+    e.uc.mem_write(ebp - 0x2000, bytes(0x2000))                   # load_terrain's locals, zeroed
+    e.uc.reg_write(UC_X86_REG_EBP, ebp)
+    e.uc.reg_write(UC_X86_REG_ESP, ebp - 0x1000)
+    e.uc.emu_start(0x4521AD, 0x4523AB, count=50000000)
+    comp_cols = list(bytes(e.uc.mem_read(0x6846F8, 53)))
+    border_cols = [bytes(e.uc.mem_read(0x452307 + 4 * i, 4))[3] for i in range(9)]
+    cases = [(0x76E8A0, 2, 333, 56, comp_cols, 0), (0x76E910, 59, 333, 56, comp_cols, 0),
+             (0x78DD80, 2, 254, 60, border_cols, 9)]
+    for tex, x, y, n, cols, bg in cases:
+        assert e.r32(tex + 4) == n and e.r32(tex + 8) == n, hex(tex)
+        engine = np.frombuffer(bytes(e.uc.mem_read(e.r32(tex), n * n)), np.uint8).reshape(n, n)
+        region = px[y:y + n, x:x + n].tolist()
+        ours = np.array(SL.terrain_hd_code(SL.terrain_hd_nearest(region, 8), cols, bg, 1), np.uint8)
+        assert (engine == ours).all(), (hex(tex), int((engine != ours).sum()))
+        assert len(np.unique(engine)) > 3, hex(tex)               # a real map, not a flat fill

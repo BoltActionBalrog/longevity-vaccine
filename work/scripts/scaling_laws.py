@@ -15278,8 +15278,8 @@ def terrain_hd_span(c: int, k: int) -> int:
     texture that is the stock one with each texel a k x k block (terrain_hd_nearest), every pixel is stock's.
     The texture's own corner coordinates (+0x0C..+0x68, the UVs of Texture_draw_trans_2 and the coast) stay stock too.
     Measured: test_terrainhd_exact.py draws on the real rasterizers under emulation, both edge families, at 2x / 4x /
-    8x: zero pixels differ. It runs 11 of the 25 span setups -- every one the exe can reach except the 60x60 border's
-    (0x61E540, a texture that is not ours); the other 13 are in functions nothing calls. (The UV-table law it replaces,
+    8x: zero pixels differ. It runs 12 of the 25 span setups -- every one the exe can reach, the territory border's
+    (0x61E540) among them; the other 13 are in functions nothing calls. (The UV-table law it replaces,
     k*u + round((k - 1) / 4), moved 11-15 % of a ground tile's pixels at 4x.)"""
     return c * k
 
@@ -15325,10 +15325,13 @@ def terrain_hd_code(x8: List[List[int]], cols: List[int], bg: int, k: int) -> Li
     """LAW (the engine's rule, at a level) -- a RAINFALL code map from the pack's 8x region of RAINFALL.PCX (file
     indices). load_terrain cuts the coast composites (RAINFALL.PCX at 2,333 and 59,333, 56 x 56) and the territory
     border (2,254, 60 x 60) by drawing that region through a remap table into a fresh Buffer: a texel is the index of
-    its colour in the list (53 at 0x6846F8 for the composites, 9 for the border), bg for the see-through 255 (0, and
-    9 for the border's Buffer_fill), 0 for any other colour -- measured: the rule rebuilds the engine's three textures
-    exactly (load_terrain's own code under emulation). A code is a class, not a colour, so a level k < 8 samples the
-    centre of each 8/k block instead of averaging."""
+    its colour in the list (53 at 0x6846F8 for the composites, 9 for the border), bg for the see-through 255 and for
+    252 and 253, which load_terrain makes see-through as well before it builds the maps (Buffer_change_color at
+    0x4521B4) (bg: 0, and 9 for the border's Buffer_fill), 0 for any other colour -- measured: the rule rebuilds the
+    engine's three textures exactly (load_terrain's own code under emulation). A code is a class, not a colour, so a
+    level k < 8 samples one pixel of each s x s block, s = 8/k, instead of averaging: pixel (s//2, s//2), i.e. the
+    pixel itself at 8x, (1, 1) of a 2 x 2 block at 4x and (2, 2) of a 4 x 4 block at 2x -- half a pack pixel down and
+    right of the true centre."""
     s = TERRAIN_HD_MASTER // k
     m = len(x8) // s
     out = []
@@ -15336,12 +15339,37 @@ def terrain_hd_code(x8: List[List[int]], cols: List[int], bg: int, k: int) -> Li
         row = []
         for x in range(m):
             v = x8[y * s + s // 2][x * s + s // 2]
-            row.append(bg if v == 255 else (cols.index(v) if v in cols else 0))
+            row.append(bg if v in TERRAIN_HD_SEE_THROUGH else (cols.index(v) if v in cols else 0))
         out.append(row)
     return out
 
 
+TERRAIN_HD_SEE_THROUGH = (252, 253, 255)
+
+
+def terrain_hd_code_census(x8: List[List[int]], cols: List[int], k: int) -> Tuple[int, int]:
+    """LAW -- what terrain_hd_code sampled, counted: (listed, unlisted) = the sampled texels of a colour in the list,
+    and of any other colour but the see-through three. A piece is SUPPLIED by the art only when listed > 0: a region
+    left see-through or blanked with any colour not in the list (RAINFALL.PCX's own frame colour 254, say) would
+    otherwise become a map of code 0 -- no ocean and no shore, or no border -- so it falls back as a missing piece
+    does. Unlisted texels become code 0 as in the engine (in a composite, land); the hook logs how many per piece."""
+    s = TERRAIN_HD_MASTER // k
+    m = len(x8) // s
+    listed = unlisted = 0
+    for y in range(m):
+        for x in range(m):
+            v = x8[y * s + s // 2][x * s + s // 2]
+            if v in TERRAIN_HD_SEE_THROUGH:
+                continue
+            if v in cols:
+                listed += 1
+            else:
+                unlisted += 1
+    return listed, unlisted
+
+
 def terrain_hd_nearest(src: List[List[int]], k: int) -> List[List[int]]:
-    """LAW -- a texture the pack does not supply (the two RAINFALL composites, PRACX's Alt+T overlays) at level k:
+    """LAW -- a texture the pack does not supply but that must be at the level (a coast composite without RAINFALL
+    art, a blank ocean cell: the composites share the ocean's UVs) at level k:
     each stock texel a k x k block. Exactly the stock picture at the HD size, so it samples like stock."""
     return [[v for v in row for _ in range(k)] for row in src for _ in range(k)]

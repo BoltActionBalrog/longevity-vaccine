@@ -50,26 +50,30 @@
 //    SpanStubs. A stub decides by the bits pointer: the last one is cached; a new one is looked up in the list of
 //    ours (repne scasd, no C, no FPU, so the rasterizer's floating-point stack is untouched).
 //  * a level is installed by giving every recorded Texture new bits at nk x nk. The bits are allocated the way
-//    Texture_extract_2 allocates them (mem_alloc 0x5D4510; the old ones freed with free 0x644EF2, as Texture_close
+//    Texture_extract_2 allocates them (mem_get 0x5D4510; the old ones freed with mem_free 0x644EF2, as Texture_close
 //    does) and filled directly: no Buffer, so no quiet failure in between. TEXTURE.PCX's textures come from the pack
-//    (each 8x cell shrunk to the level by basehd_law::PaletteBoxShrink, used as painted at 8x). The code maps come
-//    from rainfall_x8.pcx by the engine's own rule (terrainhd::Code: each texel the centre of its 8/k block, as a
-//    code is a class, not a colour), piece by piece: a piece the art leaves empty falls back -- a coast composite to
-//    terrainhd::Nearest of its stock pixels (it shares its UVs with the enlarged ocean), the border to stock (not
-//    ours). Back to stock the same way, texture by texture from the stock copy: a step that cannot fail quietly, so
-//    the textures are always all stock or all at the level, and every recorded texture always has bits.
+//    (each 8x cell shrunk to the level by basehd_law::PaletteBoxShrink, used as painted at 8x); a cell the pack leaves
+//    blank (all 255) is a piece it does not supply and stays stock, not ours -- but for the two ocean cells, whose UVs
+//    the coast composites share: their own stock pixels at the level (terrainhd::Nearest). The code maps come from
+//    rainfall_x8.pcx by the engine's own rule (terrainhd::Code: each texel one pixel of its 8/k block, as a code is a
+//    class, not a colour; 252, 253 and 255 see-through), piece by piece: a piece with no listed colour is not
+//    supplied and falls back -- a coast composite to terrainhd::Nearest of its stock pixels (it shares its UVs with
+//    the enlarged ocean), the border to stock (not ours); unlisted colours become code 0 as in the engine, counted
+//    in the log. Back to stock the same way, texture by texture from the stock copy: a step that cannot fail quietly,
+//    so the textures are always all stock or all at the level, and every recorded texture always has bits.
 //  * anything that stops a level (the pack unreadable or changed since startup, no address room for the level) is
 //    decided once: logged, stock for the session, no further work on later passes; switching the row off and on tries
-//    again once.
+//    again once. rainfall_x8.pcx the same way: proven at install, and when it is unusable (or this exe's colour lists
+//    are not the known ones) logged once and not opened again until the row is switched on.
 //
 // Native no-op: no usable pack, no Longevity Preferences tab, or any unexpected byte -> nothing patched, no row.
 // "HD Terrain" in Longevity Mod Preferences ([UIMod] TerrainHD) switches it live. On, the hook holds the cut
 // textures (160 + 2 at 56k x 56k and the border at 60k x 60k: 32.7 MB at 8x, 8.2 MB at 4x) and the stock pixels to
-// restore (0.5 MB);
-// the pack's bytes are read for a cut and freed right after. Off, the stock textures are back, the list of ours is
-// empty (every stub multiplies by 1) and nothing is held. The engine's fatal exit on an allocation failure is
-// bounded, not gone: each texture's bits are a mem_alloc (at most 448 x 448), as in Texture_extract_2, and the
-// address room for the whole level is probed before the first one.
+// restore (0.5 MB); the pack's bytes are read for a cut and freed right after. Off, the stock textures are back, the
+// list of ours is empty (every stub multiplies by 1) and nothing is held. The engine's fatal exit on an allocation
+// failure is bounded, not gone: each texture's bits are a mem_get (at most 448 x 448), as in Texture_extract_2, and
+// the address room for the level's textures is probed before the first one (the pack's stream and the rain pack's
+// are allocated after the probe).
 
 #include "terrainhd.h"
 #include "terrainhd_law.h"
@@ -92,8 +96,8 @@ namespace {
 
 constexpr uintptr_t kVA_Extract2       = 0x619710;   // Texture_extract_2: thiscall (Texture*, Buffer*, x, y, w, h, TexHeap*) RET 0x18
 constexpr uintptr_t kVA_GenTerrainPoly = 0x4632D0;   // MapWin_gen_terrain_poly: cdecl, 10 args
-constexpr uintptr_t kVA_MemAlloc       = 0x5D4510;   // mem_alloc: cdecl (size) -- malloc; on null a message box + exit
-constexpr uintptr_t kVA_Free           = 0x644EF2;   // free: cdecl (p) -- what Texture_close frees a Texture's bits with
+constexpr uintptr_t kVA_MemGet         = 0x5D4510;   // mem_get: cdecl (size) -- malloc; on null a message box + exit
+constexpr uintptr_t kVA_MemFree        = 0x644EF2;   // mem_free: cdecl (p) -- Texture_close frees bits with it
 constexpr uintptr_t kVA_LoadingCanvas  = 0x798668;   // the Buffer TEXTURE.PCX is loaded into
 constexpr uintptr_t kVA_ScreenW        = 0x9B7B1C;   // ScreenWidth
 constexpr uintptr_t kVA_ScreenH        = 0x9B7B20;   // ScreenHeight
@@ -146,8 +150,8 @@ constexpr uint32_t kSpanU = 0x9BB4F8, kSpanV = 0x9BB53C, kSpanDu = 0x9BB4E4, kSp
 struct Entry8 { uintptr_t va; BYTE b[6]; };
 const Entry8 kEntries[] = {
     { kVA_Extract2,   { 0x53, 0x55, 0x56, 0x57, 0x8B, 0x7C } },
-    { kVA_MemAlloc,   { 0x8B, 0x44, 0x24, 0x04, 0x50, 0xE8 } },
-    { kVA_Free,       { 0x56, 0x8B, 0x74, 0x24, 0x08, 0x85 } },
+    { kVA_MemGet,     { 0x8B, 0x44, 0x24, 0x04, 0x50, 0xE8 } },
+    { kVA_MemFree,    { 0x56, 0x8B, 0x74, 0x24, 0x08, 0x85 } },
     { kVA_GenTerrainPoly, { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68 } },
 };
 
@@ -169,6 +173,19 @@ constexpr size_t kStockBytes = static_cast<size_t>(kTex) * kTex;
 
 struct Texture { uint8_t* data; int w; int h; };
 
+// A cell the pack leaves blank -- every pixel the see-through 255, loaded as 9 -- is a piece the pack does not supply.
+// Cut, it would be a texture of 9s, and the rasterizer shades by adding to the index: every shade an unrelated colour.
+constexpr uint8_t kLoadedKey = 9;                      // file 255 + 10, as Buffer_load_pcx(.., 10, 236) loads it
+bool CellBlank(const uint8_t* cell, int pitch)         // the 448 x 448 cell, rows `pitch` apart
+{
+    for (int y = 0; y < kCell; ++y) {
+        const uint8_t* r = cell + static_cast<size_t>(y) * pitch;
+        for (int x = 0; x < kCell; ++x)
+            if (r[x] != kLoadedKey) return false;
+    }
+    return true;
+}
+
 enum Kind { kSheet, kComposite, kBorderTex };
 
 struct Entry {
@@ -179,6 +196,9 @@ struct Entry {
     bool atLevel;                                      // cut at the level (the border only with RAINFALL art)
     size_t stock;                                      // its pixels' offset in g_stock
 };
+
+constexpr int kOceanX = 280, kOceanY1 = 79, kOceanY2 = 136;
+bool IsOcean(const Entry& e) { return e.kind == kSheet && e.x == kOceanX && (e.y == kOceanY1 || e.y == kOceanY2); }
 
 // What the span stubs read: the bits pointers that are ours and the shift for them. Written only on the game thread,
 // between draws; `last` is reset whenever the list changes, so a freed pointer the allocator hands out again is
@@ -270,7 +290,7 @@ bool BuildSpanStubs(uint8_t* out, uint32_t outVa, uint32_t dataVa, const uint8_t
 struct Engine {
     int (__thiscall* extract)(void*, void*, int, int, int, int, void*);
     int (__cdecl* gen)(void*, void*, int, int, int, int, int, int, int, int);
-    void* (__cdecl* alloc)(size_t);                   // mem_alloc: never returns null (the engine exits instead)
+    void* (__cdecl* alloc)(size_t);                   // mem_get: never returns null (the engine exits instead)
     void (__cdecl* free)(void*);
     void (__cdecl* drawMap)(int);
     int (__thiscall* statusRedraw)(void*);
@@ -289,14 +309,22 @@ int g_on = kTerrainHdDefault;
 uint8_t g_pal[768];                                    // TEXTURE.PCX's palette (the pack must match it)
 uint8_t g_rainPal[768];                                // RAINFALL.PCX's (rainfall_x8.pcx must match it)
 bool g_rainOk = false;                                 // the exe's RAINFALL colour lists are the ones above
+// rainfall_x8.pcx, decided once as texture_x8.pcx is: proven at install (one read, one log line when unusable), opened
+// again only by a cut while usable; unusable or absent, it is not opened again until the row is switched on.
+enum RainState { kRainUntried, kRainUsable, kRainNone };
+RainState g_rain = kRainNone;
 SpanData g_span = { reinterpret_cast<const void*>(1), 0, 0, 0, {} };
 char g_dir[MAX_PATH];
+const uint8_t* g_spanArea = nullptr;                   // the stubs' page, once the span stores call into it
 
 #ifdef TERRAINHD_SELFTEST
 BYTE* g_testImage = nullptr;                           // the fake exe image (0x400000-based)
 char g_testDir[MAX_PATH];
 bool g_testNoRoom = false;                             // the address-room probe fails
 int g_testPackLoads = 0;                               // LoadPack calls
+int g_testRainLoads = 0;                               // rainfall_x8.pcx reads
+int g_testBandFailsAt = -1;                            // the n-th band read of a cut fails (-1: none)
+bool g_testSpanLocked = false;                         // a span site's page cannot be made writable
 BYTE* ImageBase() { return g_testImage; }
 #else
 BYTE* ImageBase() { return reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr)); }
@@ -347,8 +375,8 @@ void SetSpanList(int k)
 }
 
 // New engine bits of side x side for t, filled by fill(bits), then the old bits freed: what Texture_extract_2 does
-// (mem_alloc, its rows at stride side, the size, the heap flag 0), without a Buffer in between; the corner
-// coordinates are an n x n cut's, as for every coordinate of ours (stock, scaled by the span stubs). mem_alloc does
+// (mem_get, its rows at stride side, the size, the heap flag 0), without a Buffer in between; the corner
+// coordinates are an n x n cut's, as for every coordinate of ours (stock, scaled by the span stubs). mem_get does
 // not return null (the engine exits instead), so this cannot fail quietly and t never holds a texture without bits.
 template <class Fill>
 void GiveBits(Texture* t, int side, int n, Fill fill)   // n: the texture's stock size (56, the border 60)
@@ -368,7 +396,7 @@ void GiveBits(Texture* t, int side, int n, Fill fill)   // n: the texture's stoc
     if (old && ours) g_eng.free(old);
 }
 
-// Room for `bytes` of engine allocations (each one a mem_alloc that exits the process when it fails): reserved and
+// Room for `bytes` of engine allocations (each one a mem_get that exits the process when it fails): reserved and
 // released, so a level that would not fit is refused before its first allocation.
 bool RoomFor(size_t bytes)
 {
@@ -418,6 +446,7 @@ bool LoadPack(hdpack::Pack* p)
 // the result is all stock.
 void RestoreStock()
 {
+    SetSpanList(1);                                      // first: no stub may find bits that are about to be freed
     if (g_stock)
         for (int i = 0; i < g_count; ++i) {
             Entry& e = g_entries[i];
@@ -428,7 +457,6 @@ void RestoreStock()
             e.atLevel = false;
         }
     g_level = 1;
-    SetSpanList(1);
     free(g_stock);
     g_stock = nullptr;
 }
@@ -445,26 +473,42 @@ void LoadedColours(uint8_t rgbq[1024])
     }
 }
 
-// RAINFALL.PCX at 8x (terrain\rainfall_x8.pcx), optional: true and loaded when it is there and usable. Without it the
-// coast composites are their own stock pixels at the level and the border stays stock. Logged when it is there but
-// cannot be used.
+void RainPath(char* out, size_t n) { _snprintf_s(out, n, _TRUNCATE, "%sterrain\\rainfall_x8.pcx", g_dir); }
+
+// RAINFALL.PCX at 8x (terrain\rainfall_x8.pcx), optional: true and loaded when it is usable. Decided once (g_rain): a
+// file that is absent, unusable or not for this exe's colour lists is not opened again until the row is switched on;
+// unusable is logged once. Without it the coast composites are their own stock pixels at the level and the border
+// stays stock.
 bool LoadRainPack(hdpack::Pack* p)
 {
-    if (!g_rainOk) return false;
+    if (g_rain == kRainNone) return false;
     char path[MAX_PATH];
-    _snprintf_s(path, sizeof path, _TRUNCATE, "%sterrain\\rainfall_x8.pcx", g_dir);
-    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) return false;
+    RainPath(path, sizeof path);
+    if (!g_rainOk || GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
+        g_rain = kRainNone;
+        return false;
+    }
+#ifdef TERRAINHD_SELFTEST
+    ++g_testRainLoads;
+#endif
     const hdpack::Result r = hdpack::Load(p, path, kRainW * terrainhd::kMaster, kRainH * terrainhd::kMaster, g_rainPal);
-    if (r == hdpack::kOk) return true;
-    Log("[terrainhd] terrain\\rainfall_x8.pcx is not usable (%s) -> stock coast composites and border\n",
-        hdpack::Why(r));
+    if (r == hdpack::kOk) {
+        g_rain = kRainUsable;
+        return true;
+    }
+    Log("[terrainhd] terrain\\rainfall_x8.pcx is not usable (%s) -> stock coast composites and border until the row "
+        "is switched\n", hdpack::Why(r));
+    g_rain = kRainNone;
     return false;
 }
 
-// A RAINFALL code map at level k from the pack's 8x region at (x, y), n x n stock texels, into out; false if the pack
-// has nothing there (all see-through: that piece is not in the pack) or the region cannot be read.
+// A RAINFALL code map at level k from the pack's 8x region at (x, y), n x n stock texels, into out; false if the art
+// does not supply the piece -- none of its sampled texels is a listed colour (see-through, or blanked with another
+// colour such as RAINFALL.PCX's frame 254, which would otherwise be a map of code 0: no ocean and no shore, or no
+// border) -- or the region cannot be read. Texels of a colour not in the list become code 0, as in the engine; their
+// number is logged per piece.
 bool RainCode(const hdpack::Pack& pack, int x, int y, int n, const uint8_t* cols, int ncols, uint8_t bg, int k,
-              uint8_t* out)
+              uint8_t* out, const char* what)
 {
     const int side = n * terrainhd::kMaster;
     uint8_t ident[256];
@@ -473,11 +517,13 @@ bool RainCode(const hdpack::Pack& pack, int x, int y, int n, const uint8_t* cols
     if (!region) return false;
     bool ok = hdpack::Expand(pack, x * terrainhd::kMaster, y * terrainhd::kMaster, side, side, ident, region);
     if (ok) {
-        bool any = false;
-        for (size_t i = 0; i < static_cast<size_t>(side) * side && !any; ++i) any = region[i] != 255;
-        ok = any;
+        int listed = 0, unlisted = 0;
+        terrainhd::Code(region, side, n, cols, ncols, bg, k, out, &listed, &unlisted);
+        ok = listed > 0;
+        if (ok && unlisted > 0)
+            Log("[terrainhd] rainfall_x8.pcx: %d texels of %s are not one of its colours -> code 0 there, as in the "
+                "engine\n", unlisted, what);
     }
-    if (ok) terrainhd::Code(region, side, n, cols, ncols, bg, k, out);
     free(region);
     return ok;
 }
@@ -536,11 +582,14 @@ bool InstallLevel(int k)
 
     // one band of the sheet at a time (the rows of every texture cut from it), so each scanline is walked once
     bool ok = true;
-    int fromPack = 0, fromRain = 0;
+    int fromPack = 0, fromRain = 0, blank = 0, bands = 0;
     bool done[kMaxEntries] = {};
     uint8_t* band = nullptr;
     uint8_t* code = static_cast<uint8_t*>(malloc(static_cast<size_t>(kBorder * k) * (kBorder * k)));
-    if (!code) ok = false;
+    if (!code) {
+        Log("[terrainhd] no memory for a %dx code map -> stock terrain until the row is switched\n", k);
+        ok = false;
+    }
     for (int i = 0; i < g_count && ok; ++i) {
         if (done[i]) continue;
         Entry& e = g_entries[i];
@@ -550,8 +599,9 @@ bool InstallLevel(int k)
             // pixels at the level and the border left stock (not ours: drawn natively)
             const bool comp = e.kind == kComposite;
             const bool art = haveRain &&
-                (comp ? RainCode(rain, e.x == 0 ? kCompX : kCompX2, kCompY, e.n, kCompColours, 53, 0, k, code)
-                      : RainCode(rain, kBorderX, kBorderY, e.n, kBorderColours, 9, 9, k, code));
+                (comp ? RainCode(rain, e.x == 0 ? kCompX : kCompX2, kCompY, e.n, kCompColours, 53, 0, k, code,
+                                 e.x == 0 ? "the first coast composite" : "the second coast composite")
+                      : RainCode(rain, kBorderX, kBorderY, e.n, kBorderColours, 9, 9, k, code, "the territory border"));
             done[i] = true;
             if (art) {
                 GiveBits(e.tex, side, e.n,
@@ -575,7 +625,13 @@ bool InstallLevel(int k)
         const int bw = (bx1 - bx0) * terrainhd::kMaster;
         free(band);
         band = static_cast<uint8_t*>(malloc(static_cast<size_t>(bw) * kCell));
-        if (!band || !hdpack::Expand(pack, bx0 * terrainhd::kMaster, e.y * terrainhd::kMaster, bw, kCell, map, band)) {
+        bool read = band && hdpack::Expand(pack, bx0 * terrainhd::kMaster, e.y * terrainhd::kMaster, bw, kCell, map,
+                                           band);
+#ifdef TERRAINHD_SELFTEST
+        if (bands == g_testBandFailsAt) read = false;
+#endif
+        ++bands;
+        if (!read) {
             Log("[terrainhd] could not read the band at row %d of texture_x8.pcx -> stock terrain until the row is "
                 "switched\n", e.y);
             ok = false;
@@ -584,7 +640,18 @@ bool InstallLevel(int k)
         for (int j = i; j < g_count; ++j) {
             Entry& f = g_entries[j];
             if (done[j] || f.kind != kSheet || f.y != e.y) continue;
+            done[j] = true;
             const uint8_t* cell = band + (f.x - bx0) * terrainhd::kMaster;
+            if (CellBlank(cell, bw)) {
+                // the pack does not supply this piece: stock, not ours (multiplied by 1) -- but for the ocean, whose
+                // UVs the coast composites share: its own stock pixels at the level, as a composite without art
+                ++blank;
+                if (!IsOcean(f)) continue;
+                const uint8_t* px = g_stock + f.stock;
+                GiveBits(f.tex, side, f.n, [px, k](uint8_t* b) { terrainhd::Nearest(px, kTex, k, b); });
+                f.atLevel = true;
+                continue;
+            }
             GiveBits(f.tex, side, f.n, [&](uint8_t* b) {
                 if (side == kCell)                       // 8x: the cell as painted
                     for (int y = 0; y < kCell; ++y) memcpy(b + y * kCell, cell + static_cast<size_t>(y) * bw, kCell);
@@ -593,7 +660,6 @@ bool InstallLevel(int k)
             });
             f.atLevel = true;
             ++fromPack;
-            done[j] = true;
         }
     }
     free(band);
@@ -618,12 +684,22 @@ bool InstallLevel(int k)
     Log("[terrainhd] %d textures at %dx (%d from texture_x8.pcx, %d from rainfall_x8.pcx, %u MB) in %lu ms; process %u "
         "MB private, peak %u MB\n", static_cast<int>(g_span.count), k, fromPack, fromRain,
         static_cast<unsigned>(level >> 20), GetTickCount() - t0, privMb, peakMb);
+    if (blank)
+        Log("[terrainhd] %d cells are blank in texture_x8.pcx -> those pieces draw as stock\n", blank);
     return true;
 }
 
+// The level for the screen, kept for the last screen size (the terrain pass asks once per tile).
 int WantLevel()
 {
-    return terrainhd::Level(*reinterpret_cast<int*>(At(kVA_ScreenW)), *reinterpret_cast<int*>(At(kVA_ScreenH)));
+    static int w0 = -1, h0 = -1, level = 1;
+    const int w = *reinterpret_cast<int*>(At(kVA_ScreenW)), h = *reinterpret_cast<int*>(At(kVA_ScreenH));
+    if (w != w0 || h != h0) {
+        level = terrainhd::Level(w, h);
+        w0 = w;
+        h0 = h;
+    }
+    return level;
 }
 
 // --- hooks ------------------------------------------------------------------------------------------------------
@@ -632,12 +708,9 @@ int WantLevel()
 // loading canvas: a TEXTURE.PCX texture; 56x56 from load_terrain's local Buffer: a coast composite; 60x60: the border.
 int __fastcall ExtractRecorder(Texture* tex, void* /*edx*/, void* src, int x, int y, int w, int h, void* heap)
 {
-    if (g_level != 1 || g_span.count) {                  // a new load_terrain: the textures are cut at stock again
-        g_level = 1;
-        SetSpanList(1);                                  // before the engine frees the level's bits
-        free(g_stock);
-        g_stock = nullptr;
-    }
+    // a new load_terrain at a level: every texture back to stock first (the list of ours emptied before the engine
+    // frees any of the level's bits), so a texture this load does not cut again, or a cut that fails, is still stock
+    if (g_level != 1 || g_span.count) RestoreStock();
     const int rc = g_eng.extract(tex, src, x, y, w, h, heap);
     const bool tile = w == kTex && h == kTex, border = w == kBorder && h == kBorder;
     if (rc != 0 || !(tile || border) || !tex->data) return rc;
@@ -682,10 +755,7 @@ bool InstallSpanScaling()
 {
     uint8_t orig[100][6], patch[100][6];
     for (int i = 0; i < 100; ++i) memcpy(orig[i], At(kSpanSites[i]), 6);
-#ifdef TERRAINHD_SELFTEST
-    static uint8_t area[kStubArea];
-    return BuildSpanStubs(area, 0x20000000, 0x20100000, orig, patch);
-#else
+    // (under TERRAINHD_SELFTEST the same code writes into the fake image: terrainhd_cache_selftest checks the sites)
     uint8_t* area = static_cast<uint8_t*>(VirtualAlloc(nullptr, kStubArea, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
     if (!area) return false;
     if (!BuildSpanStubs(area, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(area)),
@@ -707,31 +777,30 @@ bool InstallSpanScaling()
         VirtualProtect(p, n, old, &old);
         FlushInstructionCache(GetCurrentProcess(), p, n);
     }
+    g_spanArea = area;
     return true;
-#endif
 }
 
 // Every page the span sites are on can be made writable (checked before the first one is written: all or nothing).
 bool SpanPagesWritable()
 {
 #ifdef TERRAINHD_SELFTEST
-    return true;
-#else
+    if (g_testSpanLocked) return false;
+#endif
     for (uint32_t s : kSpanSites) {
         DWORD old;
         if (!VirtualProtect(At(s), 6, PAGE_EXECUTE_READWRITE, &old)) return false;
         VirtualProtect(At(s), 6, old, &old);
     }
     return true;
-#endif
 }
 
 void BindEngine()
 {
     g_eng.extract = reinterpret_cast<decltype(g_eng.extract)>(At(kVA_Extract2));
     g_eng.gen = reinterpret_cast<decltype(g_eng.gen)>(At(kVA_GenTerrainPoly));
-    g_eng.alloc = reinterpret_cast<decltype(g_eng.alloc)>(At(kVA_MemAlloc));
-    g_eng.free = reinterpret_cast<decltype(g_eng.free)>(At(kVA_Free));
+    g_eng.alloc = reinterpret_cast<decltype(g_eng.alloc)>(At(kVA_MemGet));
+    g_eng.free = reinterpret_cast<decltype(g_eng.free)>(At(kVA_MemFree));
     g_eng.drawMap = reinterpret_cast<decltype(g_eng.drawMap)>(At(kVA_DrawMap));
     g_eng.statusRedraw = reinterpret_cast<decltype(g_eng.statusRedraw)>(At(kVA_StatusWinRedraw));
     g_eng.graphicRedraw = reinterpret_cast<decltype(g_eng.graphicRedraw)>(At(kVA_GraphicWinRedraw));
@@ -749,6 +818,7 @@ void TerrainHdSet(int on)
     g_on = on;
     if (on) {
         g_failed = false;                                // tried again, once; the next terrain pass cuts the level
+        g_rain = kRainUntried;                           // rainfall_x8.pcx too
         g_dirty = g_count != 0;
     } else {
         RestoreStock();                                  // off holds nothing
@@ -822,9 +892,14 @@ void InstallTerrainHd()
         g_rainOk = movs && memcmp(At(kVA_CompColours), kCompColours, sizeof kCompColours) == 0 &&
                    hdpack::ReadPalette(rain, g_rainPal);
         char art[MAX_PATH];
-        _snprintf_s(art, sizeof art, _TRUNCATE, "%sterrain\\rainfall_x8.pcx", g_dir);
+        RainPath(art, sizeof art);
         if (!g_rainOk && GetFileAttributesA(art) != INVALID_FILE_ATTRIBUTES)
             Log("[terrainhd] RAINFALL's colour lists or palette are not the known ones -> rainfall_x8.pcx not used\n");
+        // proven here as texture_x8.pcx is, then let go: unusable is logged once and the file not opened again
+        g_rain = kRainUntried;
+        hdpack::Pack r = {};
+        LoadRainPack(&r);
+        hdpack::Free(&r);
     }
 
     char ini[MAX_PATH];

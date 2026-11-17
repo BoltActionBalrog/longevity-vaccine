@@ -3,13 +3,20 @@ back, the span stubs' list of ours empty, nothing held); a new game at a level a
 8x the cell as painted), the list following each; PRACX's Alt+T overlays never in the list (drawn natively, nothing
 copied); a pack damaged after install and no address room for a level (each decided once: several passes, one read
 at most, one log line, nothing held, tried again only by switching the row); a failed level after a level; back to
-stock from every level with every texture keeping bits.
+stock from every level with every texture keeping bits. The installer's own writes (the 100 span sites call their
+stubs, the stubs page is the generated stubs, execute-read) and refused installs that write nothing (a damaged pack,
+a changed span store, a span page that cannot be made writable). A cell the pack leaves blank stays stock and is not
+ours (a blank ocean cell: its own stock pixels at the level). rainfall_x8.pcx decided once (damaged: read and logged
+once over several cuts; the exe's colour lists not the known ones: never opened) and what counts as a supplied piece
+(no listed colour: not supplied; 252 see-through; unlisted colours code 0, counted in the log). Cuts that fail
+halfway: a band unreadable in the middle of a cut, a recorded texture that is not a stock cut, a failed cut at a
+level.
 
 tests/terrainhd_cache_selftest.cpp compiles terrainhd.cpp itself (TERRAINHD_SELFTEST: a fake exe image and fake
-engine functions that follow the engine where the hook depends on it -- mem_alloc never returns null, a Buffer's
-pixels at +0x54 with the lock pointer null, Texture_extract_2's only quiet returns 0x10 and 3 -- and a real
-8192 x 6144 pack on disk, written once for the module, read by the real hdpack reader). One scenario per process.
-Skipped when Visual Studio is absent.
+engine functions that follow the engine where the hook depends on it -- mem_get never returns null, a Buffer's
+pixels at +0x54 with the lock pointer null, Texture_extract_2's quiet returns 0x10 and 3 (its third, 7 for a failed
+lock, is not faked: the hook treats every non-zero return alike) -- and a real 8192 x 6144 pack on disk, written once
+for the module, read by the real hdpack reader). One scenario per process. Skipped when Visual Studio is absent.
 """
 from __future__ import annotations
 
@@ -27,7 +34,9 @@ import cpp_harness  # noqa: E402
 
 SCENARIOS = ["off_holds_nothing", "new_game_and_levels", "overlays", "pack_damaged_later", "no_room",
              "failed_after_a_level", "restore_from_every_level", "bad_pack", "rain_art", "rain_composites_only",
-             "bad_span_bytes"]
+             "bad_span_bytes", "install_writes_sites", "refused_installs_write_nothing", "blank_cells",
+             "rain_pack_damaged", "rain_lists_differ", "rain_pieces", "band_fails_midway", "not_a_stock_texture",
+             "extract_fails_at_a_level"]
 
 
 @pytest.fixture(scope="module")

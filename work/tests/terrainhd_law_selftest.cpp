@@ -1,8 +1,10 @@
 // terrainhd_law.h's laws, one case per stdin line (tests\test_terrainhd_law.py batches every case through one process):
 //   zoom <w> <h>       -> MaxZoom(w, h)
 //   level <w> <h>      -> Level(w, h)
-//   uv <u> <k>         -> Uv(u, k)
+//   tile <z> 0         -> TilePx(z)
+//   span <c> <k>       -> Span(c, k)
 //   nearest <n> <k> <hex of n*n bytes>  -> hex of the (nk)^2 result
+//   code <n> <k> <hex: ncols, cols, bg, the 8n x 8n region>  -> hex of the (nk)^2 code map, then "<listed> <unlisted>"
 // One output line per input line.
 #include <cstdio>
 #include <cstdlib>
@@ -48,9 +50,10 @@ int main()
             const uint8_t bg = in[1 + ncols];
             const uint8_t* region = in.data() + 2 + ncols;
             std::vector<uint8_t> dst(n * k * n * k);
-            terrainhd::Code(region, n * terrainhd::kMaster, n, cols, ncols, bg, k, dst.data());
+            int listed = 0, unlisted = 0;
+            terrainhd::Code(region, n * terrainhd::kMaster, n, cols, ncols, bg, k, dst.data(), &listed, &unlisted);
             for (uint8_t v : dst) std::printf("%02x", v);
-            std::printf("\n");
+            std::printf(" %d %d\n", listed, unlisted);
         } else std::printf("?\n");
         std::fflush(stdout);
     }

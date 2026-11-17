@@ -5,14 +5,15 @@
 // Prints "ok <check>" / "FAIL <check>: <detail>" lines; exit code 0 only when every check passed.
 //
 // terrainhd.cpp is compiled in this file with TERRAINHD_SELFTEST: its image base is a fake exe image (the call sites,
-// the UV tables and immediates, the engine functions' entry bytes, the loading canvas and the screen size live in
-// it), its game folder is the test's, and its engine functions are the fakes below. texture.pcx and
+// the span stores, the RAINFALL colour lists, the engine functions' entry bytes, the loading canvas and the screen
+// size live in it; the installer writes its 100 span sites there), its game folder is the test's, and its engine
+// functions are the fakes below. texture.pcx and
 // terrain\texture_x8.pcx are real PCX files on disk, read by the real hdpack reader.
 //
-// The fakes follow the engine where the hook depends on it: mem_alloc never returns null (the engine exits instead;
+// The fakes follow the engine where the hook depends on it: mem_get never returns null (the engine exits instead;
 // the fake aborts, so a test that reached it fails); a Buffer keeps its pixels at +0x54 with the lock pointer +0x50
 // null outside a lock; Texture_extract_2 returns 0x10 without a Buffer and 3 for a rect outside it, the only quiet
-// failures it has, and allocates its bits through mem_alloc.
+// failures it has, and allocates its bits through mem_get.
 #define TERRAINHD_SELFTEST
 #include "../../src/uimod/src/terrainhd.cpp"
 
@@ -39,7 +40,7 @@ static int& Heap(void* t) { return *reinterpret_cast<int*>(static_cast<uint8_t*>
 static void* __cdecl FakeAlloc(size_t n)
 {
     void* p = malloc(n);
-    if (!p) { std::printf("FAIL mem_alloc returned null (the engine would exit)\n"); std::exit(3); }
+    if (!p) { std::printf("FAIL mem_get returned null (the engine would exit)\n"); std::exit(3); }
     ++g_liveBits;
     return p;
 }
@@ -146,8 +147,10 @@ static void WriteStock()
 }
 
 // terrain\rainfall_x8.pcx: see-through (255) but for the composite region (both cells: colour kCompColours[5]) and
-// the border region (kBorderColours[3]), each when asked for
-static void WriteRainPack(bool comp, bool border)
+// the border region (kBorderColours[3]), each when asked for. Variants: the composites' region filled with `compFill`
+// instead (254: blanked with RAINFALL.PCX's frame colour); the border's first 8x row of 8 texels (64 pack pixels at
+// 8x) in colour 252 (see-through to the engine as well) and its second texel row's first texel in colour 1 (unlisted).
+static void WriteRainPack(bool comp, bool border, int compFill = -1, bool borderOdd = false)
 {
     const int W = 640 * 8, H = 480 * 8;
     FILE* f = nullptr;
@@ -156,16 +159,30 @@ static void WriteRainPack(bool comp, bool border)
     std::vector<uint8_t> row(W);
     for (int y = 0; y < H; ++y) {
         memset(row.data(), 255, W);
-        if (comp && y >= 333 * 8 && y < 389 * 8) memset(row.data() + 2 * 8, kCompColours[5], 113 * 8);
-        if (border && y >= 254 * 8 && y < 314 * 8) memset(row.data() + 2 * 8, kBorderColours[3], 60 * 8);
+        if ((comp || compFill >= 0) && y >= 333 * 8 && y < 389 * 8)
+            memset(row.data() + 2 * 8, compFill >= 0 ? compFill : kCompColours[5], 113 * 8);
+        if (border && y >= 254 * 8 && y < 314 * 8) {
+            memset(row.data() + 2 * 8, kBorderColours[3], 60 * 8);
+            if (borderOdd && y < 255 * 8) memset(row.data() + 2 * 8, 252, 8 * 8);
+            if (borderOdd && y >= 255 * 8 && y < 256 * 8) memset(row.data() + 2 * 8, 1, 8);
+        }
         WriteRle(f, row.data(), W);
     }
     Trailer(f);
     fclose(f);
 }
 
-// texture_x8.pcx: each test texture's 448 x 448 cell one colour (FileIndex) with the mark at (1, 2), the rest index 3.
-static void WritePack()
+static void WriteJunkRainPack()
+{
+    FILE* f = nullptr;
+    fopen_s(&f, (g_root + "terrain\\rainfall_x8.pcx").c_str(), "wb");
+    fputs("damaged", f);
+    fclose(f);
+}
+
+// texture_x8.pcx: each test texture's 448 x 448 cell one colour (FileIndex) with the mark at (1, 2), the rest index 3;
+// the cells at `blank` (stock x, y) all see-through 255 -- pieces the pack does not supply.
+static void WritePack(const std::vector<std::pair<int, int>>& blank = {})
 {
     const int W = 1024 * 8, H = 768 * 8;
     FILE* f = nullptr;
@@ -179,6 +196,8 @@ static void WritePack()
                 memset(row.data() + CellX(i) * 8, FileIndex(i), 56 * 8);
                 if (y == CellY(i) * 8 + 2) row[CellX(i) * 8 + 1] = kMark;
             }
+        for (const auto& b : blank)
+            if (y >= b.second * 8 && y < (b.second + 56) * 8) memset(row.data() + b.first * 8, 255, 56 * 8);
         WriteRle(f, row.data(), W);
     }
     Trailer(f);
@@ -578,6 +597,238 @@ static void BadSpanBytes()
           "nothing patched");
 }
 
+// ---- the installer's own writes, and refused installs --------------------------------------------------------------
+
+static std::vector<uint8_t> SpanBytes()
+{
+    std::vector<uint8_t> v;
+    for (uint32_t s : kSpanSites) v.insert(v.end(), At(s), At(s) + 6);
+    return v;
+}
+
+// Installed: each of the 100 span sites is a call into its own stub in the stubs' page (6-byte stores: then a nop),
+// the byte after a 5-byte store untouched, and the page holds exactly what BuildSpanStubs generates for it.
+static void InstallWritesSites()
+{
+    WriteStock(); WriteIni(1);
+    const std::vector<uint8_t> before = SpanBytes();
+    uint8_t orig[100][6], patch[100][6];
+    for (int i = 0; i < 100; ++i) memcpy(orig[i], At(kSpanSites[i]), 6);
+    Install();
+    Check(g_installed && g_spanArea != nullptr, "installed, with a stubs page");
+    int good = 0;
+    for (int i = 0; i < 100; ++i) {
+        const BYTE* p = At(kSpanSites[i]);
+        int32_t rel;
+        memcpy(&rel, p + 1, 4);
+        const uintptr_t to = kSpanSites[i] + 5 + rel;          // rel32 is for the site's VA (the real image's address)
+        const size_t n = SpanStoreBytes(orig[i]);
+        // after a 5-byte store: the next store's first byte -- itself a patched site (E8) when it is one
+        bool nextSite = false;
+        for (uint32_t s : kSpanSites) nextSite |= s == kSpanSites[i] + 5;
+        good += p[0] == 0xE8 && to == reinterpret_cast<uintptr_t>(g_spanArea) + kLookupBytes + kStubBytes * i &&
+                (n == 6 ? p[5] == 0x90 : nextSite ? p[5] == 0xE8 : p[5] == before[6 * i + 5]);
+    }
+    Check(good == 100, "the 100 span sites call their own stubs (a nop after a 6-byte store)", Num(good));
+    static uint8_t want[kStubArea];
+    const bool built = BuildSpanStubs(want, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_spanArea)),
+                                      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_span)), orig, patch);
+    Check(built && memcmp(want, g_spanArea, kStubArea) == 0, "the stubs page is the generated stubs");
+    MEMORY_BASIC_INFORMATION mi = {};
+    VirtualQuery(g_spanArea, &mi, sizeof mi);
+    Check(mi.Protect == PAGE_EXECUTE_READ, "the stubs page is execute-read", Num(mi.Protect));
+}
+
+// Refused installs write nothing: a damaged pack, a span store with other bytes, a span page that cannot be made
+// writable. The span sites, the extract and terrain-pass calls all as they were.
+static void RefusedInstallsWriteNothing()
+{
+    WriteStock(); WriteIni(1);
+    std::vector<uint8_t> sites = SpanBytes();
+    WriteJunkPack();
+    Install();
+    Check(!g_installed && SpanBytes() == sites && CallsTo(kExtractSites[0], kVA_Extract2),
+          "a damaged pack: nothing written");
+    PutPackBack();
+    g_log.clear();
+    g_testSpanLocked = true;
+    Install();
+    Check(!g_installed && Logged("could not patch the span stores") == 1, "a span page not writable: not installed");
+    Check(SpanBytes() == sites && CallsTo(kExtractSites[0], kVA_Extract2) && CallsTo(kGenSites[0], kVA_GenTerrainPoly),
+          "... and nothing written");
+    g_testSpanLocked = false;
+    At(kSpanSites[57])[0] = 0x90;
+    sites = SpanBytes();
+    Install();
+    Check(!g_installed && SpanBytes() == sites, "a changed span store: the 100 sites as they were");
+}
+
+// ---- blank cells -------------------------------------------------------------------------------------------------
+
+alignas(16) static uint8_t g_ocean[kTexSize];          // the ocean texture (TEXTURE.PCX 280, 79)
+
+// A cell the pack leaves blank stays stock: its bits, its size, not in the list (multiplied by 1), the rest at the
+// level. A blank ocean cell is the exception (the coast composites share its UVs): its stock pixels at the level.
+static void BlankCells()
+{
+    WriteStock(); WriteIni(1);
+    WritePack({ { CellX(1), CellY(1) }, { 280, 79 } });
+    Install();
+    LoadTerrain();
+    ExtractRecorder(T(g_ocean), nullptr, At(kVA_LoadingCanvas), 280, 79, 56, 56, nullptr);
+    uint8_t* const blankBits = T(g_tex[1])->data;
+    Pass();
+    const Texture* b = T(g_tex[1]);
+    bool stockPx = b->w == 56 && b->h == 56 && b->data == blankBits;
+    for (int y = 0; stockPx && y < 56; ++y)
+        stockPx = memcmp(b->data + y * 56, &g_stockSheet[CellY(1) + y][CellX(1)], 56) == 0;
+    bool listed = false, oceanListed = false;
+    for (uint32_t i = 0; i < g_span.count; ++i) {
+        listed |= g_span.ptrs[i] == b->data;
+        oceanListed |= g_span.ptrs[i] == T(g_ocean)->data;
+    }
+    Check(g_level == 4 && stockPx && !listed, "the blank cell: its stock bits and size, not in the list");
+    bool others = true;
+    for (int i = 0; i < kAll; ++i) if (i != 1) others &= T(g_tex[i])->w == 224;
+    Check(others && g_span.count == kAll - 1 + 1, "the other textures at 4x and listed", Num(g_span.count));
+    const Texture* o = T(g_ocean);
+    bool oceanStock4 = o->w == 224;
+    for (int y = 0; oceanStock4 && y < 224; ++y)
+        for (int x = 0; oceanStock4 && x < 224; ++x)
+            oceanStock4 = o->data[y * 224 + x] == g_stockSheet[79 + y / 4][280 + x / 4];
+    Check(oceanStock4 && oceanListed, "a blank ocean cell: its own stock pixels at 4x, listed");
+    Check(Logged("2 cells are blank in texture_x8.pcx") == 1, "logged: 2 blank cells");
+    TerrainHdSet(0);
+    Check(T(g_tex[1])->data == blankBits && T(g_tex[1])->w == 56 && T(g_ocean)->w == 56 && StockPixels(),
+          "off: all stock, the blank one never touched");
+    PutPackBack();
+}
+
+// ---- the rain pack, decided once -----------------------------------------------------------------------------------
+
+// A damaged rainfall_x8.pcx: proven at install (read once, logged once), not opened at the cuts after it (two loads, a
+// level change); switching the row on tries it once more. The map: stock coast composites at the level, stock border.
+static void RainPackDamaged()
+{
+    WriteStock(); WriteJunkRainPack(); WriteIni(1);
+    Install();
+    Check(g_installed && g_testRainLoads == 1 && Logged("rainfall_x8.pcx is not usable") == 1,
+          "install: read once, logged once", Num(g_testRainLoads));
+    LoadTerrain();
+    Pass();
+    LoadTerrain();
+    Passes(3);
+    Screen(2560, 1440);
+    Pass();
+    Check(g_level == 8 && g_testRainLoads == 1 && Logged("rainfall_x8.pcx is not usable") == 1,
+          "three cuts: not opened again, not logged again", Num(g_testRainLoads));
+    Check(BorderStock() && !BorderListed() && T(g_tex[kSheetTex])->w == 448, "stock border, composites at the level");
+    TerrainHdSet(0);
+    TerrainHdSet(1);
+    Pass();
+    Check(g_testRainLoads == 2 && Logged("rainfall_x8.pcx is not usable") == 2, "the row switched: tried once more");
+    WriteRainPack(true, true);
+    TerrainHdSet(0);
+    TerrainHdSet(1);
+    Pass();
+    Check(g_testRainLoads == 3 && BorderListed() && T(g_borderTex)->data[0] == 3, "good again, the row switched: used");
+}
+
+// The exe's colour lists are not the known ones: rainfall_x8.pcx is never opened (not at install, not at a cut).
+static void RainListsDiffer()
+{
+    WriteStock(); WriteRainPack(true, true); WriteIni(1);
+    At(kVA_CompColours)[3] ^= 1;
+    Install();
+    LoadTerrain();
+    Passes(2);
+    TerrainHdSet(0);
+    TerrainHdSet(1);
+    Pass();
+    Check(g_installed && g_level == 4 && g_testRainLoads == 0, "never opened", Num(g_testRainLoads));
+    Check(Logged("colour lists or palette are not the known ones") == 1 && BorderStock() && !BorderListed(),
+          "logged once at install; the border stock");
+}
+
+// What counts as supplied: composites blanked with the frame colour 254 (no listed colour) fall back to their stock
+// pixels; in the border, 252 is see-through (the background 9) and an unlisted colour is code 0, counted in the log.
+static void RainPieces()
+{
+    WriteStock(); WriteRainPack(false, true, 254, true); WriteIni(1);
+    Install();
+    LoadTerrain();
+    Pass();
+    const Texture* c = T(g_tex[kSheetTex]);
+    Check(g_level == 4 && c->w == 224 && c->data[0] == g_rainPx[0][0] && c->data[4] == g_rainPx[0][1],
+          "composites blanked with 254: not supplied, their stock pixels at 4x");
+    const Texture* b = T(g_borderTex);
+    Check(b->w == 240 && b->data[0] == 9 && b->data[31] == 9 && b->data[32] == 3 && b->data[4 * 240] == 0 &&
+              b->data[4 * 240 + 3] == 0 && b->data[4 * 240 + 4] == 3 && b->data[8 * 240] == 3,
+          "the border: 252 -> the background 9, an unlisted colour -> 0, the rest its code");
+    Check(Logged("16 texels of the territory border are not one of its colours") == 1 &&
+              Logged("composite are not") == 0, "the unlisted texels counted in the log");
+    Check(Logged("1 from rainfall_x8.pcx") == 1, "1 piece from the art (the border)");
+}
+
+// ---- cuts that fail halfway ----------------------------------------------------------------------------------------
+
+// The second band of a cut cannot be read: the textures the first band cut go back -- all stock, nothing held, decided
+// once.
+static void BandFailsMidway()
+{
+    WriteStock(); WriteIni(1);
+    Install();
+    LoadTerrain();
+    g_testBandFailsAt = 1;
+    Passes(4);
+    Check(g_failed && g_level == 1 && StockPixels() && HoldsNothing() && EveryTextureHasBits(),
+          "a band unreadable halfway: all stock, nothing held", Num(g_liveBits));
+    Check(Logged("could not read the band") == 1, "logged once");
+    g_testBandFailsAt = -1;
+    TerrainHdSet(0);
+    TerrainHdSet(1);
+    Pass();
+    Check(g_level == 4 && AllAt(224), "readable again, the row switched: 4x");
+}
+
+// A recorded texture that is not a stock cut when the level is made (here: the engine's cut failed for it): no level,
+// logged once, nothing changed.
+static void NotAStockTexture()
+{
+    WriteStock(); WriteIni(1);
+    Install();
+    LoadTerrain();
+    // a later load_terrain whose cut of texture 2 fails (a rect outside the canvas: Texture_extract_2's quiet 3)
+    const int rc = ExtractRecorder(T(g_tex[2]), nullptr, At(kVA_LoadingCanvas), 1000, 1, 56, 56, nullptr);
+    Check(rc == 3, "the engine's failed cut is returned as it was", Num(rc));
+    const int bits = g_liveBits;
+    Passes(3);
+    Check(g_failed && g_level == 1 && g_liveBits == bits && !g_stock && SpanListIs(1),
+          "a texture that is not a stock cut: no level, nothing allocated");
+    Check(Logged("texture 2 is not a stock 56x56 texture") == 1, "logged once");
+    // the next load_terrain cuts it again: switched on again, the level
+    LoadTerrain();
+    TerrainHdSet(0);
+    TerrainHdSet(1);
+    Pass();
+    Check(g_level == 4 && AllAt(224), "cut again, the row switched: 4x");
+}
+
+// A failed cut inside ExtractRecorder while at a level: every texture is back to stock before the engine runs (the
+// list of ours empty first), so with the cut failing nothing is left at the level; the cut's result is the engine's.
+static void ExtractFailsAtALevel()
+{
+    WriteStock(); WriteIni(1);
+    Install();
+    LoadTerrain();
+    Pass();
+    Check(g_level == 4 && SpanListIs(4), "at 4x");
+    const int rc = ExtractRecorder(T(g_tex[0]), nullptr, nullptr, 0, 0, 56, 56, nullptr);   // no Buffer: 0x10
+    Check(rc == 0x10, "the engine's result returned", Num(rc));
+    Check(g_level == 1 && StockPixels() && HoldsNothing() && EveryTextureHasBits(),
+          "a failed cut at a level: every texture stock with bits, the list empty, nothing held", Num(g_liveBits));
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 3) return 2;
@@ -641,6 +892,15 @@ int main(int argc, char** argv)
     else if (s == "bad_span_bytes") BadSpanBytes();
     else if (s == "rain_art") RainArt();
     else if (s == "rain_composites_only") RainCompositesOnly();
+    else if (s == "install_writes_sites") InstallWritesSites();
+    else if (s == "refused_installs_write_nothing") RefusedInstallsWriteNothing();
+    else if (s == "blank_cells") BlankCells();
+    else if (s == "rain_pack_damaged") RainPackDamaged();
+    else if (s == "rain_lists_differ") RainListsDiffer();
+    else if (s == "rain_pieces") RainPieces();
+    else if (s == "band_fails_midway") BandFailsMidway();
+    else if (s == "not_a_stock_texture") NotAStockTexture();
+    else if (s == "extract_fails_at_a_level") ExtractFailsAtALevel();
     else return 2;
     return g_fails ? 1 : 0;
 }

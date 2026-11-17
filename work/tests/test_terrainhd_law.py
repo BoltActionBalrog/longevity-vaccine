@@ -2,7 +2,8 @@
 rest on: PRACX's deepest zoom per screen, the one session level, the UV law.
 
 The port runs as one process (tests/terrainhd_law_selftest.cpp, every case over stdin; skipped when VS is absent).
-The UV offset is measured on the real Texture_draw_2 in test_terrainhd_uv_measured.py.
+The span law is checked on the real rasterizers, and the code-map rule against load_terrain's own code on the
+stock RAINFALL.PCX, in test_terrainhd_exact.py.
 """
 from __future__ import annotations
 
@@ -49,19 +50,6 @@ def test_level_keeps_a_texel_per_pixel_across_the_real_tile_or_is_capped():
             assert need > k // 2, (w, h)                      # the smallest level that covers it
 
 
-def test_span_law_samples_the_block_of_the_stock_texel():
-    """k * (u0 + n du) lies in the k x k block of stock's texel for every sample, and fits 32 bits: the largest span
-    coordinate at 8x is 56 * 8 << 16 (u, v) and |du| is at most a texture width per pixel."""
-    rnd = random.Random(3)
-    for k in (1, 2, 4, 8):
-        for _ in range(20000):
-            u0, du, n = rnd.randrange(0, 56 << 16), rnd.randrange(-(56 << 16), 56 << 16), rnd.randrange(0, 600)
-            stock = u0 + n * du
-            hd = SL.terrain_hd_span(u0, k) + n * SL.terrain_hd_span(du, k)
-            assert hd >> 16 >> (k.bit_length() - 1) == stock >> 16
-    assert SL.terrain_hd_span(56 << 16, 8) < 2 ** 31
-
-
 def test_code_map_follows_the_engine_rule_and_samples_block_centres():
     cols = [7, 9, 11]
     x8 = [[(7 if (x // 8 + y // 8) % 2 else 255) for x in range(16)] for y in range(16)]
@@ -71,6 +59,33 @@ def test_code_map_follows_the_engine_rule_and_samples_block_centres():
     two = SL.terrain_hd_code(x8, cols, 9, 2)                      # 2x samples (2 + 4j): (4, 12) is not one
     assert two[1][3] == 0 and two[0][0] == 9 and len(two) == 4
     assert SL.terrain_hd_code([[3] * 8] * 8, cols, 9, 1) == [[0]]  # a colour not in the list -> 0
+
+
+def test_code_map_treats_252_and_253_as_see_through_and_counts_what_it_sampled():
+    """load_terrain makes 252 and 253 see-through as well before it builds the maps (Buffer_change_color 0x4521B4):
+    they take the background. The census counts the sampled texels of a listed colour and of any other (code 0 without
+    a trace in the engine); a piece is supplied only when it has a listed texel."""
+    cols = [7, 9, 11]
+    for v in (252, 253, 255):
+        assert SL.terrain_hd_code([[v] * 8] * 8, cols, 9, 1) == [[9]]
+        assert SL.terrain_hd_code_census([[v] * 8] * 8, cols, 1) == (0, 0)
+    x8 = [[11 if x < 8 else 3 for x in range(16)] for y in range(16)]
+    assert SL.terrain_hd_code_census(x8, cols, 1) == (2, 2)
+    assert SL.terrain_hd_code_census(x8, cols, 2) == (8, 8)
+    assert SL.terrain_hd_code_census([[254] * 8] * 8, cols, 1) == (0, 1)   # blanked with the frame: not supplied
+
+
+def test_code_map_samples_pixel_half_s_of_each_block():
+    """The sampled pixel of each s x s block (s = 8 / k) is (s // 2, s // 2): (1, 1) of a 2 x 2 block at 4x, (2, 2)
+    of a 4 x 4 block at 2x, (4, 4) of the 8 x 8 block at 1x -- half a pack pixel down and right of the true centre."""
+    cols = [7, 9, 11]
+    for k, s in ((4, 2), (2, 4), (1, 8)):
+        for y in range(s):
+            for x in range(s):
+                x8 = [[3] * 8 for _ in range(8)]
+                x8[y][x] = 9
+                want = 1 if (x, y) == (s // 2, s // 2) else 0
+                assert SL.terrain_hd_code(x8, cols, 0, k)[0][0] == want, (k, x, y)
 
 
 def test_nearest_is_blocks_of_stock():
@@ -113,10 +128,12 @@ def test_port_matches_the_python(port):
     for n, k in ((2, 8), (3, 4), (5, 2), (6, 4)):
         cols = rnd.sample(range(255), 9)
         bg = rnd.choice((0, 9))
-        region = [[rnd.choice(cols + [255, 254, 3]) for _ in range(8 * n)] for _ in range(8 * n)]
+        region = [[rnd.choice(cols + [255, 254, 253, 252, 3]) for _ in range(8 * n)] for _ in range(8 * n)]
         blob = bytes([len(cols)] + cols + [bg] + [v for row in region for v in row])
         cases.append(f"code {n} {k} " + blob.hex())
-        want.append("".join(f"{v:02x}" for row in SL.terrain_hd_code(region, cols, bg, k) for v in row))
+        listed, unlisted = SL.terrain_hd_code_census(region, cols, k)
+        want.append("".join(f"{v:02x}" for row in SL.terrain_hd_code(region, cols, bg, k) for v in row)
+                    + f" {listed} {unlisted}")
     got = run(port, cases)
     bad = [(c[:40], g[:40], w[:40]) for c, g, w in zip(cases, got, want) if g != w]
     assert not bad, bad[:5]

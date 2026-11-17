@@ -41,20 +41,30 @@ inline int Level(int w, int h)
 }
 
 // scaling_laws.terrain_hd_code: a RAINFALL code map (the coast composites, the territory border) at level k from the
-// pack's 8x region of RAINFALL.PCX (file indices, row stride pitch): each texel samples the centre of its 8/k block and
-// takes the engine's rule -- the index of its colour in cols, bg for the see-through 255, 0 for any other colour.
-inline void Code(const uint8_t* x8, int pitch, int n, const uint8_t* cols, int ncols, uint8_t bg, int k, uint8_t* out)
+// pack's 8x region of RAINFALL.PCX (file indices, row stride pitch): each texel samples pixel (s/2, s/2) of its s x s
+// block, s = 8/k (the pixel itself at 8x, (1, 1) of a 2 x 2 block at 4x, (2, 2) of a 4 x 4 at 2x: half a pack pixel
+// down and right of the true centre), and takes the engine's rule -- the index of its colour in cols, bg for the
+// see-through 255 and for 252 and 253 (load_terrain makes those see-through too, Buffer_change_color 0x4521B4), 0
+// for any other colour. Counts the texels: *listed of a colour in cols, *unlisted of any other but the see-through
+// three (they become code 0 without a trace in the engine; the hook logs them).
+inline void Code(const uint8_t* x8, int pitch, int n, const uint8_t* cols, int ncols, uint8_t bg, int k, uint8_t* out,
+                 int* listed, int* unlisted)
 {
     const int s = kMaster / k, m = n * k;
+    *listed = 0;
+    *unlisted = 0;
     for (int y = 0; y < m; ++y)
         for (int x = 0; x < m; ++x) {
             const uint8_t v = x8[(y * s + s / 2) * pitch + x * s + s / 2];
-            uint8_t c = 0;
-            if (v == 255) c = bg;
-            else
+            int c = -1;
+            if (v == 255 || v == 252 || v == 253) c = bg;
+            else {
                 for (int i = 0; i < ncols; ++i)
-                    if (cols[i] == v) { c = static_cast<uint8_t>(i); break; }
-            out[y * m + x] = c;
+                    if (cols[i] == v) { c = i; break; }
+                if (c < 0) { c = 0; ++*unlisted; }
+                else ++*listed;
+            }
+            out[y * m + x] = static_cast<uint8_t>(c);
         }
 }
 
