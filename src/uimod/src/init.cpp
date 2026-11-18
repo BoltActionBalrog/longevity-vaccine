@@ -38,6 +38,7 @@
 #include "basehd.h"
 #include "objecthd.h"
 #include "menuhd.h"
+#include "terrainhd.h"
 #include "blinkfix.h"
 #include "cursorscale.h"
 #include "hudmovesfix.h"
@@ -408,6 +409,13 @@ extern "C" void __stdcall Init(HMODULE self)
     // or without the Longevity tab; "HD Map Objects" in Longevity Mod Preferences ([UIMod] ObjectHD) switches it
     // live, and off holds no memory. 36 byte-checked E8 retargets. See objecthd.cpp.
     InstallObjectHd();
+
+    // Drop-in HD terrain textures: <game>\terrain\texture_x8.pcx (TEXTURE.PCX at 8x) replaces the ground textures
+    // wherever the terrain is drawn, at one level for the session (2x / 4x / 8x from the screen's deepest zoom).
+    // Nothing is patched without a usable pack or without the Longevity tab; "HD Terrain" in Longevity Mod
+    // Preferences ([UIMod] TerrainHD) switches it live, and off holds no memory. 30 byte-checked E8 retargets and
+    // the rasterizers' 100 span stores turned into calls of stubs. See terrainhd.cpp.
+    InstallTerrainHd();
 
     // The HD main menu and planet setup: <game>\menu\hd\ (panorama + custom_planet strips + moons) composed at any
     // resolution by one uniform scale. Nothing is patched without a usable menu\hd\space_x3.pcx or without the

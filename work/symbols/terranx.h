@@ -1044,6 +1044,42 @@ extern int  Buffer_sync_to_palette(struct Buffer* self, struct Palette* pal);   
 extern int  Palette_get_rgbquad(/*ecx*/ struct Palette* self, void* dst, int start, int count); // addr: 0x005FE560  observed  thiscall RET 0xC; PALETTEENTRY (r,g,b,flags) -> RGBQUAD (b,g,r,0); ret 3 dst NULL / 7 HPALETTE 0x9B8178 NULL
 
 // ============================================================================
+// Textures and their rasterizers (terrainhd.cpp)
+// ============================================================================
+extern void Texture_ctor(struct Texture* self);                                // addr: 0x00619650  thinker   thiscall
+extern void Texture_close(struct Texture* self);                               // addr: 0x00619690  thinker   thiscall; frees bits unless +0x6C
+extern int  Texture_extract_2(struct Texture* self, struct Buffer* src, int x, int y, int w, int h, void* heap); // addr: 0x00619710  thinker   thiscall RET 0x18; bits by mem_get, stride w
+extern void* mem_get(size_t n);                                                // addr: 0x005D4510  thinker   cdecl; on null a message box + exit
+extern void mem_free(void* p);                                                 // addr: 0x00644EF2  thinker   cdecl
+extern void Texture_draw_trans(struct Texture* self, struct Buffer* dst, struct Vert* pts, int n, struct Vert* uvs);      // addr: 0x006198E0  thinker   thiscall
+extern void Texture_draw_trans_4(struct Texture* self, struct Buffer* dst, struct Vert* pts, int n, struct Vert* uvs, int mode); // addr: 0x006239B0  thinker   thiscall
+extern int  Texture_draw_trans_2(struct Buffer* dst, struct Vert* pts, int octagon);                                    // addr: 0x0061A240  thinker   thiscall (ecx = Texture); UVs = the texture's own corners
+extern int  Texture_draw_upper_threshold_trans(struct Buffer* dst, struct Vert* pts, int n, struct Vert* uvs);         // addr: 0x0061A760  thinker   thiscall (ecx = Texture)
+extern int  Texture_draw(struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs);                    // addr: 0x0061B1F0  thinker   thiscall (ecx = Texture) RET 0x14
+extern int  Texture_draw_trans_3(struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs);            // addr: 0x0061C090  thinker   thiscall (ecx = Texture) RET 0x14
+extern int  Texture_draw_mask_dest(struct Buffer* dst, struct Vert* pts, uint8_t* code_layer, uint8_t* layer_tables, int n, struct Vert* uvs); // addr: 0x0061E540  thinker   thiscall (ecx = Texture); a code's layer blends the destination
+extern int  Texture_draw_coast(struct Buffer* dst, struct Vert* pts, int* light, struct Texture* composite, uint8_t* coast_table, int n, struct Vert* uvs); // addr: 0x0061EAD0  thinker   thiscall (ecx = ocean Texture); one UV array for both textures
+extern int  Texture_setup_edge_gouraud(struct EdgeScan* e, int vert);          // addr: 0x0061FC90  thinker   cdecl; edge u << 16 + 0x8000
+extern void Texture_draw_trans_dispatch(struct Texture* self, struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs, int mode); // addr: 0x00622DB0  observed  thiscall; mode -1 -> Texture_draw_trans_3
+extern void Texture_draw_2(struct Texture* self, struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs, int mode); // addr: 0x006233C0  thinker   thiscall RET 0x18; mode -1 -> Texture_draw
+extern void Texture_draw_fungus(struct Texture* self, struct Buffer* dst, struct Vert* pts, int n, struct Vert* uvs, int mode); // addr: 0x006239E0  observed  thiscall; mode -1 -> Texture_draw_upper_threshold_trans
+extern int  Texture_draw_coast_2(struct Texture* self, struct Buffer* dst, struct Vert* pts, int* light, struct Texture* composite, uint8_t* coast_table, int n, struct Vert* uvs, int mode); // addr: 0x00623F80  thinker   thiscall RET 0x20; mode -1 -> Texture_draw_coast
+extern void Texture_draw_coast_dispatch(struct Texture* self, struct Buffer* dst, struct Vert* pts, int* light, int n, struct Vert* uvs, int a6, int mode); // addr: 0x00624670  observed  thiscall RET 0x1C; mode -1 -> 0x61AC60
+extern int  Texture_setup_edge(struct EdgeScan* e, int vert);                  // addr: 0x00624D80  thinker   cdecl; edge u << 16
+extern int32_t g_tex_span_u;                                                   // addr: 0x009BB4F8  observed  16.16 u of a span's left edge
+extern int32_t g_tex_span_v;                                                   // addr: 0x009BB53C  observed  16.16 v of a span's left edge
+extern int32_t g_tex_span_du;                                                  // addr: 0x009BB4E4  observed  16.16 u step per pixel
+extern int32_t g_tex_span_dv;                                                  // addr: 0x009BB4C8  observed  16.16 v step per pixel
+extern uint8_t* g_tex_bits;                                                    // addr: 0x009BB544  observed  the drawn Texture's bits
+extern int32_t* g_tex_uvs;                                                     // addr: 0x009BB490  observed  the polygon's UV list
+extern int32_t g_terrain_uv_quads[32];                                         // addr: 0x00685CA8  observed  terrain pass UVs: quarter-tile quads
+extern int32_t g_terrain_uv_polys[56];                                         // addr: 0x00686090  observed  terrain pass UVs: triangles and quads
+extern uint8_t g_coast_colours[53];                                            // addr: 0x006846F8  observed  RAINFALL.PCX colours -> coast codes
+extern struct Texture g_coast_composite;                                       // addr: 0x0076E8A0  observed  56x56 code map from RAINFALL.PCX (2,333)
+extern struct Texture g_coast_composite_2;                                     // addr: 0x0076E910  observed  56x56 code map from RAINFALL.PCX (59,333)
+extern struct Texture g_territory_border;                                      // addr: 0x0078DD80  observed  60x60 code map from RAINFALL.PCX (2,254)
+
+// ============================================================================
 // GraphicWin (window draw surface)
 // ============================================================================
 extern void GraphicWin_ctor(struct GraphicWin* self);                          // addr: 0x005D4CF0  thinker   on malloc(0xA14) block

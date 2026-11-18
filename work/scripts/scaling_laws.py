@@ -15259,3 +15259,117 @@ def menu_hd_resample(rows: List[bytes], sw: int, sh: int, pal: bytes, key: int, 
         e0, e1 = e1, e0
         out.append(line)
     return out
+# ---- HD terrain textures (src/uimod/src/terrainhd_law.h is the port) ------------------------------------------------
+
+TERRAIN_HD_TILE = 56          # a stock terrain texture is 56 x 56 texels; the UV tables and immediates are in 0..55
+TERRAIN_HD_MASTER = 8         # the pack: TEXTURE.PCX at 8x (terrain/texture_x8.pcx)
+TERRAIN_HD_MAX_LEVEL = 8      # the most the session level ever is (terrain_hd_level): the pack's own size
+PRACX_HUD_ROWS = 213          # PRACX ZoomInit: the map's height is the screen's minus the 213-row console
+
+
+def terrain_hd_span(c: int, k: int) -> int:
+    """LAW (EXACT, 2026-11-16) -- a span's texture coordinate at level k: the stock one times k.
+
+    Every textured draw is one of ten rasterizers; each span's coordinates are four 16.16 values -- u and v captured
+    from the left edge, du and dv from a floating-point divide (fistp) -- and the clipping pre-step adds du * clip to
+    u (and dv * clip to v). The texture coordinates of the polygon (two UV tables, eight 0x37 immediates) stay stock
+    and every one of the four stores is multiplied by k after the stock computation, so each sample is exactly
+    k * (u0 + n du): the HD texel k*U + floor(k * frac) lies inside the k x k block of the stock texel U. With a
+    texture that is the stock one with each texel a k x k block (terrain_hd_nearest), every pixel is stock's.
+    The texture's own corner coordinates (+0x0C..+0x68, the UVs of Texture_draw_trans_2 and the coast) stay stock too.
+    Measured: test_terrainhd_exact.py draws on the real rasterizers under emulation, both edge families, at 2x / 4x /
+    8x: zero pixels differ. It runs 12 of the 25 span setups -- every one the exe can reach, the territory border's
+    (0x61E540) among them; the other 13 are in functions nothing calls. (The UV-table law it replaces,
+    k*u + round((k - 1) / 4), moved 11-15 % of a ground tile's pixels at 4x.)"""
+    return c * k
+
+
+def terrain_hd_max_zoom(w: int, h: int) -> int:
+    """LAW (PRACX's) -- the deepest zoom PRACX allows on a w x h screen: ZoomInit's iZoomFactorMax loop (even steps
+    from 2 while w / tile_w > 6 and (h - 213) / tile_h > 3, ZoomFactorToPt: i = (50 (z + 16) / 16 + 1) / 4,
+    tile 8i x 4i). 72 at 3840x2160, 30 at 1920x1080."""
+    mh = h - PRACX_HUD_ROWS
+    z = 0
+    while True:
+        z += 2
+        i = (50 * (z + 16) // 16 + 1) // 4
+        px, py = max(i * 8, 1), max(i * 4, 1)
+        if not (w // px > 6 and mh // py > 3) or z >= 400:
+            return z
+
+
+def terrain_hd_tile_px(z: int) -> int:
+    """LAW (the engine's) -- a map tile's width in pixels at zoom z: 8i with i = (50 (z + 16) / 16 + 1) / 4
+    (ZoomFactorToPt; the tile is 8i x 4i, its vertices at 0x4633F6..0x46343A). 96 at the default zoom 0, 448 at the
+    deepest zoom at 3840x1080 (56; measured in game under PRACX + Thinker, by wheel and by key), 552 at 3840x2160."""
+    return 8 * ((50 * (z + 16) // 16 + 1) // 4)
+
+
+def terrain_hd_level(w: int, h: int) -> int:
+    """LAW -- the ONE level k every terrain texture is cut at for the session (every console samples the same art, so
+    a screen never looks different because of where the main map was last zoomed): the smallest k in {2, 4, 8} that
+    keeps at least a texel per pixel across a tile at the deepest zoom the player can reach. The tile's width
+    (terrain_hd_tile_px) shows the texture's diagonal, 55k * sqrt(2) texel steps: 2 (55k)^2 >= tile_px^2. Capped at 8,
+    the pack's own size (a cell used as painted). 2x at 1024x768; 4x from 1280x1024 to 1920x1080; 8x from 2560x1440 up
+    (3840x1080 needs 5.76, 3840x2160 7.10)."""
+    t = terrain_hd_tile_px(terrain_hd_max_zoom(w, h))
+    k = 2
+    while k < TERRAIN_HD_MAX_LEVEL:
+        if 2 * (55 * k) ** 2 >= t * t:
+            return k
+        k *= 2
+    return TERRAIN_HD_MAX_LEVEL
+
+
+def terrain_hd_code(x8: List[List[int]], cols: List[int], bg: int, k: int) -> List[List[int]]:
+    """LAW (the engine's rule, at a level) -- a RAINFALL code map from the pack's 8x region of RAINFALL.PCX (file
+    indices). load_terrain cuts the coast composites (RAINFALL.PCX at 2,333 and 59,333, 56 x 56) and the territory
+    border (2,254, 60 x 60) by drawing that region through a remap table into a fresh Buffer: a texel is the index of
+    its colour in the list (53 at 0x6846F8 for the composites, 9 for the border), bg for the see-through 255 and for
+    252 and 253, which load_terrain makes see-through as well before it builds the maps (Buffer_change_color at
+    0x4521B4) (bg: 0, and 9 for the border's Buffer_fill), 0 for any other colour -- measured: the rule rebuilds the
+    engine's three textures exactly (load_terrain's own code under emulation). A code is a class, not a colour, so a
+    level k < 8 samples one pixel of each s x s block, s = 8/k, instead of averaging: pixel (s//2, s//2), i.e. the
+    pixel itself at 8x, (1, 1) of a 2 x 2 block at 4x and (2, 2) of a 4 x 4 block at 2x -- half a pack pixel down and
+    right of the true centre."""
+    s = TERRAIN_HD_MASTER // k
+    m = len(x8) // s
+    out = []
+    for y in range(m):
+        row = []
+        for x in range(m):
+            v = x8[y * s + s // 2][x * s + s // 2]
+            row.append(bg if v in TERRAIN_HD_SEE_THROUGH else (cols.index(v) if v in cols else 0))
+        out.append(row)
+    return out
+
+
+TERRAIN_HD_SEE_THROUGH = (252, 253, 255)
+
+
+def terrain_hd_code_census(x8: List[List[int]], cols: List[int], k: int) -> Tuple[int, int]:
+    """LAW -- what terrain_hd_code sampled, counted: (listed, unlisted) = the sampled texels of a colour in the list,
+    and of any other colour but the see-through three. A piece is SUPPLIED by the art only when listed > 0: a region
+    left see-through or blanked with any colour not in the list (RAINFALL.PCX's own frame colour 254, say) would
+    otherwise become a map of code 0 -- no ocean and no shore, or no border -- so it falls back as a missing piece
+    does. Unlisted texels become code 0 as in the engine (in a composite, land); the hook logs how many per piece."""
+    s = TERRAIN_HD_MASTER // k
+    m = len(x8) // s
+    listed = unlisted = 0
+    for y in range(m):
+        for x in range(m):
+            v = x8[y * s + s // 2][x * s + s // 2]
+            if v in TERRAIN_HD_SEE_THROUGH:
+                continue
+            if v in cols:
+                listed += 1
+            else:
+                unlisted += 1
+    return listed, unlisted
+
+
+def terrain_hd_nearest(src: List[List[int]], k: int) -> List[List[int]]:
+    """LAW -- a texture the pack does not supply but that must be at the level (a coast composite without RAINFALL
+    art, a blank ocean cell: the composites share the ocean's UVs) at level k:
+    each stock texel a k x k block. Exactly the stock picture at the HD size, so it samples like stock."""
+    return [[v for v in row for _ in range(k)] for row in src for _ in range(k)]
