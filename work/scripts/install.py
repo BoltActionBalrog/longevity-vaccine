@@ -1653,6 +1653,12 @@ def patch_pracx_icons(game_dir: Path) -> dict:
     res = pi.patch_folder(game_dir, pracx_icons_overlay(), say=lambda t: ix.say("  " + t))
     if not res:
         ix.say(f"  no {pi.SHEET} in the game folder: skipped")
+    elif any(s == pi.MISSING_ART for s in res.values()):
+        # Not the read-only advice: nothing was tried on the sheet, and this installer can never add art it lacks.
+        import manifest as _mf
+        ix.warn("  WARNING: PRACX's icon art is missing or damaged in this copy of the installer, so PRACX's grey unworked-tile "
+                f"yields were not added. Download Longevity Vaccine from {_mf.DOWNLOAD_URL} and run INSTALL.bat to add "
+                "them. Longevity Vaccine works without them.")      # user-approved wording 2026-11-19
     elif any(s == pi.FAILED for s in res.values()):
         ix.warn(f"  WARNING: PRACX's grey unworked-tile yields were not added. Close the game, make sure {pi.SHEET} "
                 "is not read-only, and run the installer again. Longevity Vaccine works without them.")
@@ -1697,7 +1703,7 @@ def restore_pracx_icons(game_dir: Path) -> tuple:
 def pracx_icons_status(res: dict) -> str:
     """Summary word: ok when the sheet has the art now (added or already there), error on a failure, else skip."""
     st = next(iter(res.values()), "")
-    return "ok" if st in ("added", "current") else ("error" if st == "failed" else "skip")
+    return "ok" if st in ("added", "current") else ("error" if st in ("failed", "missing-art") else "skip")
 
 
 def deploy_runtime(game_dir: Path, quiet: bool = False) -> bool:
@@ -5416,6 +5422,14 @@ def do_repair(game_dir: Path) -> int:
     ix.say(f"  currently resident: {before}")
     try:
         bsmod.deploy(game_dir, payload_root(), ver.VERSION, say=ix.say)
+    except bsmod.IncompletePayload as e:
+        # This copy itself lacks files: running the same --repair again can never succeed. The bootstrap's
+        # --repair downloads a complete copy first (audit 2026-11-19, M5).
+        raise ix.InstallerError(
+            "Longevity Vaccine's updater could not be reinstalled: this copy of the installer is missing some of "      # user-approved wording 2026-11-19
+            "its own files.", detail=f"  {e}", changed=None,
+            remedy=f"run {launcher_path(game_dir)} --update --repair, which downloads a complete copy first; "
+                   "your game files were not touched.")
     except OSError as e:
         raise ix.InstallerError(
             "Longevity Vaccine's updater could not be reinstalled.", detail=f"  {e}",
@@ -7321,9 +7335,20 @@ def _install_rest(game_dir: Path, args, results, patched, spec, target_id, compa
     # The resident updater was deployed before uimod.dll (_deploy_resident); its failure is
     # reported here, once the mod itself is in place.
     if resident_error is not None:
+        import bootstrap as _bs
         ix.say(f"  WARNING: could not install Longevity Vaccine's updater ({copy_error_summary(resident_error)}).")
-        ix.say("  Longevity Vaccine itself IS installed and playable, but this copy cannot update itself:")
-        ix.say("  future updates will have to be downloaded and run by hand.")
+        if isinstance(resident_error, _bs.IncompletePayload):
+            # The folder this installer runs from lacks some of its own files (a partial extraction, a file a
+            # virus scanner removed): a complete copy fixes it, so say that -- not "cannot update itself"
+            # (audit 2026-11-19, M5).
+            import manifest as _mf
+            ix.say("  Longevity Vaccine itself IS installed and playable, but this installer's folder is missing "
+                   "some of its files, so the in-game updates cannot be set up yet.")      # user-approved wording 2026-11-19
+            ix.say("  Extract the whole download again (or download it again from "
+                   f"{_mf.DOWNLOAD_URL}) and run INSTALL.bat once more.")
+        else:
+            ix.say("  Longevity Vaccine itself IS installed and playable, but this copy cannot update itself:")
+            ix.say("  future updates will have to be downloaded and run by hand.")
 
     import receipt as rc
     # MERGE with what the receipt already says: a re-run used to replace the whole module map,

@@ -45,7 +45,9 @@ def test_the_base_archive_synthesises_both_launchers():
         entries = rel.collect("base", include_python=False)
     except (FileNotFoundError, SystemExit) as e:          # a checkout without the built DLL
         pytest.skip(f"base cannot be collected here: {e}")
-    assert sorted(arc for src, arc in entries if src is None) == ["INSTALL.bat", "UNINSTALL.bat"]
+    # ... and the payload's file list, which write_zip computes from the other entries (bootstrap.INVENTORY_REL).
+    assert sorted(arc for src, arc in entries if src is None) == ["INSTALL.bat", "UNINSTALL.bat",
+                                                                    "scripts/payload_inventory.json"]
 
 
 @pytest.mark.parametrize("name", LAUNCHERS)

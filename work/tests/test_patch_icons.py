@@ -235,8 +235,9 @@ def test_a_wrong_overlay_writes_nothing(tmp_path, stock) -> None:
     d[300] ^= 0x01
     bad.write_bytes(bytes(d))
     g = _game(tmp_path, stock)
-    assert pi.patch_folder(g, bad, say=_quiet) == {pi.SHEET: pi.FAILED}
-    assert pi.patch_folder(g, tmp_path / "missing.pcx", say=_quiet) == {pi.SHEET: pi.FAILED}
+    # MISSING_ART, not FAILED: the art is not this installer's, so read-only advice would be wrong (2026-11-18).
+    assert pi.patch_folder(g, bad, say=_quiet) == {pi.SHEET: pi.MISSING_ART}
+    assert pi.patch_folder(g, tmp_path / "missing.pcx", say=_quiet) == {pi.SHEET: pi.MISSING_ART}
     assert (g / pi.SHEET).read_bytes() == stock and not pi.backup_of(g / pi.SHEET).exists()
 
 

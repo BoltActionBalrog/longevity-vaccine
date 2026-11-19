@@ -2,6 +2,11 @@
 
 UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
+## 1.0.2
+
+### Updates
+- Updating in-game now adds PRACX's grey unworked-tile yields and the portraits guide. The in-game update to 1.0.1 left them out.
+
 ## 1.0.1
 
 ### Cinematics

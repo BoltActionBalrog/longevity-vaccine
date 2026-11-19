@@ -76,6 +76,9 @@ ART_RECT_SHA256 = "726156c5305a1e9c2f355a47ec53a58d598e65d1a1f37310b2bb3d7e97236
 
 ADDED, CURRENT, FOREIGN, HAS_ART, RESTORED, UNPATCHED, NO_BACKUP, FAILED = (
     "added", "current", "foreign", "has-art", "restored", "unpatched", "no-backup", "failed")
+#: The art is not in this installer (or is not the expected file): nothing was tried on the sheet, and running the
+#: same installer again cannot help -- unlike FAILED, a write that did not go through.
+MISSING_ART = "missing-art"
 
 
 class SheetError(ValueError):
@@ -289,7 +292,8 @@ def patch_file_status(path: pathlib.Path, load, check: bool = False) -> tuple:
     try:
         overlay = load()
     except (OSError, SheetError) as e:
-        return FAILED, f"PRACX's icon art is missing from this installer ({e}), so {path.name} is left alone"
+        return MISSING_ART, (f"PRACX's icon art is missing or damaged in this installer ({e}), so {path.name} is "
+                             "left alone")
     base_px = decode(base)[1]
     out_pixels = compose(base_px, overlay)
     out = encode(header, out_pixels, palette)

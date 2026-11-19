@@ -125,6 +125,24 @@ def stopped_error(disk_note=None) -> InstallerError:
                           title="NOTHING WAS CHANGED", disk_note=disk_note if disk_note else False)
 
 
+#: A file every WARNING line of this run (and of the generation 2 and worker it starts, which inherit it) is appended
+#: to. Set only by the release-candidate tool (dev_candidate.py), which fails a `full` update on any line in it:
+#: generation 2 prints in its own console window, which nothing else captures -- so 1.0.1's "grey unworked-tile
+#: yields were not added" passed the candidate check (2026-11-18).
+WARNINGS_FILE_ENV = "LONGEVITY_WARNINGS_FILE"
+
+
+def _record_warning(text: str) -> None:
+    path = os.environ.get(WARNINGS_FILE_ENV)
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8", errors="replace") as f:
+            f.write(text.replace(_YELLOW, "").replace(_RESET, "").strip() + "\n")
+    except Exception:  # noqa: BLE001 - a test aid must never fail a run
+        pass
+
+
 def say(*parts: object) -> None:
     """print(), but it records everything and can never raise.
 
@@ -135,6 +153,8 @@ def say(*parts: object) -> None:
     text = " ".join(str(p) for p in parts)
     _transcript.append(text)
     _last_blank = text.endswith("\n") or text == ""
+    if "WARNING" in text:
+        _record_warning(text)
     if sys.stdout is None:
         return
     try:
@@ -665,7 +685,9 @@ _RUN_SCOPED_ENV = ("LONGEVITY_NO_WAIT", "LONGEVITY_WORKER", "LONGEVITY_PAYLOAD_R
 
 
 def outliving_env() -> dict:
-    return {k: v for k, v in os.environ.items() if k not in _RUN_SCOPED_ENV}
+    # WARNINGS_FILE_ENV is dropped too, but kept out of _RUN_SCOPED_ENV: that tuple mirrors the DLL's kScrubbedEnv
+    # (test_thinker_check), and the variable is the candidate tool's, never a player's (audit 2026-11-19, L2).
+    return {k: v for k, v in os.environ.items() if k not in _RUN_SCOPED_ENV and k != WARNINGS_FILE_ENV}
 
 
 def arrow_choice(title, notes, options: list, at: int = 0) -> int:

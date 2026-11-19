@@ -81,11 +81,16 @@ def build_base_archive(out: Path, stamp: str = REAL_VERSION) -> Path:
     if n != 1:
         raise SystemExit("could not stamp VERSION in version.py")
     vp.write_text(stamped, encoding="utf-8")
+    # The payload's own file list, as release.py writes it into every real base archive: generation 2 completes
+    # its staged payload against it, and refuses a hand-over whose archive has none (bootstrap.complete_payload).
+    import bootstrap as bs
+    files = sorted(f for f in root.rglob("*") if f.is_file() and "__pycache__" not in f.parts)
+    blobs = [(str(f.relative_to(root)).replace("\\", "/"), f.read_bytes()) for f in files]
     archive = out / f"base-{stamp}.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        for f in sorted(root.rglob("*")):
-            if f.is_file() and "__pycache__" not in f.parts:
-                z.write(f, str(f.relative_to(root)).replace("\\", "/"))
+        for rel_path, data in blobs:
+            z.writestr(rel_path, data)
+        z.writestr(bs.INVENTORY_REL, bs.make_inventory(blobs))
     shutil.rmtree(root, ignore_errors=True)
     return archive
 

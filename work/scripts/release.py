@@ -50,6 +50,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
 
 import version as ver  # noqa: E402
+import bootstrap as bs  # noqa: E402  (the payload file list's one format: make_inventory / INVENTORY_REL)
 
 _REPO = _SCRIPTS.parent.parent
 _PATCHES = _REPO / "work" / "patches" / "patches.yaml"
@@ -678,6 +679,9 @@ def collect(module: str, include_python: bool) -> list[tuple[Path, str]]:
 
     if module == "base":
         out.extend((None, name) for name in _SYNTHESISED)   # synthesised, see write_zip
+        # The payload's own file list (bootstrap.INVENTORY_REL), computed from the entries above by write_zip: the
+        # list generation 2 completes a staged payload against, whatever list an older generation 1 copied with.
+        out.append((None, bs.INVENTORY_REL))
     return out
 
 
@@ -693,17 +697,58 @@ def write_zip(entries: list[tuple[Path, str]], dest: Path) -> None:
     # deterministic so the reproducible-zip guarantee is unaffected. DEFLATE specifically --
     # the base archive is extracted by a human with Windows Explorer, which cannot read LZMA
     # or bzip2 zip entries and would fail or silently skip them.
+    # The base carries its payload's file list (bootstrap.INVENTORY_REL). Its bytes are read ONCE and the list is
+    # made from exactly the bytes written: a file that changed between a hashing pass and a writing pass (an
+    # editor save, a rebuilt DLL) would ship a list its own archive contradicts -- and every update would refuse
+    # it (audit 2026-11-19, M2). ~47 MB held for the base only; a pack streams one file at a time as before.
+    listed = any(src is None and arc == bs.INVENTORY_REL for src, arc in entries)
+    blobs = {arc: _entry_bytes(src, arc) for src, arc in entries if arc != bs.INVENTORY_REL} if listed else {}
+    if listed:
+        blobs[bs.INVENTORY_REL] = bs.make_inventory(blobs.items())
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for src, arc in sorted(entries, key=lambda e: e[1]):
             info = zipfile.ZipInfo(arc, date_time=_ZIP_EPOCH)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             info.create_system = 0
-            if src is None:
-                z.writestr(info, _SYNTHESISED[arc].encode("ascii"))
-            else:
-                z.writestr(info, src.read_bytes())
+            z.writestr(info, blobs[arc] if listed else _entry_bytes(src, arc))
     tmp.replace(dest)
+    if listed:
+        problem = inventory_problem(dest)
+        if problem:
+            dest.unlink()
+            raise SystemExit(f"REFUSING to ship {dest.name}: {problem}")
+
+
+def _entry_bytes(src, arc: str) -> bytes:
+    return _SYNTHESISED[arc].encode("ascii") if src is None else src.read_bytes()
+
+
+def inventory_problem(archive: Path):
+    """What is wrong with a base archive's payload file list, read back from the archive itself; None when it is
+    exactly every member but the root launchers, each with its true hash and size, and no bytecode (swap_in
+    never copies bytecode, so a listed .pyc could never be made resident)."""
+    import hashlib
+    with zipfile.ZipFile(archive) as z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        if bs.INVENTORY_REL not in names:
+            return "it has no payload file list"
+        try:
+            inv = bs.parse_inventory(z.read(bs.INVENTORY_REL))
+        except OSError as e:
+            return str(e)
+        want = {n for n in names if n not in bs.ROOT_ONLY and n != bs.INVENTORY_REL}
+        if set(inv) != want:
+            return (f"its file list and its members differ (listed only: {sorted(set(inv) - want)[:3]}, "
+                    f"members only: {sorted(want - set(inv))[:3]})")
+        for n in sorted(want):
+            data = z.read(n)
+            if inv[n] != (hashlib.sha256(data).hexdigest(), len(data)):
+                return f"{n} does not match its entry in the file list"
+        pyc = [n for n in want if bs._is_bytecode(n)]
+        if pyc:
+            return f"it ships Python bytecode ({', '.join(sorted(pyc)[:3])})"
+    return None
 
 
 def check_dev_only_packages(root: Path = None) -> list[str]:

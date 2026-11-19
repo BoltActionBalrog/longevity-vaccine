@@ -29,6 +29,8 @@ not a nicety, and it is why generation 2 runs from staging and waits for generat
 
     gen 2  (runs from staging, so `updater` is idle)
       wait for gen 1 to exit
+      make its own payload EXACTLY its release's file list (complete_payload): gen 1 is the OLDER
+          release and staged it with ITS list; missing files come from the verified archive
       swap: updater -> updater.old | new -> updater | rm updater.old
       THEN do the real install (install.py --update)
 
@@ -194,6 +196,14 @@ def reconcile(game_dir: Path, say=print) -> None:
         if not is_usable(cand):
             say(f"  ignoring {cand.name}: incomplete ({', '.join(missing_parts(cand))})")
             continue
+        # A copy that carries its file list (written FIRST) must match it: is_usable alone passed a copy cut
+        # short after python.exe but before its DLLs (audit 2026-11-19, L1). A list this code cannot read (a
+        # newer release's) leaves is_usable as the test.
+        cand_inv = _lenient_inventory(cand)
+        off = _inexact(cand, cand_inv) if cand_inv is not None else ""
+        if off:
+            say(f"  ignoring {cand.name}: incomplete ({off})")
+            continue
         say(f"  {why} ({cand.name})")
         if live.exists():
             _rm_tree(game_dir, live)
@@ -259,7 +269,124 @@ PAYLOAD = (
     ("src/uimod/third_party/ffmpeg/bin", "src/uimod/third_party/ffmpeg/bin"),
     ("art/longevity_sm.pcx", "work/art/longevity_sm.pcx"),   # the update prompt's picture (optional)
     ("art/pracx_icons_overlay.pcx", "work/art/pracx_icons_overlay.pcx"),   # patch_icons.py's art (optional)
+    ("portraits/LONGEVITY_PORTRAITS_README.txt", "work/art/portraits-README.txt"),   # deploy_runtime's guide (optional)
 )
+
+#: The release's OWN list of its payload: every file of the base archive but the root launchers, with its sha256
+#: and size (release.py writes it). It lives under scripts/, the one folder every shipped generation 1 copies
+#: whole, so it reaches generation 2 whatever list the older generation 1 copied with. Where it exists it -- not
+#: PAYLOAD -- says what a payload is: PAYLOAD is a second list that a FROZEN generation 1 applied to a NEWER
+#: archive, which is how 1.0.1's in-game update lost the PRACX icon art (2026-11-18).
+INVENTORY_REL = "scripts/payload_inventory.json"
+INVENTORY_FORMAT = 1
+#: Archive members that are not part of the payload: the launchers a player runs from the extracted zip.
+ROOT_ONLY = ("INSTALL.bat", "UNINSTALL.bat")
+#: Files of a payload directory that are not payload: the version stamp deploy() writes, and the list itself.
+_NOT_PAYLOAD = (VERSION_FILE, INVENTORY_REL)
+
+
+def make_inventory(entries) -> bytes:
+    """The inventory for `entries`, an iterable of (payload path, bytes). Deterministic (sorted, no timestamps),
+    so a rebuilt archive still hashes the same."""
+    import hashlib
+    import json
+    files = {}
+    for rel, data in entries:
+        if rel in ROOT_ONLY or rel in _NOT_PAYLOAD:
+            continue
+        files[rel] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+    doc = {"format": INVENTORY_FORMAT, "files": dict(sorted(files.items()))}
+    return (json.dumps(doc, indent=1, sort_keys=True) + "\n").encode("ascii")
+
+
+#: Names Windows reserves at every folder level, with or without an extension.
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+
+
+def _safe_rel(rel) -> bool:
+    """A payload path that stays inside the payload and names one file Windows can hold: relative, forward
+    slashes, no `..`, no drive or stream, no part ending in a dot or space (Windows drops them) and no device
+    name (audit 2026-11-19, L3)."""
+    if not isinstance(rel, str) or not rel or rel.startswith("/") or "\\" in rel or ":" in rel:
+        return False
+    for part in rel.split("/"):
+        if part in ("", ".", "..") or part.endswith((".", " ")):
+            return False
+        if part.split(".")[0].upper() in _RESERVED_NAMES:
+            return False
+    return True
+
+
+def parse_inventory(raw: bytes) -> dict:
+    """{payload path: (sha256, size)} from an inventory's bytes; OSError when it is not one."""
+    import json
+    try:
+        doc = json.loads(raw.decode("ascii"))
+        files = doc["files"] if doc.get("format") == INVENTORY_FORMAT else None
+        out = {rel: (str(v["sha256"]).lower(), int(v["size"])) for rel, v in files.items()}
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        raise OSError(f"the installer's file list cannot be read ({type(e).__name__})")
+    bad = [rel for rel in out if not _safe_rel(rel)]
+    if bad:
+        raise OSError(f"the installer's file list names a path outside it: {bad[0][:80]}")
+    if len({rel.casefold() for rel in out}) != len(out):
+        raise OSError("the installer's file list names one file twice (letter case only differs)")
+    return out
+
+
+def read_inventory(root: Path):
+    """The inventory of the payload at `root`, or None when it has none (a payload from before inventories, or a
+    developer's checkout). OSError when one is there and cannot be read."""
+    p = Path(root) / INVENTORY_REL
+    if not p.is_file():
+        return None
+    return parse_inventory(p.read_bytes())
+
+
+def _sha256_file(p: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _is_bytecode(rel: str) -> bool:
+    """Bytecode the interpreter writes beside a script it runs: never payload, never a difference."""
+    return "__pycache__" in rel.split("/") or rel.endswith(".pyc")
+
+
+def payload_diff(root: Path, inv: dict) -> tuple:
+    """(missing, differing, extra) payload paths of the directory `root` against inventory `inv`, each sorted.
+    `extra` leaves out the version stamp, the inventory and bytecode."""
+    root = Path(root)
+    missing, differing = [], []
+    for rel, (digest, size) in sorted(inv.items()):
+        p = root / rel
+        if not p.is_file():
+            missing.append(rel)
+        elif p.stat().st_size != size or _sha256_file(p) != digest:
+            differing.append(rel)
+    extra = []
+    if root.is_dir():
+        for p in root.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(root).as_posix()
+            if rel not in inv and rel not in _NOT_PAYLOAD and not _is_bytecode(rel):
+                extra.append(rel)
+    return missing, differing, sorted(extra)
+
+
+def _inexact(root: Path, inv: dict) -> str:
+    """'' when `root` holds exactly the files of `inv`, else a short account of what is off (for a log line)."""
+    missing, differing, extra = payload_diff(root, inv)
+    out = []
+    for what, items in (("missing", missing), ("different", differing), ("not in the list", extra)):
+        if items:
+            out.append(f"{what}: {', '.join(items[:3])}" + (f" and {len(items) - 3} more" if len(items) > 3 else ""))
+    return "; ".join(out)
 
 
 def _source_of(root: Path, rel: str) -> Path:
@@ -409,8 +536,49 @@ def _publish(incoming: Path, live: Path, aside: Path, say=print) -> None:
                 raise
 
 
+class IncompletePayload(OSError):
+    """A payload that lacks (or has damaged) files its own list names. The remedy is a complete copy -- extract the
+    whole archive again, or download it -- never the same run again."""
+
+    def __init__(self, msg: str, missing=()):
+        super().__init__(msg)
+        self.missing = list(missing)
+
+
+def _lenient_inventory(root: Path):
+    """read_inventory, or None when the list is absent OR cannot be read: a NEWER release's list, which this
+    (by then frozen) code may not understand, must never stop it staging that release (audit 2026-11-19, H1)."""
+    try:
+        return read_inventory(root)
+    except OSError:
+        return None
+
+
+def _copy_listed(src_root: Path, dst: Path, inv: dict) -> int:
+    """Copy the listed files that exist from `src_root` to `dst`; the number copied. The list goes FIRST, so a
+    copy cut short still carries it and reconcile() can tell it is not complete."""
+    src_root, dst = Path(src_root), Path(dst)
+    (dst / INVENTORY_REL).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src_root / INVENTORY_REL, dst / INVENTORY_REL)
+    copied = 0
+    for rel in sorted(inv):
+        src = src_root / rel
+        if not src.is_file():
+            continue
+        out = dst / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, out)
+        copied += 1
+    return copied
+
+
+def _short(items) -> str:
+    items = list(items)
+    return ", ".join(items[:3]) + (f" and {len(items) - 3} more" if len(items) > 3 else "")
+
+
 def deploy(game_dir: Path, payload_root: Path, version: str, dest: Path = None,
-           say=print) -> Path:
+           say=print, strict: bool = True) -> Path:
     """Copy the installer's own payload into the resident updater directory, repo-shaped.
 
     This is what makes the in-game prompt able to find an installer at all: before it existed,
@@ -421,6 +589,12 @@ def deploy(game_dir: Path, payload_root: Path, version: str, dest: Path = None,
     anyway, so running --repair from a resident copy (whose layout it could not read) replaced a
     working 400 MB updater with a single VERSION file -- and that VERSION then lied, so the next
     check reported "already current" forever. The repair button destroyed the thing it repairs.
+
+    `strict` (a first install, --repair): the payload must be exactly its own file list
+    (IncompletePayload otherwise). Not strict (generation 1 staging a NEWER release): copy what the
+    list names, or PAYLOAD when the list is absent or not understood, and leave exactness to that
+    release's generation 2, which can complete it from the archive -- a frozen generation 1 that
+    refused here would stop the one program able to repair it (audit 2026-11-19, H1).
     """
     payload_root = Path(payload_root)
     dest = Path(dest) if dest else updater_dir(game_dir)
@@ -433,7 +607,17 @@ def deploy(game_dir: Path, payload_root: Path, version: str, dest: Path = None,
             f"the payload at {payload_root} is not a complete installer (missing: "
             f"{', '.join(absent)}). Refusing to publish it over Longevity Vaccine's updater.")
 
-    need = _tree_size(payload_root, [str(_source_of(payload_root, d)) for d, _s in PAYLOAD])
+    # The payload's own list, when it has one: then exactly its files are copied, whatever PAYLOAD says.
+    inv = read_inventory(payload_root) if strict else _lenient_inventory(payload_root)
+    if inv is not None and strict:
+        lacking = [rel for rel in sorted(inv) if not (payload_root / rel).is_file()]
+        if lacking:
+            raise IncompletePayload(f"{payload_root} is missing {len(lacking)} of the installer's files "
+                                    f"({_short(lacking)})", lacking)
+    if inv is not None:
+        need = sum(size for _d, size in inv.values())
+    else:
+        need = _tree_size(payload_root, [str(_source_of(payload_root, d)) for d, _s in PAYLOAD])
     free = shutil.disk_usage(str(dest.parent if dest.parent.exists() else game_dir)).free
     # The publish keeps the old copy alongside the new one until the last rename, so the peak is
     # roughly twice the payload.
@@ -445,25 +629,35 @@ def deploy(game_dir: Path, payload_root: Path, version: str, dest: Path = None,
     _rm_tree(game_dir, staged)
     staged.mkdir(parents=True, exist_ok=True)
 
-    copied = 0
-    for dst_rel, _src_rel in PAYLOAD:
-        src = _source_of(payload_root, dst_rel)
-        if not src.exists():
-            continue                    # optional extras (CHANGELOG, assets on a dev tree)
-        dst = staged / dst_rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if src.is_dir():
-            shutil.copytree(src, dst, dirs_exist_ok=True,
-                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        else:
-            shutil.copy2(src, dst)
-        copied += 1
+    if inv is not None:
+        copied = _copy_listed(payload_root, staged, inv)
+    else:
+        copied = 0
+        for dst_rel, _src_rel in PAYLOAD:
+            src = _source_of(payload_root, dst_rel)
+            if not src.exists():
+                continue                    # optional extras (CHANGELOG, assets on a dev tree)
+            dst = staged / dst_rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                shutil.copytree(src, dst, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            else:
+                shutil.copy2(src, dst)
+            copied += 1
     (staged / VERSION_FILE).write_text(version + "\n", encoding="ascii")
 
     if not is_usable(staged):
         _rm_tree(game_dir, staged)
         raise OSError(f"the staged updater is incomplete (missing: "
                       f"{', '.join(missing_parts(staged))}); nothing was replaced")
+    if inv is not None and strict:
+        missing, differing, _extra = payload_diff(staged, inv)
+        if missing or differing:
+            _rm_tree(game_dir, staged)
+            raise IncompletePayload(f"{len(missing) + len(differing)} of the installer's files are missing or "
+                                    f"damaged in {payload_root} ({_short(missing + differing)})",
+                                    missing + differing)
 
     # Publish by rename, so a half-copied payload is never visible as the resident updater.
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -481,18 +675,30 @@ def deploy(game_dir: Path, payload_root: Path, version: str, dest: Path = None,
 
 
 def swap_in(game_dir: Path, new_payload: Path, say=print) -> None:
-    """Make `new_payload` the resident updater."""
+    """Make `new_payload` the resident updater. With a file list it copies exactly the list (and the version
+    stamp) and requires the copy to match it; bytecode the running interpreter wrote is never copied."""
     if not is_usable(new_payload):
         raise OSError(f"refusing to install an incomplete updater (missing: "
                       f"{', '.join(missing_parts(new_payload))})")
     root = mods_root(game_dir)
     live, old, new = root / UPDATER_DIR, root / OLD_DIR, root / NEW_DIR
     _rm_tree(game_dir, new)
-    shutil.copytree(new_payload, new, dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    inv = read_inventory(new_payload)
+    if inv is not None:
+        new.mkdir(parents=True, exist_ok=True)
+        _copy_listed(new_payload, new, inv)
+        if (Path(new_payload) / VERSION_FILE).is_file():
+            shutil.copy2(Path(new_payload) / VERSION_FILE, new / VERSION_FILE)
+    else:
+        shutil.copytree(new_payload, new, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     if not is_usable(new):
         _rm_tree(game_dir, new)
         raise OSError("the copy of the new updater came out incomplete; nothing was replaced")
+    off = _inexact(new, inv) if inv is not None else ""
+    if off:
+        _rm_tree(game_dir, new)
+        raise OSError(f"the copy of the new updater does not match its file list ({off}); nothing was replaced")
     if live.is_dir():
         _rm_tree(game_dir, old)
         if old.exists():
@@ -907,7 +1113,7 @@ def _download_new_payload(game_dir: Path, base: dict, latest: str, args) -> Path
     flat = staging / f"payload-{latest}"
     _rm_tree(game_dir, flat)
     try:
-        deploy(game_dir, out, latest, dest=flat, say=ix.say)
+        deploy(game_dir, out, latest, dest=flat, say=ix.say, strict=False)   # exactness is gen 2's (H1)
     except OSError as e:
         # deploy() refuses a payload that lacks a required part (on Windows 7: tools/python38) with a bare
         # OSError; to the player that is the "downloaded installer is incomplete" verdict, not a crash.
@@ -929,6 +1135,181 @@ def _runs_from(d: Path) -> bool:
 def _hand_off_in_place(game_dir: Path, args) -> int:
     """Run install.py --update from THIS payload (no new installer was needed)."""
     return _run_installer(_SCRIPTS, game_dir, args)
+
+
+def _is_handover(game_dir: Path, root: Path, args) -> bool:
+    """True for the one run completion is for: generation 2 handed `--swap-into`, running from a payload in the
+    staging folder. A manual `--generation 2` run from the resident updater must never rewrite the folder it
+    runs from (audit 2026-11-19, L4)."""
+    if not getattr(args, "swap_into", None):
+        return False
+    try:
+        Path(root).resolve().relative_to((mods_root(game_dir) / "staging").resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def complete_payload(game_dir: Path, root: Path, version: str, args, say=print) -> None:
+    """Make the payload at `root` (generation 2's own, staged by generation 1) exactly its release's file list:
+    add what is missing, replace what differs and delete what does not belong. The bytes -- and the list itself
+    whenever the staged one is not exact -- come only from this release's archive, as pinned by the signed
+    manifest: the copy generation 1 downloaded (still in staging: only this generation's install clears it),
+    else downloaded again. Nothing is fetched when the payload already matches its list.
+
+    Runs only on a hand-over (_is_handover). Raises InstallerError(changed=False) when the payload cannot be made
+    exact; it runs before the swap and the install, so the previous updater stays in place and the game is
+    untouched. A staged payload WITHOUT a list is completed from the archive's list too: generation 2 is always a
+    release that ships one, so a missing list means generation 1 lost it (audit 2026-11-19, M1)."""
+    root = Path(root)
+    if not _is_handover(game_dir, root, args):
+        return
+    try:
+        staged_inv = _lenient_inventory(root)
+        if staged_inv is not None and not any(payload_diff(root, staged_inv)):
+            return
+        archive = _release_archive(game_dir, version, args)
+        raw, inv = _archive_inventory(archive)
+        if staged_inv is not None and staged_inv != inv:
+            raise OSError("the downloaded release is not the one this installer came from")
+        missing, differing, extra = payload_diff(root, inv)
+        need = missing + differing
+        list_ok = (root / INVENTORY_REL).is_file() and (root / INVENTORY_REL).read_bytes() == raw
+        if need:
+            say(f"  completing the new installer: {len(need)} file(s) from the downloaded release")      # user-approved wording 2026-11-19
+            _restore_members(game_dir, archive, root, need, inv)
+        if not list_ok:
+            _write_in(game_dir, root / INVENTORY_REL, raw)
+        for rel in extra:
+            _unlink_in(game_dir, root / rel)
+        off = _inexact(root, inv)
+        if off:
+            raise OSError(f"still not the release's files ({off})")
+    except ix.InstallerError:
+        raise
+    except (OSError, zipfile.BadZipFile) as e:
+        import manifest as mfmod
+        raise ix.InstallerError(
+            "The new installer's files could not be completed, so nothing was changed.",      # user-approved wording 2026-11-19
+            code=ix.EXIT_ABORTED, detail=f"  {e}", changed=False,
+            remedy=f"run the update again, or download the latest version from {mfmod.DOWNLOAD_URL}")
+
+
+def _archive_inventory(archive: Path) -> tuple:
+    """(raw bytes, parsed) of the file list inside the release archive; OSError when it has none."""
+    try:
+        with zipfile.ZipFile(archive) as z:
+            if INVENTORY_REL not in z.namelist():
+                raise OSError("the downloaded release has no file list")
+            raw = z.read(INVENTORY_REL)
+    except zipfile.BadZipFile as e:
+        raise OSError(f"the downloaded release could not be opened ({e})")
+    return raw, parse_inventory(raw)
+
+
+def _release_archive(game_dir: Path, version: str, args) -> Path:
+    """This release's base archive in staging, verified against the signed manifest (downloaded when it is not
+    there). OSError, or InstallerError for a manifest that cannot be trusted."""
+    import fetch as fetchmod
+    import install as inst
+    import manifest as mfmod
+    import preflight as pfm
+    try:
+        raw, sig = inst.fetch_manifest(game_dir, args.manifest, offline=True)     # the one generation 1 used
+    except ix.InstallerError:
+        if args.offline:
+            raise
+        raw, sig = inst.fetch_manifest(game_dir, args.manifest, False)
+    try:
+        doc = mfmod.load_verified(raw, sig, allow_env=inst._local_manifest(args.manifest))
+    except mfmod.ManifestError as e:
+        raise OSError(f"the update information could not be trusted ({e})")
+    mods = doc.get("modules")
+    base = mods.get("base") if isinstance(mods, dict) else None
+    base = base if isinstance(base, dict) else {}
+    url, digest, size, have = base.get("url"), base.get("sha256"), base.get("size"), base.get("version")
+    if not isinstance(have, str) or not ver.is_valid(have) or ver.normalise(have) != ver.normalise(version):
+        raise OSError(f"the update information is for v{str(have)[:20]}, not this installer's v{version}")
+    if not isinstance(url, str) or not isinstance(digest, str) or not url or not digest:
+        raise OSError("the update information does not say where the release is")
+    archive = fetchmod.staging_dir(game_dir) / pfm.staging_name(url, "base")
+    if args.offline and not archive.is_file():
+        raise OSError("the downloaded release is no longer in the staging folder, and --offline forbids fetching it")
+    local_manifest = bool(getattr(args, "manifest", None)) and not str(
+        args.manifest).lower().startswith(("http://", "https://"))
+    try:
+        fetchmod.download(url, archive, sha256=digest, size=size, mirror=base.get("mirror"),
+                          allow_file=local_manifest, label="installer", root=game_dir)
+    except fetchmod.FetchError as e:
+        raise OSError(str(e))
+    return archive
+
+
+def _restore_members(game_dir: Path, archive: Path, root: Path, rels: list, inv: dict) -> None:
+    """Write each of `rels` from `archive` into the payload at `root`, each checked against `inv` first."""
+    import hashlib
+    try:
+        z = zipfile.ZipFile(archive)
+    except (zipfile.BadZipFile, OSError) as e:
+        raise OSError(f"the downloaded release could not be opened ({e})")
+    with z:
+        names = set(z.namelist())
+        for rel in rels:
+            if rel not in names:
+                raise OSError(f"{rel} is not in the downloaded release")
+            data = z.read(rel)
+            digest, size = inv[rel]
+            if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
+                raise OSError(f"{rel} in the downloaded release does not match its file list")
+            _write_in(game_dir, root / rel, data)
+
+
+def _write_in(game_dir: Path, dst: Path, data: bytes) -> None:
+    """Write one payload file: under a temporary name, then renamed into place, so no half-written file is ever
+    visible; never through a link on the way from the game folder."""
+    import safe_fs
+    dst = Path(dst)
+    try:
+        dst.relative_to(Path(game_dir))
+        link = safe_fs.first_link(Path(game_dir), dst.parent)
+    except ValueError:
+        link = None
+    if link is not None:
+        raise OSError(f"{link} is a link to another folder")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(dst.name + ".lvpart")
+    try:
+        tmp.write_bytes(data)
+        _replace_file_retrying(tmp, dst)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _replace_file_retrying(src: Path, dst: Path) -> None:
+    """os.replace for one FILE, waited out while another program holds `dst` (a virus scan of a fresh copy)."""
+    patience = _Patience(None)
+    while True:
+        try:
+            os.replace(str(src), str(dst))
+            return
+        except PermissionError:
+            if not patience.wait():
+                raise
+
+
+def _unlink_in(game_dir: Path, p: Path) -> None:
+    """Delete one stray file of the payload; never through a link on the way from the game folder."""
+    import safe_fs
+    try:
+        p.relative_to(Path(game_dir))
+        root = Path(game_dir)
+    except ValueError:
+        root = p.parent
+    if p.exists() and not safe_fs.unlink(root, p):
+        raise OSError(f"{p.name} could not be removed")
 
 
 def _generation_two(game_dir: Path, args) -> int:
@@ -953,6 +1334,13 @@ def _generation_two(game_dir: Path, args) -> int:
     # release is simply re-downloaded and re-fails on every attempt. The remedy for a bad release
     # is the kill switch (honoured by generation 1 before anything else), not a stale resident
     # copy -- and `--repair` re-deploys from whatever payload it is run from.
+    #
+    # But FIRST make this payload whole. Generation 1 is the OLDER release's code and staged this payload with ITS
+    # list of files, so anything this release added outside the folders it copies whole was left behind -- and
+    # then became resident, so every later run lacked it too (1.0.0 -> 1.0.1 lost the PRACX icon art). This
+    # generation's own list decides, and a payload that cannot be made exact stops here: nothing changed.
+    import config as _cfg
+    complete_payload(game_dir, _cfg.payload_root_from(_SCRIPTS), ver.VERSION, args, say=ix.say)
     if args.swap_into:
         try:
             # The payload ROOT. Found by looking for the bundled interpreter rather

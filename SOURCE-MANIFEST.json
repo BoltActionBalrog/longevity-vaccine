@@ -1,5 +1,5 @@
 {
-  "commit": "53f291b9f0f8eb923402c354be42c94e61a303c1",
+  "commit": "96ac4784e5b0061d36bb1c0fdca83c89661a2510",
   "files": {
     ".gitattributes": {
       "sha256": "404efea0dc0b2687cd88bef7f66f7c57d53f321a7ce8579961b79c7f91728c32",
@@ -1286,7 +1286,7 @@
       "size": 67187
     },
     "src/uimod/src/version.h": {
-      "sha256": "0f9c129b23bb5374605a39b825a36821c3891763faa27776007ade358a568eec",
+      "sha256": "e3763383f3f54e19671ff18d4a7a821709edae895983f739946aefbb5f067b35",
       "size": 1786
     },
     "src/uimod/src/vidmode.cpp": {
@@ -1978,8 +1978,8 @@
       "size": 526
     },
     "work/CHANGELOG.md": {
-      "sha256": "c8de58e62c91849274bee8992021f71d82e4ce18947cf4a39899a1679d29dc57",
-      "size": 13515
+      "sha256": "8cb845c13edf356d7fe1a4369ab52c11bb715656681937a2c3a0b052033da897",
+      "size": 13668
     },
     "work/FONT_FACE_WEIGHT_AUDIT.md": {
       "sha256": "8fc4c4bdbcf329ca17f0816f9a94d6e40926d6e4a7de74915a84286c565cd324",
@@ -3118,8 +3118,8 @@
       "size": 5535
     },
     "work/scripts/bootstrap.py": {
-      "sha256": "57fba65061a81d9811c53ef07bfe90c63ca84bccf48496a38617f171cec39e32",
-      "size": 60585
+      "sha256": "a7064fdec6b22d693dc5e143ee2c461617d16cfb3c94f9a7ed145782aa9e4f0b",
+      "size": 79554
     },
     "work/scripts/build_runtime.py": {
       "sha256": "aa5fa42cb4a29959bf174a52845310ef1e1e58970699eae35a2f766c9e6a0f40",
@@ -3154,8 +3154,8 @@
       "size": 3646
     },
     "work/scripts/dev_test_manifest.py": {
-      "sha256": "984402823fe85a8fe8d834112a8931ef7f63a1b8453910ca7b4d1a3bc2579520",
-      "size": 8450
+      "sha256": "a5aa1351ba6ec4e4367eb3f67c532e55506e8195838e87db9a074438903af301",
+      "size": 8853
     },
     "work/scripts/disasm_range.py": {
       "sha256": "457e1117dee783b22cea70181151974f3cbc7e9a5fea9dcb97aad120734cb2bb",
@@ -3598,12 +3598,12 @@
       "size": 4909
     },
     "work/scripts/install.py": {
-      "sha256": "b092d52657bf17b2a2300021cbe19a73890dedc5545cfdadc6172d5b8258951a",
-      "size": 408698
+      "sha256": "93822b90637e4ec396cc6808bac5711a1f1970c54a1925921351b04387f8b977",
+      "size": 410715
     },
     "work/scripts/installer_exit.py": {
-      "sha256": "fc7fc611f8db00f0842f99eb2a8f61f5f7c8b619dd1db2ec777606513f1d3bd9",
-      "size": 44403
+      "sha256": "e2744f3ffa3fbd45a46b10c4ce7de0b0a02c687a70ecd0c158783afd7b906082",
+      "size": 45537
     },
     "work/scripts/investigate_destbuf_sizing.py": {
       "sha256": "5474f3205d9812434c1d0b71ac09ca703f10678037c6f296582a52e83dd34a59",
@@ -3630,8 +3630,8 @@
       "size": 31294
     },
     "work/scripts/patch_icons.py": {
-      "sha256": "7d94911cf3aee43829e5bfbad4a35f9484e097e4429535813354c4ff45c678f3",
-      "size": 19860
+      "sha256": "99f4950afca2c2efe47d48762b6d9dbad9844bdf5bb7efd18e431e71cf8b02f5",
+      "size": 20138
     },
     "work/scripts/preflight.py": {
       "sha256": "b263f540763e9e3051ac8981afbc443eb9b711004ad9f33f9c0abbd54cf05e9c",
@@ -3654,8 +3654,8 @@
       "size": 4467
     },
     "work/scripts/release.py": {
-      "sha256": "7933756ecc2c6a875277e2341549ba53b9683981dea716bf3421b9c6b0e107e0",
-      "size": 60631
+      "sha256": "e3784f9fdb6fa8cc67aab755a95d9b76b03406e1ec3d523ef88e27d0d8794734",
+      "size": 63289
     },
     "work/scripts/rename_one.py": {
       "sha256": "a9fe258b3f0689d2b5049c5f673641d5b88d8dd2f2ef3b8e20d27557d5002859",
@@ -3822,7 +3822,7 @@
       "size": 3195
     },
     "work/scripts/version.py": {
-      "sha256": "82677f558b0938eaa6175a7232d94a040cbcd6752f1ed43f3b292efffb74c2d5",
+      "sha256": "f68737e06e72a4788a61690d3ab633f282d1c943555eb1ea9277038dd2d8db4c",
       "size": 9305
     },
     "work/scripts/wine_ddraw.py": {
@@ -4778,8 +4778,8 @@
       "size": 35911
     },
     "work/tests/test_patch_icons.py": {
-      "sha256": "478cb0b8ebac6cea8fe97d5b8ad705f618a76be8ae5011e805e7245cd46894e6",
-      "size": 25173
+      "sha256": "aaee2f84d092c66535e4bb323cec619b986da86abd1bb9279575d0fd27738ab8",
+      "size": 25296
     },
     "work/tests/test_patch_integrity.py": {
       "sha256": "06d5e6e925244c394f1178d7825279fed5c7982cf72ace01bdfd3cdeddc40498",
@@ -4788,6 +4788,10 @@
     "work/tests/test_patch_log.py": {
       "sha256": "9a7f8f09dc0537930cca52cfec10dbd632c78dd7eb1065db51a23d2a0281c73d",
       "size": 21220
+    },
+    "work/tests/test_payload_inventory.py": {
+      "sha256": "d8b4244ae9fb75fda9118adbeb71ae861f4c4039e52e527ee2b3452cd0e30764",
+      "size": 40333
     },
     "work/tests/test_pfalign_asm_parity.py": {
       "sha256": "015f98598111f22c5b7037f20392b19b5b89fe2f0743e67b2c79381c77082042",
@@ -4906,8 +4910,8 @@
       "size": 6780
     },
     "work/tests/test_root_launchers.py": {
-      "sha256": "d849fdbde7b094d149bc5c3237f6dc37c54f39e2727bffd8dc4bcf9e76ffe90a",
-      "size": 5045
+      "sha256": "158ba8e3ac3b3b374b229a1beda50073916349c6f31dfda106ffdc3e09dc767d",
+      "size": 5261
     },
     "work/tests/test_roots_pem.py": {
       "sha256": "94252f36ee68bda2051a977be188d3b254bd09721dd20cdecc1677ec11515c1a",
@@ -5716,5 +5720,5 @@
   },
   "hashes": "sha256 of the committed blob (git cat-file -p <rev>:<path>), so line-ending conversion on checkout does not change them",
   "source": "smacx-ui",
-  "tree_hash": "e0b963a3a4ba44f83d7e4a63423ffb6f9512d6b0b9bafb2d595dc993f89bfc6e"
+  "tree_hash": "1109f32d21b64ec87778f5f49c7adbcf60d1a76e849a0e89ad3736ca31453c01"
 }
