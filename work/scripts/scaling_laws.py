@@ -1568,14 +1568,18 @@ PREF_FRAME_SITES = (0x48FB19, 0x48FB29, 0x48FB39, 0x48FBB7, 0x48FC01, 0x49184D, 
 
 #: The PrefWin frames' NATIVE half-open rects, measured on the pristine image (prefwin_halfopen_emu at 1024x768; the
 #: sites rebuild them from PrefWin_build's statics every call).  'dll' is uimod.dll's Longevity-page slider frame
-#: (prefs.cpp: FrameX, FrameY - BotShift + 44, + FrameW, + 48; BotShift is 0 at every g > 16).
+#: (prefs.cpp: FrameX, FrameY - BotShift + kSliderY, + FrameW, + 48; BotShift is 0 at every g > 16).  Since the tab's
+#: two pages it sits above the stock More button (on the Cancel row, native 360..380) with PREF_DLL_MORE_GAP between
+#: them: kSliderY = 44 - 23 (one button row, 0x17) - 6 = 15.  It was (256, 331, 713, 379); the contributor's PR #2
+#: page code had (256, 308, 713, 356), a 4-native gap -- the owner asked for more room above More (2026-11-14).
+PREF_DLL_MORE_GAP = 10              # native px between the Longevity frame's bottom and the More button's top
 PREF_FRAME_NATIVE = {
     "backdrop": (23, 0, 723, 390),
     "inner": (27, 4, 719, 386),
     "lpanel": (30, 7, 250, 383),
     "rpanel": (253, 7, 716, 383),
     "sframe": (256, 287, 713, 379),
-    "dll": (256, 331, 713, 379),
+    "dll": (256, 302, 713, 350),
 }
 #: The frames' CONTENT, native child-window x / y / w / h (thunk_pref_gwinit scales each arg by floor, so a child's
 #: device right edge is fl(x g/16) + fl(w g/16)): the left panel's button column (first row y 10, last row 360 + 20),
@@ -1585,7 +1589,22 @@ PREF_FRAME_NATIVE = {
 PREF_BTN_X, PREF_BTN_W = 33, 214
 PREF_CONTENT_TOP, PREF_CONTENT_LAST_Y, PREF_ROW_H = 10, 360, 20
 PREF_LIST_X, PREF_LIST_W = 256, 457
-PREF_LABEL_LAST_Y = 356             # the audio page's 4th label row (290 + 3 * 22); the Longevity frame's 2nd
+PREF_LABEL_LAST_Y = 356             # the audio page's 4th label row (290 + 3 * 22)
+PREF_DLL_LABEL_LAST_Y = 327         # the Longevity frame's 2nd label row (prefs.cpp: LabelY0 290 + kSliderY 15 + 22)
+#: each slider frame's last label row: its bottom mirrors its top about that row (_pref_slider_frame_bottom)
+PREF_SLIDER_LAST_LABEL = {"sframe": PREF_LABEL_LAST_Y, "dll": PREF_DLL_LABEL_LAST_Y}
+#: The Longevity page's option rows (prefs.cpp BuildWidgets): row i's NATIVE top = TabY0 + 3 + i * 22 -- vanilla's own
+#: option-row pitch (19-row bar + 3 gap, type1_row_pitch's 22) by the owner's choice (2026-11-14; it was 20 while one
+#: page had to hold every row), each top floored once by the GraphicWin_init gate.  A row's window is 20 native tall
+#: (the 17-row box sprite + the 3-row label cell).  Page 1 holds PREF_LONGEVITY_PAGE1_LINES lines above the frame.
+PREF_LONGEVITY_ROW_PITCH, PREF_LONGEVITY_ROW_DY, PREF_LONGEVITY_ROW_H = 22, 3, 20
+PREF_LONGEVITY_PAGE1_LINES = 12     # display mode, Constrain Mouse, updates, Modern, its 2 children on ONE line, drag cells,
+                                    # 2 camera, 3 cloak, airdrop
+
+
+def pref_longevity_row_top(tab_y0: int, i: int) -> int:
+    """LAW -- the Longevity page's option row i's NATIVE window top (prefs.cpp rowY): tab_y0 + 3 + 22 i."""
+    return tab_y0 + PREF_LONGEVITY_ROW_DY + i * PREF_LONGEVITY_ROW_PITCH
 
 
 def prefwin_window_wh(g: int) -> Tuple[int, int]:
@@ -1613,12 +1632,13 @@ def pref_backdrop_draw_rect(rect: Tuple[int, int, int, int], g: int) -> Tuple[in
     return bandmap_rect_from_halfopen(rail_left_extent(g), t, r, b, g)
 
 
-def _pref_slider_frame_bottom(t: int, g: int) -> int:
+def _pref_slider_frame_bottom(t: int, g: int, last_label_y: int = PREF_LABEL_LAST_Y) -> int:
     """A slider frame's half-open device bottom (prefwin_layout): its top fl(t g/16) mirrored about the label column --
-    bottom channel = fl((t + 3)g/16) - fl(t g/16) - K below the last label row's fl(356g/16) + fl(20g/16)."""
+    bottom channel = fl((t + 3)g/16) - fl(t g/16) - K below its last label row's fl(y g/16) + fl(20g/16)
+    (PREF_SLIDER_LAST_LABEL: 356 for the audio frame, 327 for the Longevity frame)."""
     k = stroke_width(g)
     f = lambda v: popup_scale_floor(v, g)                                     # noqa: E731
-    return f(PREF_LABEL_LAST_Y) + f(PREF_ROW_H) + (f(t + 3) - f(t) - k) + k
+    return f(last_label_y) + f(PREF_ROW_H) + (f(t + 3) - f(t) - k) + k
 
 
 @functools.lru_cache(maxsize=None)
@@ -1636,6 +1656,7 @@ def pref_chain_split(g: int) -> Tuple[Tuple[int, int, int, int], Tuple[int, int,
     SCORED: every distinct spacing the split sets, each against vanilla x g/16 as |16 v - w g| -- the eight channels,
     the PANEL GAP (list_l - btn_r - 2K - c_lp - c_rp, vanilla 3) and the two slider frames' BOTTOM GAPS to the right
     panel (vanilla 3; v2 left these three unscored and they absorbed the error, audit-w6A v2: 4K's gap 9 vs 7.5).
+    (Since the Longevity tab's two pages only the audio frame's bottom gap: uimod.dll's frame sits above the More button.)
     The split minimises, in order: the number of spacings MORE THAN 1 px off; the number of vanilla relations it
     breaks -- the cross-axis channel pairs left unequal (a_h | a_t, b_h | b_v, c_lp | c_v, c_rp | c_v: each frame's
     four sides are equal in vanilla); the worst error; the sum of squared errors; then the wider outer channels
@@ -1656,7 +1677,10 @@ def pref_chain_split(g: int) -> Tuple[Tuple[int, int, int, int], Tuple[int, int,
     s_t = f(PREF_CONTENT_TOP) - k - 2 * k
     s_b = (f(bd[3]) - k) - bot - 2 * k
     gap0 = list_l - btn_r - 2 * k
-    sfb = [_pref_slider_frame_bottom(PREF_FRAME_NATIVE[n][1], g) for n in ("sframe", "dll")]
+    # the slider frame that closes the right panel (vanilla bottom gap 3): the audio page's. The Longevity frame shared
+    # that edge until the tab's two pages; it now sits above the More button's row, so its bottom gap is no longer a
+    # vanilla spacing and is not scored (PREF_DLL_MORE_GAP is its own law, pref_dll_more_gap).
+    sfb = [_pref_slider_frame_bottom(PREF_FRAME_NATIVE["sframe"][1], g)]
     err = lambda v, w: abs(16 * v - w * g)                                    # noqa: E731
     hs, vs = [], []
     for a in range(s_l + 1):
@@ -1711,7 +1735,7 @@ def prefwin_layout(g: int) -> dict:
     The slider frames (the audio page's, uimod.dll's Longevity frame) keep their top fl(t g/16) and span the page
     list's columns [fl(256g/16), fl(256g/16) + fl(457g/16)) -- the right panel is mirrored about that span, so panel
     -> frame L == R -- and their BOTTOM mirrors the top about the label column: bottom channel = fl((t + 3)g/16) -
-    fl(t g/16) - K, below the last label row's fl(356g/16) + fl(20g/16).
+    fl(t g/16) - K, below the frame's own last label row's fl(y g/16) + fl(20g/16) (PREF_SLIDER_LAST_LABEL).
 
     Returns the INCLUSIVE device rects the band-map renderers draw (key = PREF_FRAME_NATIVE's) and the channels.
     g <= 16: the native half-open rects (the primitive's own render; vanilla's channels 3 / 2 / 2 by construction)."""
@@ -1728,7 +1752,7 @@ def prefwin_layout(g: int) -> dict:
     list_r = list_l + f(PREF_LIST_W)
     top, bot = f(PREF_CONTENT_TOP), f(PREF_CONTENT_LAST_Y) + f(PREF_ROW_H)
     (a_h, b_h, c_lp, c_rp), (a_t, b_v, c_v, a_b) = pref_chain_split(g)
-    sf_b = {n: _pref_slider_frame_bottom(PREF_FRAME_NATIVE[n][1], g) for n in ("sframe", "dll")}
+    sf_b = {n: _pref_slider_frame_bottom(PREF_FRAME_NATIVE[n][1], g, PREF_SLIDER_LAST_LABEL[n]) for n in ("sframe", "dll")}
     # half-open [L, R) x [T, B), then inclusive for the band map
     in_ho = (bd_in[0] + a_h, bd_in[1] + a_t, bd_in[2] - a_h, bd_in[3] - a_b)
     pt, pb = in_ho[1] + k + b_v, in_ho[3] - k - b_v
@@ -1741,6 +1765,16 @@ def prefwin_layout(g: int) -> dict:
     out["backdrop"] = pref_backdrop_draw_rect(bd, g)
     out.update(K=k, a_h=a_h, b_h=b_h, c_lp=c_lp, c_rp=c_rp, a_t=a_t, a_b=a_b, b_v=b_v, c_v=c_v)
     return out
+
+
+def pref_dll_more_gap(g: int) -> int:
+    """LAW -- the device gap between the Longevity slider frame's drawn bottom and the More button's top, the derived
+    spacing PREF_DLL_MORE_GAP (10 native) leaves: fl(360 g/16) - (the frame's half-open bottom, prefwin_layout).
+    g <= 16: 360 - 350 = 10."""
+    if g <= NATIVE_G:
+        return PREF_CONTENT_LAST_Y - PREF_FRAME_NATIVE["dll"][3]
+    t = PREF_FRAME_NATIVE["dll"][1]
+    return popup_scale_floor(PREF_CONTENT_LAST_Y, g) - _pref_slider_frame_bottom(t, g, PREF_DLL_LABEL_LAST_Y)
 
 
 def pref_frame_draw_rect(site: int, rect: Tuple[int, int, int, int], g: int) -> Tuple[int, int, int, int]:
@@ -1782,7 +1816,7 @@ def pref_mode_cell_x(frame_x: int, frame_w: int, i: int, n: int = 3) -> int:
 
 #: The left panel's CATEGORY column (PrefWin_build 0x48D9CC..0x48DD10 + uimod.dll's Longevity tab): FlatButton child
 #: windows at native (PREF_BTN_X, PREF_CONTENT_TOP + PREF_TAB_PITCH * i, PREF_BTN_W, PREF_ROW_H), i = 0..5 the six stock
-#: tabs, i = 6 the DLL's "Longevity Mod Preferences" (y0 + 0x84).  Vanilla's gaps are all 2 (pitch 22, face 20).
+#: tabs, i = 6 the DLL's "Longevity Preferences" (y0 + 0x84).  Vanilla's gaps are all 2 (pitch 22, face 20).
 #: Gamma Correction is NOT a row of the column: the same x / w / h at y0 + 0x9A (row 7, no DLL) or y0 + 0xB0 (row 8,
 #: the DLL's imm patch @0x48DD03); it keeps the plain floor, like Restore Defaults / OK / Cancel.
 PREF_TAB_PITCH, PREF_TAB_ROWS = 22, 7
@@ -1835,7 +1869,7 @@ def pref_child_y(x: int, y: int, w: int, h: int, g: int, y0: int = PREF_CONTENT_
 def map_label_font_size(native: int, g: int, pct: int) -> int:
     """The map-label font size law (thunk_map_font; group map_label_fonts) —
     the on-map base-name/"(production)"/landmark label fonts with the
-    user-facing "Longevity Mod Preferences" font-scale slider applied.
+    user-facing "Longevity Preferences" font-scale slider applied.
 
     The engine (MapWin_calculate_dimensions 0x462980) computes a zoom-derived
     NATIVE size, capped at 12; the slider percent pct in [0, 100] interpolates
@@ -10837,7 +10871,7 @@ def bases_row_pitch(g: int) -> int:
 # and its two native centring offsets scale with it.  The engine rejects ratios above g_sprite_scale_max
 # (4.0): g caps at 40 -> 2.5, never reached.
 BLINK_OFF_X, BLINK_OFF_Y = 7, 5
-# "Big F4 indicators" (Longevity Mod Preferences checkbox -> g_big_f4, 2026-09-12d): a DELIBERATE divergence
+# "Big F4 indicators" (Longevity Preferences checkbox -> g_big_f4, 2026-09-12d): a DELIBERATE divergence
 # the user chose -- the ring at 2x the lawful size (3x until 2026-09-12f), at every g (native included).
 # Above g=32 that ratio exceeds the engine core's 4.0 reject, so the big path stamps through
 # thunk_sprite_scale_nn (our full-coverage NN, same Sprite_draw_2 contract, no cap) and leaves the SCALE
@@ -11537,6 +11571,12 @@ HOF_PAIR_MIN_LUMA_DELTA = 0
 HOF_FIELD_PAIR = (65, 197)
 
 
+def hof_field_cell(pair) -> int:
+    """g_hof_field's value: 0 = no field clause, else the pair packed (A | B << 8) -- the cell carries the pair so
+    another screen's art (the Holobook's 64/197) reuses t_hof_pairfld (2026-11-15; was a 0/1 flag + literals)."""
+    return 0 if pair is None else (pair[0] & 0xFF) | ((pair[1] & 0xFF) << 8)
+
+
 def hof_pair_top(a: int, b: int, pal: bytes) -> int:
     """The WIDE (stripe-top) member of a row pair: the brighter by luma; ties -> the lower index."""
     la, lb = mon_luma(pal, a), mon_luma(pal, b)
@@ -11601,6 +11641,182 @@ def hof_pair_enlarge(src, pitch: int, sx: int, sy: int, sw: int, sh: int, pal: b
                 a = top if wide else (mate if top == a else a)
             dst[yy * d_pitch + xx] = a
     return dw, dh
+
+
+# ==========================================================================
+# RETIREMENT HOLOBOOK ("Welcome to the Planetary Archives"; Holobook_g 0x872CB0) (2026-11-15)
+# The end-of-game rating book quayle 0x496670 opens (retire + end_of_game). Same family as the Hall of
+# Fame: frame.pcx 1024x768 at (0,0) + an 800x600 content art (Holobook.pcx) at (0x77, 0x50). Design =
+# the full-screen menus' decision of 2026-09-13: full-height 4:3, centred, black letterbox, uniform
+# num/16 with num = hof_scale_num (the HOF's law: min of both axes, clamped 72). Every geometry value =
+# vanilla x num/16 through mon_s, every native literal scaled independently from its own origin.
+# Fonts (user decision 2026-11-15): scale the size vanilla RENDERS = find_font_snap(requested) -- the
+# painter asks [0x8A40E4] (26,0) / [0x8A40E8] (18,2) / [0x8A40E0] (11,0) / [0x8A40F0] (32,0) and vanilla
+# draws AN 24 bold / AN 18 bold+italic / Arial 12 / AN 32 bold (glyph-exact on the pristine shot,
+# work\_hb_static_map.md d2). Line pitch: the fonts' own metric (user decision: no override yet).
+# Line breaks (user decision 2026-11-15): vanilla's -- the word-fit measures with the vanilla font at
+# the vanilla width (hb_line_breaks). Static map + plan: work\_hb_static_map.md.
+# Bake: assemble_holobook.py; laws tests\test_scaling_holobook.py; parity tests\test_holobook_asm_parity.py.
+# ==========================================================================
+HB_ORG_X, HB_ORG_Y = HOF_ORG_X, HOF_ORG_Y                  # gwinit's wide content origin (0x77, 0x50)
+HB_CONTENT_NATIVE = (HB_ORG_X, HB_ORG_Y, HB_ORG_X + 800, HB_ORG_Y + 600)   # Holobook +0xA24..+0xA30
+HB_RECT_LITERALS = (                                       # gwinit's content-relative imm32, table +0xA34 (6 x RECT)
+    (0x13A, 0x19, 0x301, 0x235),    # 0 +0xA34 book list (entries stack upward from B)
+    (0x14C, 0x26, 0x2F0, 0x22E),    # 1 +0xA44 artbox<page>.pcx (420x520, key 9)
+    (0x289, 0x239, 0x301, 0x24D),   # 2 +0xA54 CLOSE / BACK (120x20)
+    (0x2A, 0x22, 0x116, 0x81),      # 3 +0xA64 BOOKTITLE
+    (0x1E, 0x13E, 0x11E, 0x1B0),    # 4 +0xA74 BOOKINTRO / BOOKLIST<page>
+    (0x16C, 0x239, 0x27A, 0x24D),   # 5 +0xA84 rating line
+)
+HB_RECTS_NATIVE = tuple((l + HB_ORG_X, t + HB_ORG_Y, r + HB_ORG_X, b + HB_ORG_Y) for l, t, r, b in HB_RECT_LITERALS)
+HB_TABLE_OFF = 0xA34                                       # first RECT of the table (6 x 16 B)
+HB_BUTTON = 2                                              # the rect both FlatButtons are built from
+HB_ART_NATIVE = (420, 520)                                 # artbox<n>.pcx = the art rect
+HB_LIST_GAP = 6                                            # imm8 @0x495E4C (first y = B + 6) and @0x495FE4 (entry gap)
+HB_LIST_BOTTOM = 10                                        # imm8 @0x495E49 (the seed rect's B = list B + 10)
+HB_FONT_TABLES = {                                         # painter font table -> vanilla's REQUEST (S, v)
+    0x008A40E4: (26, 0),            # BOOKTITLE, caption 1
+    0x008A40E8: (18, 2),            # BOOKINTRO / BOOKLIST<page>, rating line
+    0x008A40E0: (11, 0),            # book list entries (+ the GameLanguage ListBox)
+    0x008A40F0: (32, 0),            # captions 2 and 8
+}
+HB_FONT_LABEL = 14                                         # FlatButton label font 0x6E84B4 = Font_init("Arial", 14, bold)
+HB_CAPTIONS = {                                            # page -> content-relative (x0, y0, w, h) of +0xA94 (painter imm)
+    1: (0x15B, 0x1F6, 0x187, 0x26),
+    2: (0x136, 0x1A5, 0x1CB, 0x32),
+    8: (0x13C, 0x1DF, 0x1C1, 0x54),
+}
+HB_BLIT_KEY = MON_KEY                                      # artbox magenta and the copy_4 backdrops' transparent index
+HB_FIELD_PAIR = (64, 197)                                  # Holobook.pcx's scanline field: pcx 54 (4,4,4) / 187 (11,18,24) + 10
+
+
+def hb_scale_num(screen_w: int, screen_h: int) -> int:
+    """The Holobook's num over den 16: the Hall of Fame's law (same frame, same content geometry)."""
+    return hof_scale_num(screen_w, screen_h)
+
+
+def hb_armed(screen_w: int, screen_h: int, wide: int) -> bool:
+    return bool(wide) and hb_scale_num(screen_w, screen_h) > NATIVE_G
+
+
+def hb_letterbox(screen_w: int, screen_h: int, num: int) -> Tuple[int, int]:
+    return hof_letterbox(screen_w, screen_h, num)
+
+
+def hb_origin(num: int, lx: int, ly: int) -> Tuple[int, int]:
+    """(OX, OY) = letterbox + s(119|80): the device content origin."""
+    return hof_origin(num, lx, ly)
+
+
+def hb_content_rect(num: int, lx: int, ly: int) -> Tuple[int, int, int, int]:
+    """Holobook +0xA24: (LX + s(119), LY + s(80), LX + s(919), LY + s(680))."""
+    l, t, r, b = HB_CONTENT_NATIVE
+    return (lx + mon_s(l, num), ly + mon_s(t, num), lx + mon_s(r, num), ly + mon_s(b, num))
+
+
+def hb_rect(lit: Tuple[int, int, int, int], num: int, lx: int, ly: int) -> Tuple[int, int, int, int]:
+    """A content-relative literal rect -> device: origin + s(edge), each edge scaled on its own."""
+    ox, oy = hb_origin(num, lx, ly)
+    return (ox + mon_s(lit[0], num), oy + mon_s(lit[1], num), ox + mon_s(lit[2], num), oy + mon_s(lit[3], num))
+
+
+def hb_rects(num: int, lx: int, ly: int) -> Tuple[Tuple[int, int, int, int], ...]:
+    """The table +0xA34..+0xA93 REBUILT from gwinit's literals (gwinit re-seeds it natively on every open)."""
+    return tuple(hb_rect(r, num, lx, ly) for r in HB_RECT_LITERALS)
+
+
+def hb_button_rect(num: int, lx: int, ly: int) -> Tuple[int, int, int, int]:
+    """(x, y, w, h) of CLOSE and BACK: (OX + s(0x289), OY + s(0x239), s(120), s(20)) -- the size scaled from
+    vanilla's own w/h (R - L, B - T), never from two independently rounded edges."""
+    ox, oy = hb_origin(num, lx, ly)
+    l, t, r, b = HB_RECT_LITERALS[HB_BUTTON]
+    return (ox + mon_s(l, num), oy + mon_s(t, num), mon_s(r - l, num), mon_s(b - t, num))
+
+
+def hb_font_native(table: int) -> Tuple[int, int]:
+    """(size, variant) vanilla RENDERS for a painter font table: the pool snaps the request."""
+    s, v = HB_FONT_TABLES[table]
+    return find_font_snap(s), v
+
+
+def hb_font(table: int, num: int) -> Tuple[str, int, int]:
+    """(name, size, style) of the scaled font: vanilla's face/style at fl(snap(S) x num/16) (t_ffn_at with the
+    snapped S = Font_init at the exact size on a private slot); vanilla's own at num <= 16."""
+    s, v = hb_font_native(table)
+    name, style = font_pool_face(s, v)
+    return name, font_scaled_size(s, num), style
+
+
+def hb_list_gap(num: int) -> int:
+    """The entry gap and the first entry's offset under the list rect (imm8 x2): s(6)."""
+    return mon_s(HB_LIST_GAP, num)
+
+
+def hb_list_bottom(num: int) -> int:
+    """The seed rect's bottom offset (imm8): s(10)."""
+    return mon_s(HB_LIST_BOTTOM, num)
+
+
+def hb_caption_rect(page: int, num: int, lx: int, ly: int) -> Tuple[int, int, int, int]:
+    """+0xA94 for a captioned book page: origin + s(x0) .. origin + s(x0 + w), likewise y -- both edges from the
+    content origin (the painter's y1 = y0 + h chain would round twice)."""
+    x0, y0, w, h = HB_CAPTIONS[page]
+    return hb_rect((x0, y0, x0 + w, y0 + h), num, lx, ly)
+
+
+def hb_imm_ok(num: int) -> bool:
+    """The three list imm8s stay signed bytes (s(10) <= 127) for every num the law can produce."""
+    return hb_list_bottom(num) <= 0x7F and hb_list_gap(num) <= 0x7F
+
+
+HB_WRAP_SITES = {                                          # painter wrap call -> (font table, vanilla wrap width)
+    0x00495848: (0x008A40E4, 0x116 - 0x2A),     # BOOKTITLE, Buffer_wrap_cent_4 in the title rect
+    0x0049599F: (0x008A40E8, 0x11E - 0x1E),     # book page: BOOKINTRO / BOOKLIST<page>, wrap_cent_4
+    0x00495DD4: (0x008A40E8, 0x11E - 0x1E),     # list page: BOOKINTRO, wrap_cent_4
+    0x00495D5E: (0x008A40F0, 0x1C1),            # caption 8, Buffer_wrap_cent_6 in +0xA94
+}
+# The list loop measures (Buffer_wrap_height) and draws (Buffer_wrap_2) each entry at the list width; both
+# must break identically (measure == draw, feedback_wrap_width_desync_line_step).
+HB_LIST_WRAP_WIDTH = 0x301 - 0x13A                          # 455
+
+
+def _hb_first_break(s: str, width_fn, width: int):
+    """Font_find_line_break_l 0x619370's word-fit over a whole remaining string: the budget is spent piece by piece --
+    the first word, then each ' word' (a leading space and the word, ONE GetTextExtentPoint32A call) -- and the line
+    breaks before the piece that drives it negative (a first word that alone does not fit stays on its line).
+    Returns the index of the breaking space, or None when the rest fits."""
+    budget, start = width, 0
+    while True:
+        j = s.find(" ", start + 1)
+        end = j if j != -1 else len(s)
+        budget -= width_fn(s[start:end])
+        if budget < 0:
+            return (j if j != -1 else None) if start == 0 else start
+        if j == -1:
+            return None
+        start = j
+
+
+def hb_line_breaks(text: str, width_fn, width: int, scaled_fn=None, scaled_width: int = 0) -> List[str]:
+    """The lines a wrap produces.  width_fn(s) -> pixel width with the measuring font.  Alone = the engine's own
+    word-fit (vanilla at the vanilla font and width).  With scaled_fn / scaled_width = the Holobook lever (t_hb_flb v2,
+    user decision 2026-11-15 + audit fix): every line breaks at the EARLIER of vanilla's break (width_fn, width) and
+    the scaled font's own break at the device width -- vanilla's breaks wherever the scaled line fits its box, the
+    engine's otherwise, so no line ever runs out of its box."""
+    lines: List[str] = []
+    s = text
+    while s:
+        brk = _hb_first_break(s, width_fn, width)
+        if scaled_fn is not None:
+            b2 = _hb_first_break(s, scaled_fn, scaled_width)
+            if brk is None or (b2 is not None and b2 < brk):
+                brk = b2
+        if brk is None:
+            lines.append(s)
+            break
+        lines.append(s[:brk])
+        s = s[brk + 1:]
+    return lines
 
 
 # ==========================================================================
@@ -11700,12 +11916,90 @@ def font_law_slot_index(native: int, variant: int) -> Optional[int]:
 # 0x6E84B4 = Font_init("Arial", 14, 1); the HUD M/I buttons' +0x970 is 0x7CFE8C = Arial 14 bold.
 BUTTON_DEFAULT_FONT = (12, 0)      # (native size, pool variant) of the default FlatButton label font -> t_ffn(12, 0)
 BUTTON_SHARED_A14B = (14, 1)       # the Font_init("Arial", 14, 1) family (0x6E84B4, 0x7CFE8C) -> t_fdirect_a14b()
+# PrefWin's stock buttons: PrefWin_build gives 14 of the 15 the shared Arial 14 bold (Buffer_set_font(0x6E84B4) after
+# each BaseButton_init: the 7 tabs 0x48DA05..0x48DD18, the 4 audio Off toggles 0x48F6E4..0x48F74B, Restore / OK /
+# Cancel 0x48F8EE..0x48F930) but never the More / Back button (PrefWin +0x1A868): it keeps the default label font,
+# Arial 12 regular (user shot 20261114-171000 at 1024x768: "More" == GDI Arial -12 weight 400, 25 x 9, glyph-exact).
+# thunk_pref_show gave all 15 the a14b slot until 2026-11-14, so More / Back drew Arial 14 bold above g = 16.
+PREF_MORE_BTN_FONT = BUTTON_DEFAULT_FONT   # -> t_ffn(12, 0) in t_pref_morefont (called by thunk_pref_show)
 
 
 def button_default_font_law(g: int) -> Tuple[str, int, int]:
-    """What the COUNCIL/MP-time, scenario-diplo and TutWin TOUR/Close labels draw with at g: the pool face
-    law for the native (12, 0) = Arial fl(12g/16) regular (Arial 12 regular at g <= 16)."""
+    """What the COUNCIL/MP-time and scenario-diplo labels draw with at g: the pool face law for the native
+    (12, 0) = Arial fl(12g/16) regular (Arial 12 regular at g <= 16).  Pristine glyph maps confirm both
+    (refs/pristine/Council.png "Council", DiploEditor.png "Clear" == GDI Arial -12 weight 400)."""
     return font_face_law_font(*BUTTON_DEFAULT_FONT, g)
+
+
+# TutWin's TOUR / Close / Continue / End Tour / OK are the popup's DIALOG-row buttons: they draw with the def-dialog
+# font popups_tutorial installs (Dialog_set_def_dialog_font 0x609D20 <- g_text_font_v0 = find_font(16, 0)), the
+# same Font as the box's body text -- NOT the default label font [0x9403DC] = find_font(12, 0).  Evidence:
+# refs/pristine/CrashLandTooltip.png "Close" resampled to native px == GDI "Arial Narrow" -16 weight 700 (synthetic
+# bold of arialn.ttf), 38x11 pixel-exact; DronePsych.png "Continue" / "End Tour" agree.  (2026-09-17 v4 put these on
+# BUTTON_DEFAULT_FONT by inference from the COUNCIL probe; a 2026-11-10 player report caught it.)
+TUTWIN_BTN_FONT = (16, 0)          # (native size, pool variant) -> t_ffn(16, 0) in thunk_tutbtn_post
+
+
+# Other sites that asked the pool for find_font(scale(12), v) and so crossed into Arial Narrow bold at g >= 18
+# (2026-11-10 sweep after the TutWin report).  Each native is an EXPLICIT vanilla font, pixel- or probe-confirmed:
+#   FileDlg file list + filename field: Dialog_set_dialog_font / Buffer_set_font(&0x7CFEB4) @0x407737 / 0x407813 =
+#     Arial 12 regular (refs/pristine/Save.png "auto" / "Santiago of..." == GDI Arial -12 weight 400, glyph-exact).
+#   NetWin lobby chat TextScroll / EditLine font1 = 0x7D3948 = Arial 12 regular (frida_nwchatfont.log: lineH 15 h 9 ==
+#     find_font(12,0); GetObject on 0x7D3948 = Arial -12 w0, hook_btnfont_probe.js).
+#   COMMLINK "NO CONTACTS" (commlink_redraw find_font(12,1)) = Arial 12 bold (refs/pristine/CommlinkMenu.png, glyph-
+#     exact) -> any pool font <= 12 on the COMMLINK buffers goes through the face law (hm_scalefont).
+#   COMMLINK MP turn-clock text MW+0x2884 = Font_init("Arial", 14, 1) @0x479FFA, a DIRECT init -> font_direct_law
+#     (t_fdirect_a14b), not the pool (t_ffn(14,1) = Arial Narrow bold).
+FILEDLG_TEXT_FONT = (12, 0)        # -> t_ffn(12, 0) in thunk_filedlg_dlgfont / thunk_filedlg_editfont
+LOBBY_CHAT_FONT = (12, 0)          # -> t_ffn(12, 0) in thunk_nw_chatfont
+COMMLINK_HDR_FONT = BUTTON_SHARED_A14B   # MW+0x2884 -> t_fdirect_a14b() in hm_scalefont
+
+
+def commlink_pool_font_law(native: int, variant: int, g: int) -> Tuple[str, int, int]:
+    """hm_scalefont's pool branch (a find_font(S, v) font set on a COMMLINK buffer): natives <= 12 go to t_ffn(S, v)
+    -- Arial, own weight, fl(S*g/16) for a key with a cave slot (FONT_LAW_SLOT_KEYS, e.g. "NO CONTACTS" (12, 1));
+    a key WITHOUT a slot falls back to the pool find_font(fl(S*g/16), v) like t_ffn_num does (no COMMLINK text uses
+    one today: the only pool font vanilla sets on the MW buffer is find_font(12, 1) @0x479895).  Natives > 12 keep
+    v1's pool ask find_font(round(S*g/16) clamped to 8..40, v) -- already Arial Narrow bold like vanilla's."""
+    if g <= NATIVE_G:
+        return font_face_law_font(native, variant, g)
+    if native <= FONT_POOL_SMALL_MAX:
+        if font_law_slot_index(native, variant) is not None:
+            return font_face_law_font(native, variant, g)
+        snap = find_font_snap(font_scaled_size(native, g))
+        name, style = font_pool_face(snap, variant)
+        return (name, snap, style)
+    n = min(40, max(8, (native * g + 8) >> 4))
+    snap = find_font_snap(n)
+    name, style = font_pool_face(snap, variant)
+    return (name, snap, style)
+
+
+# The TUTORIAL popup style (popups_tutorial 0x5888E0, entered by popt 0x48C320 for every tutor.txt popup -- "About
+# Research" et al. -- and by TutWin_tut_win) installs THREE default font triples: string (BasePop_set_def_string_font
+# 0x6048C0 <- g_text_font_v0/v1/v2 = find_font(InterludeFontSize, v), the .ini key, default 16), dialog
+# (Dialog_set_def_dialog_font 0x609D20, same) and BUTTON (BasePop_set_def_button_font 0x6049C0 <- [0x94576C]/
+# [0x94580C]/[0x945808] = find_font(16, v), a hard 16).  At the default InterludeFontSize all three are equal; the
+# port re-installs all three at find_font(g, v) (a custom InterludeFontSize is not followed -- pre-existing in v1).
+# thunk_tutwin_fonts re-installs all three at find_font(g, v) (v1 re-installed only string + dialog, so a popt
+# popup's OK stayed Arial Narrow 16 bold = native at every g; user 4K shot 20261110-210056, glyph-exact).
+TUTORIAL_POPUP_FONT_NATIVE = 16
+
+
+def tutorial_popup_font_law(variant: int, g: int) -> Tuple[str, int, int]:
+    """The string / dialog / button default font of a tutorial-style popup at g: the pool face law for (16, v) =
+    Arial Narrow bold (v2 bold-italic) at fl(16g/16) = g, pool-snapped -- identical for all three triples, as in
+    vanilla, and identical to the TutWin button label (TUTWIN_BTN_FONT)."""
+    return font_face_law_font(TUTORIAL_POPUP_FONT_NATIVE, variant, g)
+
+
+
+
+def tutwin_button_font_law(g: int) -> Tuple[str, int, int]:
+    """What TutWin's dialog-row button labels draw with at g: the pool face law for the native (16, 0) =
+    Arial Narrow bold at fl(16g/16) = g (pool-snapped up to 40, a Font_init'd slot above) -- vanilla's
+    Arial Narrow 16 bold at g <= 16."""
+    return font_face_law_font(*TUTWIN_BTN_FONT, g)
 
 
 def button_a14b_font_law(g: int) -> Tuple[str, int, int]:
@@ -15022,3 +15316,138 @@ def popup_title_ring_clear(g: int, ornate: bool = False) -> int:
         popup_title_band_rows(0, g)[1] if not ornate else 37)
     return popup_scale_floor(header, g) - popup_pad(3, g) - band_end
 
+
+
+# ==== END-GAME REPLAY window (show_replay 0x5ADBF0, group replay_scale, src assemble_replay.py) =======================
+# A stack-local ReplayWin built at a literal 800 x 600 + Win_center over the live map: the popup family (g), uniform
+# scale, every edge in cum-position form from the NEARER window edge (each gap a difference of two scale_px values, the
+# left / right and top / bottom margins matched).  Vanilla, measured on a 1:1 native render (static map
+# work\_replay_static_map.md section d): window 800 x 600, title box (4, 4, W-4, 24) + text inset 3, map child
+# (3, 26, W-3, H-26), Close bar (3, H-23, W-3, H-3).  The map is the engine's OWN zoom fit on the scaled window (user
+# 2026-11-15: option A) -- its tile is 8u px, u an integer, so it is off vanilla x g/16 by the fit's quantization; that
+# deviation is accepted, never "fixed" toward vanilla x g/16.
+REPLAY_WIN = (800, 600)
+REPLAY_TITLE_INSET, REPLAY_TITLE_BOTTOM = 4, 0x18       # ReplayWin_draw: {L+4, T+4, R-4, T+4+0x14}
+REPLAY_TEXT_INSET = 3                                   # ReplayWin_draw 0x5AD691: the text rect = the title box inset 3
+REPLAY_MAP_SIDE, REPLAY_MAP_TOPBOT = 3, 0x17 + 3        # ReplayWin_build: map rect {L+3, T+0x1A, R-3, B-0x1A}
+REPLAY_CLOSE_TOP, REPLAY_CLOSE_BOTTOM = 0x17, 3         # Close bar: top = map B + 3 = H - 0x17, bottom = top + 0x14
+
+
+def replay_window_wh(g: int) -> Tuple[int, int]:
+    """The un-grown window: (s(800), s(600)).  It always fits the screen: s(600) <= 600 H / 768 < H and
+    s(800) <= 800 W / 1024 < W at the popup g (the grown one: replay_window, capped to the screen)."""
+    return scale_px(REPLAY_WIN[0], g), scale_px(REPLAY_WIN[1], g)
+
+
+def replay_title_box(w: int, g: int) -> Tuple[int, int, int, int]:
+    """The d618 title box (half-open), window-local: (s4, s4, W - s4, s24)."""
+    s4 = scale_px(REPLAY_TITLE_INSET, g)
+    return s4, s4, w - s4, scale_px(REPLAY_TITLE_BOTTOM, g)
+
+
+def replay_text_inset(g: int) -> int:
+    """The title text rect's inset inside the title box: s(3) (the same value as nw_title_band_inset; the port is
+    t_nwf_ins3)."""
+    return scale_px(REPLAY_TEXT_INSET, g)
+
+
+def replay_text_rect(w: int, g: int) -> Tuple[int, int, int, int]:
+    l, t, r, b = replay_title_box(w, g)
+    k = replay_text_inset(g)
+    return l + k, t + k, r - k, b - k
+
+
+def replay_map_rect(w: int, h: int, g: int) -> Tuple[int, int, int, int]:
+    """The MapWin child's rect: (s3, s26, W - s3, H - s26)."""
+    s3, s26 = scale_px(REPLAY_MAP_SIDE, g), scale_px(REPLAY_MAP_TOPBOT, g)
+    return s3, s26, w - s3, h - s26
+
+
+def replay_close_rect(w: int, h: int, g: int) -> Tuple[int, int, int, int]:
+    """The Close FlatButton's rect: (s3, H - s23, W - s3, H - s3) -- its left / right are the map's."""
+    s3 = scale_px(REPLAY_MAP_SIDE, g)
+    return s3, h - scale_px(REPLAY_CLOSE_TOP, g), w - s3, h - scale_px(REPLAY_CLOSE_BOTTOM, g)
+
+
+def _ctrunc_div(a: int, b: int) -> int:
+    q = abs(a) // abs(b)
+    return q if (a >= 0) == (b > 0) else -q
+
+
+def replay_fit_z(w: int, h: int, map_x: int, map_y: int) -> int:
+    """EXACT port of ReplayWin_build's zoom fit (0x5AD77E..0x5AD7D4, idiv truncation) on the window's local W / H:
+    min(((2W / MapAreaX) * 16) / 100 - 16, ((2H / MapAreaY) * 16) / 50 - 16)."""
+    zx = _ctrunc_div(_ctrunc_div(2 * w, map_x) * 16, 100) - 16
+    zy = _ctrunc_div(_ctrunc_div(2 * h, map_y) * 16, 50) - 16
+    return min(zx, zy)
+
+
+def map_u_of_zoom(z: int) -> int:
+    """MapWin_calculate_dimensions' UNARMED zoom unit (+0x1DDC8): q = trunc((z + 16) * 50 / 16), u = max(1,
+    trunc((q + 1) / 4)).  The tile is 8u px wide (+0x1DDB4), rows step 2u."""
+    q = _ctrunc_div((z + 16) * 50, 16)
+    return max(1, _ctrunc_div(q + 1, 4))
+
+
+def replay_map_px(u: int, map_x: int, map_y: int) -> Tuple[int, int]:
+    """The rendered map's pixel size at unit u: 4u(X+1) x 2u(Y+1) (648 x 324 for the 40 x 80 world at u = 2)."""
+    return 4 * u * (map_x + 1), 2 * u * (map_y + 1)
+
+
+REPLAY_BLANK_ZOOM = -16    # the fit's floor (a = 0): MapWin draws no map at this zoom (engine render, pristine exe)
+
+
+def replay_clip_free_width(u: int, map_x: int) -> int:
+    """The narrowest map child that clips no map row once t_rp_rows centres the map: its span is 4u(X + 1) (alternate
+    rows start 4u further left; measured on the engine's own render).  The engine's own centring ignores that
+    stagger (the map sits 2u left of centre) and needed 4u(X + 2)."""
+    return 4 * u * (map_x + 1)
+
+
+def replay_map_origin(child_w: int, child_h: int, u: int, map_x: int, map_y: int, top: int, g: int):
+    """t_rp_rows on a whole-world view: the row fix's top row -(top & 1) and, at g > 16, the centred
+    (pixel_left, pixel_top) -- the map's span [pixel_left - 4u, pixel_left + 4uX) and its ink rows
+    [py(0) + 1, py(Y-1) + 4u - 1] (py(y) = 2u(y - top' - 1) + pixel_top) centred in the child.  Returns
+    (top', pixel_left or None, pixel_top delta-or-value): at g <= 16 only top' and the pixel_top shift 2u(top' - top)."""
+    top2 = -(top & 1)
+    if g <= NATIVE_G:
+        return top2, None, 2 * u * (top2 - top)
+    left = (child_w - 4 * u * (map_x + 1)) // 2 + 4 * u
+    t_ink = (child_h - (2 * u * (map_y + 1) - 1)) // 2
+    return top2, left, t_ink - 1 + 2 * u * (top2 + 1)
+
+
+def replay_window(g: int, map_x: int, map_y: int, screen_w: int, screen_h: int) -> Tuple[int, int]:
+    """The window (the user's decision 2026-11-15, "grow the window"): (s(800), s(600)), grown -- 4:3 kept -- just
+    enough that the engine's fitted map clips no row: W = replay_clip_free_width(u, X) + 2 s(3), H = max(s(600),
+    ceil(3W / 4)), u = the fit on the s(800) x s(600) window -- but ONLY when that grown window fits the screen
+    (W <= ScreenWidth, H <= ScreenHeight).  Where it would not (big custom worlds, u at its floor of 1: from ~143
+    tiles wide at g 18, ~179 at 1920 x 1080, ~358 at 4K), the window stays s(800) x s(600) and the map clips as
+    vanilla's does: never a window off the screen, never one filling it without fixing the clip.  Nor where the
+    fit is REPLAY_BLANK_ZOOM (-16): the engine renders no map there (measured on its own render, the pristine exe
+    too -- vanilla's replay is blank for worlds wider than ~114 tiles at 1024 x 768); every window the screen cap
+    would refuse is such a blank one (the tests sweep it), the cap only guards the law.  g <= 16:
+    800 x 600, vanilla (its own clip of the tiny world included).  Port: t_rp_winsize (ScreenWidth / ScreenHeight
+    0x9B7B1C / 0x9B7B20, the dims Win_center centres in)."""
+    w, h = replay_window_wh(g)
+    if g <= NATIVE_G:
+        return w, h
+    z = replay_fit_z(w, h, map_x, map_y)
+    if z <= REPLAY_BLANK_ZOOM:                     # the engine draws no map at all there: nothing to keep unclipped
+        return w, h
+    u = map_u_of_zoom(z)
+    need = replay_clip_free_width(u, map_x) + 2 * scale_px(REPLAY_MAP_SIDE, g)
+    if need > w:
+        nh = max(h, (3 * need + 3) // 4)
+        if need <= screen_w and nh <= screen_h:
+            return need, nh
+    return w, h
+
+
+def replay_map_zoom(map_x: int, map_y: int, g: int) -> int:
+    """The map law (option A, the user's decision): the engine's own zoom fit on the s(800) x s(600) window.  For
+    every #WORLDSIZE world it is also the fit on the grown window (replay_window); for tiny custom worlds (16..22
+    half-tiles wide) the grown window would let the fit pick a larger unit, which would need more room again, so the
+    zoom is pinned to the un-grown fit: t_rp_winsize computes it into g_rp_z, t_rp_zoom stores it at 0x5AD85E.
+    g <= 16: the vanilla fit."""
+    return replay_fit_z(*replay_window_wh(g), map_x, map_y)

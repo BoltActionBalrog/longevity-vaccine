@@ -15,6 +15,9 @@ Cost: the test durations are the ones pytest already measures for every report
 perf_counter() calls per module. The files are written once, at session end.
 Disable with SMACX_TIMINGS=0.
 
+A failed test also keeps the tail of its report ("failure"), and under xdist every test names its worker ("w", in
+report order), so a flake that passes on re-run still leaves its message and its worker's test history behind.
+
 Session-scoped fixtures are billed to the SETUP of the first test that requests them -- that is
 where their cost actually lands, so a large setup on one test usually means an expensive fixture.
 
@@ -34,6 +37,7 @@ import pytest
 
 TIMINGS_DIR = Path(__file__).resolve().parent / "timings"
 KEEP_RUNS = 40
+FAILURE_CHARS = 4000            # the tail of a failed test's report kept in its run file
 
 _enabled = os.environ.get("SMACX_TIMINGS", "1") != "0"
 _tests: dict[str, dict] = {}
@@ -89,6 +93,13 @@ def pytest_runtest_logreport(report):
     if rec is None:
         rec = _tests[nid] = {"setup": 0.0, "call": 0.0, "teardown": 0.0, "outcome": ""}
     rec[report.when] = round(report.duration, 4)
+    node = getattr(report, "node", None)              # xdist controller: the worker that ran it
+    if node is not None and "w" not in rec:
+        rec["w"] = getattr(getattr(node, "gateway", None), "id", "")
+    if report.outcome == "failed":
+        # A flake that never reproduces leaves only this behind: keep its message, and (with "w" and the file's
+        # report order) the tests that ran before it in the same worker.
+        rec["failure"] = f"[{report.when}] " + (report.longreprtext or "")[-FAILURE_CHARS:]
     # The outcome that matters: a failed/skipped setup, else the call's.
     if report.when == "call" or (report.when == "setup" and report.outcome != "passed") \
             or (report.when == "teardown" and report.outcome == "failed"):

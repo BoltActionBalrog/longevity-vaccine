@@ -33,19 +33,21 @@ import config                 # noqa: E402
 import receipt as rc          # noqa: E402
 import release as rel         # noqa: E402
 import version as ver         # noqa: E402
+from conftest import _missing  # noqa: E402  (a skip, or a FAILURE under LONGEVITY_REQUIRE_E2E: audit-k LOW-4)
 
 _PY = _REPO / "tools" / "python" / "python.exe"
 
-pytestmark = pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+pytestmark = pytest.mark.needs_local(_PY, "the bundled interpreter")
 
 
 @pytest.fixture(scope="module")
 def extracted(tmp_path_factory) -> Path:
     """A real release archive, built and unpacked. Shared: building it is not cheap."""
     if not (rel.RUNTIME_DIR / "python.exe").is_file():
-        pytest.skip("no staged runtime; run build_runtime.py first")
+        _missing(rel.RUNTIME_DIR / "python.exe", "the staged runtime (run build_runtime.py first)")
     if not (rel.RUNTIME38_DIR / "python.exe").is_file():
-        pytest.skip("runtime38 not staged (fetch_python38.py + build_runtime.py); release.py requires both")
+        _missing(rel.RUNTIME38_DIR / "python.exe",
+                 "the staged runtime38 (fetch_python38.py + build_runtime.py; release.py requires both)")
     out = tmp_path_factory.mktemp("rel")
     p = subprocess.run([str(_PY), str(_SCRIPTS / "release.py"), "--skip-gate",
                         "--modules", "base", "--out", str(out)],
@@ -63,6 +65,7 @@ def test_the_archive_has_the_shipped_layout_and_no_work_folder(extracted):
     """`work` is a checkout's folder -- it holds tests, screenshots and notes. It means nothing
     to a player and must not reach the archive."""
     assert (extracted / "INSTALL.bat").is_file(), "no obvious thing to double-click"
+    assert (extracted / "UNINSTALL.bat").is_file(), "no obvious way to remove the mod"
     assert (extracted / "scripts" / "run-install.bat").is_file()
     assert (extracted / "scripts" / "install.py").is_file()
     assert (extracted / "scripts" / "bootstrap.py").is_file()
@@ -146,7 +149,8 @@ def test_running_install_bat_from_an_incomplete_extraction_still_reports(extract
     p = subprocess.run(["cmd", "/c", str(partial / "INSTALL.bat"), "--no-wait"],
                        capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300)
     out = p.stdout + p.stderr
-    assert p.returncode != 0
+    assert p.returncode == 9, out
+    assert "not recognized" not in out, out          # the 1.0.0 launcher fell through to `call ""`
     assert "INSTALLATION FAILED" in out, out
     assert "extract the WHOLE archive" in out, out
     assert "Nothing on disk was changed" in out, out

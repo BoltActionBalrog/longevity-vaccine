@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 # One BLAS thread per process, set before anything imports numpy/scipy. OpenBLAS sizes its buffers for one thread per
@@ -44,14 +43,20 @@ def pytest_addoption(parser, pluginmanager):
 # No test -- and no installer a test spawns -- may read or write the REAL desktop: the installer's
 # shortcut offer looks at LONGEVITY_DESKTOP_DIRS first, so point it at a throwaway folder for the
 # whole session (tests that need their own use monkeypatch.setenv on top).
-os.environ["LONGEVITY_DESKTOP_DIRS"] = tempfile.mkdtemp(prefix="lv-desktop-")
+# Both throwaway folders belong to THIS process and are removed when it exits (after every test and every
+# installer subprocess it ran); the controller also sweeps empty ones a killed run left. See lv_tempdirs.py.
+import lv_tempdirs  # noqa: E402
+
+if not os.environ.get("PYTEST_XDIST_WORKER"):
+    lv_tempdirs.sweep_stale()
+os.environ["LONGEVITY_DESKTOP_DIRS"] = lv_tempdirs.make("desktop")
 # Nor find the real game, nor remember a throwaway install as one of the player's: an installer
 # run without --game-dir looks only at the folders a test names, and the folders it installed
 # into are recorded in a throwaway file (config.CANDIDATES_ENV / INSTALLS_ENV).
 # Assigned, not setdefault: a value inherited from a developer's shell would point the suite at
 # real folders or record test installs into a real list.
 os.environ["LONGEVITY_GAME_CANDIDATES"] = ""
-os.environ["LONGEVITY_INSTALLS_FILE"] = str(Path(tempfile.mkdtemp(prefix="lv-installs-")) / "installs.txt")
+os.environ["LONGEVITY_INSTALLS_FILE"] = str(Path(lv_tempdirs.make("installs")) / "installs.txt")
 
 # Cache compiled bytecode even when the environment says not to (PYTHONDONTWRITEBYTECODE=1, as agent shells set
 # it). Without the cache EVERY worker of EVERY run re-does pytest's assertion rewrite of every test module and
@@ -244,6 +249,22 @@ def need_local():
     return need
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "needs_local(path, what): skip when `path` is absent -- a FAILURE under LONGEVITY_REQUIRE_E2E")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """`@pytest.mark.needs_local(path, what)` in place of a plain `skipif(not path.exists())` (audit-j L4: the bundled
+    interpreter's and the batch's ~100 end-to-end tests skipped silently under LONGEVITY_REQUIRE_E2E too, and the run
+    "passed"). Absent: _missing -- a skip, or a failure when the release gate demands the real thing."""
+    for mark in item.iter_markers("needs_local"):
+        p, what = mark.args
+        if not Path(p).exists():
+            _missing(Path(p), what)
+
+
 @pytest.fixture(scope="session")
 def bak_path() -> Path:
     p = config.terranx_bak(required=False)
@@ -334,3 +355,188 @@ def pristine_bytes() -> bytes:
 def pristine_pe_ctx(pristine_bytes) -> dict:
     pe = pefile.PE(data=pristine_bytes, fast_load=True)
     return {"data": pristine_bytes, "pe": pe, "resolver": ap.VaResolver(pe)}
+
+
+#: install.py's run-wide globals and their import-time values. A test that runs _install / do_update sets them,
+#: and the next test in the worker saw them (code review 2026-11-15: _THINKER_NEW, _VERDICT, _LAUNCH_EXE,
+#: _NOTE_ARGS leaked between tests).
+INSTALL_GLOBALS = {"_THINKER_NEW": False, "_VERDICT": None, "_LAUNCH_EXE": None, "_NOTE_ARGS": None,
+                   "_PENDING_UPDATE_CHECKS": None, "_WHATS_NEW": None}
+
+
+@pytest.fixture
+def install_globals(monkeypatch):
+    """Every install.py run-wide global at its import-time value, and put back after the test."""
+    import install as inst
+    import installer_exit as ix
+    for name, value in INSTALL_GLOBALS.items():
+        if hasattr(inst, name):
+            monkeypatch.setattr(inst, name, value)
+    monkeypatch.setattr(inst, "_PACKS_UNREAD", [], raising=False)     # a fresh list: never shared between tests
+    monkeypatch.setattr(inst, "_UNTICKED", [], raising=False)          # the last list's unticks (audit-t)
+    monkeypatch.setattr(inst, "_PENDING_CHOICES", None, raising=False)  # a first install's held answers (audit-t)
+    import thinker_flow as tf
+    monkeypatch.setattr(tf, "_INI_OWED", None, raising=False)           # a thinker.ini choice another test's change owed
+    monkeypatch.setattr(ix, "_PLAYER_NO_PROMPT", False, raising=False)   # main() sets it from --no-prompt
+    monkeypatch.delenv("LONGEVITY_PLAYER_NO_PROMPT", raising=False)
+    monkeypatch.delenv("LONGEVITY_NO_WAIT", raising=False)     # an in-process main() exports it; ix.can_ask reads it
+
+
+@pytest.fixture
+def synthetic_pin(monkeypatch):
+    """The synthetic Thinker files (test_thinker_update.NEW, plus the review tests' Changelog.md) stand in for the
+    compiled pin's release: the install record is checked against the pin's own file hashes (audit-g HIGH-1), and a
+    test's record holds the synthetic files' hashes."""
+    import hashlib
+    import thinker_flow as tf
+    from test_thinker_update import NEW
+    files = {**NEW, "Changelog.md": b"what's new"}
+    table = {rel.lower(): (rel, hashlib.sha256(data).hexdigest()) for rel, data in files.items()}
+    pid = tf.compiled_pin().pin_id
+    monkeypatch.setattr(tf, "_pin_files", lambda pin_id: dict(table) if pin_id == pid else {})
+
+
+#: Connections an in-process test tried to make to another host (the guard below refuses and records them).
+_NET_TRIES: list = []
+
+
+def _loopback(addr) -> bool:
+    """This machine: "localhost", or an address that PARSES as a loopback one (audit-f L1: a prefix test let
+    "127.example.invalid" through)."""
+    import ipaddress
+    host = addr[0] if isinstance(addr, tuple) and addr else addr
+    if isinstance(host, bytes):
+        host = host.decode("ascii", "replace")
+    if not isinstance(host, str):
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
+class _NetSink:
+    """A local stand-in for the network, for every installer CHILD process a test starts: the session points
+    HTTP_PROXY / HTTPS_PROXY here, the children inherit it, and a request for longevitymods.com, GitHub or anything
+    else arrives here -- recorded and refused, never the real host (user 2026-11-15: no test may fetch the live
+    manifest; a test that needs one passes a local signed manifest or --offline)."""
+
+    def __init__(self):
+        import socket
+        import threading
+        self.requests = []
+        self._srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._srv.bind(("127.0.0.1", 0))
+        self._srv.listen(32)
+        self.port = self._srv.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                c, _ = self._srv.accept()
+            except OSError:
+                return
+            try:
+                c.settimeout(5)
+                line = c.recv(4096).split(b"\r\n", 1)[0].decode("latin-1", "replace")
+                self.requests.append(line)
+                c.sendall(b"HTTP/1.1 502 Blocked by the test suite\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            finally:
+                c.close()
+
+
+_SINK = None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_network():
+    """The suite is hermetic (user 2026-11-15). In this process: socket.connect to anything but this machine is
+    refused and recorded (so a test fails even when the code under test swallows the error). In every child
+    process: HTTP(S)_PROXY points at _NetSink (NO_PROXY keeps local test servers direct). A live check opts in with
+    LONGEVITY_NET_TESTS=1.
+
+    In this process connect, connect_ex and name lookups (getaddrinfo / gethostbyname) are all refused for anything
+    but this machine (audit-f L1). The limit, which this guard cannot close: a CHILD process honours the proxy only
+    for HTTP(S) it makes through a proxy-aware client, so a child started with a fresh environment (no
+    HTTP(S)_PROXY), or one that opens raw sockets or resolves names itself, reaches the network directly. Every
+    installer child the suite starts inherits os.environ and fetches through urllib, which honours the proxy."""
+    global _SINK
+    if os.environ.get("LONGEVITY_NET_TESTS"):
+        yield
+        return
+    import socket
+    _SINK = _NetSink()
+    proxy = f"http://127.0.0.1:{_SINK.port}"
+    saved = {k: os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+                                            "NO_PROXY", "no_proxy")}
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        os.environ[k] = proxy
+    os.environ["NO_PROXY"] = os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
+    real = socket.socket.connect
+    real_ex = socket.socket.connect_ex
+    real_gai = socket.getaddrinfo
+    real_ghbn = socket.gethostbyname
+    real_ghbn_ex = socket.gethostbyname_ex
+
+    def refuse(addr):
+        _NET_TRIES.append(addr)
+        raise OSError("blocked by the test suite: no network")
+
+    def guarded(self, addr):
+        if getattr(self, "family", None) in (socket.AF_INET, socket.AF_INET6) and not _loopback(addr):
+            refuse(addr)
+        return real(self, addr)
+
+    def guarded_ex(self, addr):
+        if getattr(self, "family", None) in (socket.AF_INET, socket.AF_INET6) and not _loopback(addr):
+            refuse(addr)
+        return real_ex(self, addr)
+
+    def lookup(real_fn):
+        def guarded_lookup(host, *a, **k):
+            if host is not None and not _loopback(host):      # None / "" : a local bind, never a lookup
+                if host != "":
+                    _NET_TRIES.append(("lookup", host))
+                    raise socket.gaierror(socket.EAI_NONAME, "blocked by the test suite: no name lookups")
+            return real_fn(host, *a, **k)
+        return guarded_lookup
+
+    socket.socket.connect = guarded
+    socket.socket.connect_ex = guarded_ex
+    socket.getaddrinfo = lookup(real_gai)
+    socket.gethostbyname = lookup(real_ghbn)
+    socket.gethostbyname_ex = lookup(real_ghbn_ex)
+    try:
+        yield
+    finally:
+        socket.socket.connect = real
+        socket.socket.connect_ex = real_ex
+        socket.getaddrinfo = real_gai
+        socket.gethostbyname = real_ghbn
+        socket.gethostbyname_ex = real_ghbn_ex
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+@pytest.fixture(autouse=True)
+def _no_network_tried():
+    """Fail the test that tried the network: in this process, or through a child (its request reached _NetSink).
+
+    The limit of the attribution (audit-l L5): a child's request is charged to the test running in this worker when it
+    ARRIVES. A child that outlives its test (one left running in the background) and fetches later is charged to the
+    next test in the same worker. Every child the suite starts is waited for by its own test, so this does not happen
+    today. A test that starts a child it does not wait for must tag it, or stop it, before it ends."""
+    _NET_TRIES.clear()
+    seen = len(_SINK.requests) if _SINK is not None else 0
+    yield
+    tried = list(_NET_TRIES) + (_SINK.requests[seen:] if _SINK is not None else [])
+    _NET_TRIES.clear()
+    assert not tried, f"the test tried to reach the network (blocked): {tried}"

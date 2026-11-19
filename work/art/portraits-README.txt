@@ -53,7 +53,7 @@ WHEN CHANGES SHOW
   change one of the portrait settings below.  Native life: at its next combat.
 
 SETTINGS
-  Preferences > Longevity Mod Preferences: "Enable Custom Portraits" turns all of this on or off;
+  Preferences > Longevity Preferences: "Enable Custom Portraits" turns all of this on or off;
   under it, "Use Turovetsky's HD Portrait Pack" (shown when the HD pack is installed) and
   "Add Scanlines".  Scanlines apply to replacement images only; the game's own portraits are
   unchanged.  Changes take effect at once and are saved with OK.

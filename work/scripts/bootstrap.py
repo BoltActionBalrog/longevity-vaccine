@@ -62,6 +62,10 @@ from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPTS))
+# Run as a script, this module is __main__; install.py and thinker_flow's `import bootstrap` must get THIS one,
+# never a second copy with its own state (the double import that hid journey R's verdict in install.py).
+if __name__ == "__main__":
+    sys.modules.setdefault("bootstrap", sys.modules[__name__])
 
 import installer_exit as ix  # noqa: E402  (stdlib-only; safe at module scope)
 import version as ver        # noqa: E402  (stdlib-only; ships in `base`)
@@ -74,6 +78,34 @@ UPDATER_DIR = "updater"
 OLD_DIR = "updater.old"
 NEW_DIR = "updater.new"
 VERSION_FILE = "VERSION"
+
+
+def _rm_tree(game_dir: Path, p: Path) -> None:
+    """shutil.rmtree, never through a junction or symlink on the way from the game folder (safe_fs; verification
+    of f076f34). A tree outside the game folder (a test's deploy target) is checked from its own parent."""
+    import safe_fs
+    p = Path(p)
+    try:
+        p.relative_to(Path(game_dir))
+        root = Path(game_dir)
+    except ValueError:
+        root = p.parent
+    safe_fs.rmtree(root, p)
+
+
+def _refuse_link(game_dir: Path, dest: Path) -> None:
+    """Nothing of the updater is written through a junction or symlink on the way from the game folder (audit-j L3: a
+    junctioned LongevityMods got a new updater copy at every setup, and updater.prev copies outside the game folder
+    that could not be deleted again) -- as logs and staging. Raises OSError naming the link; the caller says that this
+    copy cannot update itself. A destination outside the game folder (a test's) is not checked."""
+    import safe_fs
+    try:
+        Path(dest).relative_to(Path(game_dir))
+    except ValueError:
+        return
+    link = safe_fs.first_link(Path(game_dir), Path(dest))
+    if link is not None:
+        raise OSError(f"{link} is a link to another folder")      # user-approved wording 2026-11-16 (in the updater warning)
 
 
 def mods_root(game_dir: Path) -> Path:
@@ -130,6 +162,9 @@ def reconcile(game_dir: Path, say=print) -> None:
     root = mods_root(game_dir)
     if not root.is_dir():
         return
+    import safe_fs
+    if safe_fs.link_on_path(Path(game_dir), root / UPDATER_DIR):
+        return                                        # never promotes or deletes through a link (audit-j L3)
     live = root / UPDATER_DIR
     old, new = root / OLD_DIR, root / NEW_DIR
     prev, staging = live.with_name(live.name + ".prev"), live.with_name(live.name + ".staging")
@@ -138,14 +173,15 @@ def reconcile(game_dir: Path, say=print) -> None:
         for stale in (old, new, prev, staging):
             if stale.exists():
                 say(f"  cleaning up {stale.name} left by an interrupted update")
-                shutil.rmtree(stale, ignore_errors=True)
+                _rm_tree(game_dir, stale)
         return
 
     # The live copy is missing or unusable. Promote the best VALID candidate, newest first.
     if live.exists() and not live.is_dir():
         say("  removing a stray file where the updater directory belongs")
         try:
-            live.unlink()
+            import safe_fs
+            safe_fs.unlink(Path(game_dir), live)          # never through a junctioned LongevityMods
         except OSError:
             pass
 
@@ -160,7 +196,7 @@ def reconcile(game_dir: Path, say=print) -> None:
             continue
         say(f"  {why} ({cand.name})")
         if live.exists():
-            shutil.rmtree(live, ignore_errors=True)
+            _rm_tree(game_dir, live)
         try:
             # Usually a freshly copied tree -- exactly what a virus scan is still reading.
             _replace_retrying(cand, live, say=say)
@@ -176,7 +212,7 @@ def reconcile(game_dir: Path, say=print) -> None:
     if is_usable(live):
         for stale in (old, new, prev, staging):
             if stale.exists():
-                shutil.rmtree(stale, ignore_errors=True)
+                _rm_tree(game_dir, stale)
     elif any(p.exists() for p in (old, new, prev, staging)):
         say("  WARNING: no complete updater could be recovered; leftover copies were KEPT.")
         say("  Re-run the installer you downloaded to restore it.")
@@ -222,6 +258,7 @@ PAYLOAD = (
     ("src/uimod/build/Release/uimod.dll", "src/uimod/build/Release/uimod.dll"),
     ("src/uimod/third_party/ffmpeg/bin", "src/uimod/third_party/ffmpeg/bin"),
     ("art/longevity_sm.pcx", "work/art/longevity_sm.pcx"),   # the update prompt's picture (optional)
+    ("art/pracx_icons_overlay.pcx", "work/art/pracx_icons_overlay.pcx"),   # patch_icons.py's art (optional)
 )
 
 
@@ -388,12 +425,13 @@ def deploy(game_dir: Path, payload_root: Path, version: str, dest: Path = None,
     payload_root = Path(payload_root)
     dest = Path(dest) if dest else updater_dir(game_dir)
     staged = dest.with_name(dest.name + ".staging")
+    _refuse_link(game_dir, dest)
 
     absent = [rel for rel in required_parts() if not _source_of(payload_root, rel).exists()]
     if absent:
         raise OSError(
             f"the payload at {payload_root} is not a complete installer (missing: "
-            f"{', '.join(absent)}). Refusing to publish it over the resident updater.")
+            f"{', '.join(absent)}). Refusing to publish it over Longevity Vaccine's updater.")
 
     need = _tree_size(payload_root, [str(_source_of(payload_root, d)) for d, _s in PAYLOAD])
     free = shutil.disk_usage(str(dest.parent if dest.parent.exists() else game_dir)).free
@@ -404,7 +442,7 @@ def deploy(game_dir: Path, payload_root: Path, version: str, dest: Path = None,
             f"not enough space to install the updater: need about "
             f"{need * 2 / (1 << 20):.0f} MB free, have {free / (1 << 20):.0f} MB")
 
-    shutil.rmtree(staged, ignore_errors=True)
+    _rm_tree(game_dir, staged)
     staged.mkdir(parents=True, exist_ok=True)
 
     copied = 0
@@ -423,22 +461,22 @@ def deploy(game_dir: Path, payload_root: Path, version: str, dest: Path = None,
     (staged / VERSION_FILE).write_text(version + "\n", encoding="ascii")
 
     if not is_usable(staged):
-        shutil.rmtree(staged, ignore_errors=True)
+        _rm_tree(game_dir, staged)
         raise OSError(f"the staged updater is incomplete (missing: "
                       f"{', '.join(missing_parts(staged))}); nothing was replaced")
 
     # Publish by rename, so a half-copied payload is never visible as the resident updater.
     dest.parent.mkdir(parents=True, exist_ok=True)
     prev = dest.with_name(dest.name + ".prev")
-    shutil.rmtree(prev, ignore_errors=True)
+    _rm_tree(game_dir, prev)
     if prev.exists():
         # rmtree(ignore_errors=True) can be silently defeated by a lock, and the publish would
         # then fail against an existing directory. Step aside to a unique name instead.
         prev = dest.with_name(f"{dest.name}.prev.{os.getpid()}")
-        shutil.rmtree(prev, ignore_errors=True)
+        _rm_tree(game_dir, prev)
     _publish(staged, dest, prev, say=say)
-    shutil.rmtree(prev, ignore_errors=True)
-    say(f"  resident updater deployed: {dest}  (v{version}, {copied} component(s))")
+    _rm_tree(game_dir, prev)
+    say(f"  Longevity Vaccine's updater deployed: {dest}  (v{version}, {copied} component(s))")
     return dest
 
 
@@ -449,22 +487,22 @@ def swap_in(game_dir: Path, new_payload: Path, say=print) -> None:
                       f"{', '.join(missing_parts(new_payload))})")
     root = mods_root(game_dir)
     live, old, new = root / UPDATER_DIR, root / OLD_DIR, root / NEW_DIR
-    shutil.rmtree(new, ignore_errors=True)
+    _rm_tree(game_dir, new)
     shutil.copytree(new_payload, new, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     if not is_usable(new):
-        shutil.rmtree(new, ignore_errors=True)
+        _rm_tree(game_dir, new)
         raise OSError("the copy of the new updater came out incomplete; nothing was replaced")
     if live.is_dir():
-        shutil.rmtree(old, ignore_errors=True)
+        _rm_tree(game_dir, old)
         if old.exists():
             # rmtree(ignore_errors=True) can be silently defeated by a lock, and the rename below
             # would then fail against an existing directory. Step aside to a unique name instead.
             old = root / f"{OLD_DIR}.{os.getpid()}"
-            shutil.rmtree(old, ignore_errors=True)
+            _rm_tree(game_dir, old)
     _publish(new, live, old, say=say)
-    shutil.rmtree(old, ignore_errors=True)
-    say("  resident updater replaced with the new generation")
+    _rm_tree(game_dir, old)
+    say("  Longevity Vaccine's updater replaced with the new generation")
 
 
 def run(argv: list = None) -> int:
@@ -476,7 +514,7 @@ def run(argv: list = None) -> int:
     apr.add_argument("--generation", type=int, default=1)
     apr.add_argument("--wait-pid", type=int, default=None)
     apr.add_argument("--swap-into", default=None,
-                     help="the resident updater directory this generation should become")
+                     help="the folder of Longevity Vaccine's updater that this generation should become")
     apr.add_argument("--manifest", default=None)
     # run-install.bat forwards its WHOLE argument list here, `--update` included. Without this
     # line argparse answered every `run-install.bat --update` with "unrecognized arguments":
@@ -484,7 +522,7 @@ def run(argv: list = None) -> int:
     apr.add_argument("--update", action="store_true", help=argparse.SUPPRESS)
     apr.add_argument("--modules", default=None,
                      help="Forwarded to the installer: extras to add or re-install "
-                          "(movies-hd = HD Cinematics, portraits-hd = Turovetsky's HD Portrait Pack).")
+                          "(movies-hd = Z2k Retro's HD Cinematics, portraits-hd = Turovetsky's HD Portrait Pack).")
     apr.add_argument("--no-prompt", action="store_true",
                      help="Forwarded to the installer: never ask anything.")
     # The GAME's hand-off flag (FROZEN: the DLL passes it, and every later generation must accept
@@ -493,9 +531,14 @@ def run(argv: list = None) -> int:
     apr.add_argument("--only-listed", action="store_true",
                      help="Forwarded to the installer: fetch only the packs named by --modules.")
     apr.add_argument("--repair", action="store_true",
-                     help="re-deploy the resident updater from a freshly downloaded module")
+                     help="reinstall Longevity Vaccine's updater from a freshly downloaded module")
     apr.add_argument("--no-wait", action="store_true")
     apr.add_argument("--offline", action="store_true")
+    # Thinker update (thinker-updater-design.md): forwarded to the worker; the second only changes the
+    # waiting line (the pid is the startup-box repair window, not the game).
+    apr.add_argument("--with-thinker", action="store_true", help=argparse.SUPPRESS)
+    apr.add_argument("--keep-thinker", action="store_true", help=argparse.SUPPRESS)
+    apr.add_argument("--from-fix-thinker", action="store_true", help=argparse.SUPPRESS)
     # TOLERANT of flags it does not know. The game's DLL can be newer than this bootstrap (the
     # resident copy is the previous release's until a swap succeeds, and a failed swap is not
     # fatal), and a strict parse turned every new protocol flag into "the installer did not
@@ -532,6 +575,8 @@ def run(argv: list = None) -> int:
             code=ix.EXIT_NO_GAME, detail=f"Looked for: {game_dir}", changed=False,
             remedy="check the --game-dir path: it must be the folder that holds terranx.exe.")
     args.game_dir = str(game_dir)
+    global _GAME_DIR, _WAIT_PID
+    _GAME_DIR, _WAIT_PID = game_dir, args.wait_pid
 
     gen = max(1, int(args.generation))
     # One installer at a time, before anything is read or written. Generation 2 waits for
@@ -549,7 +594,22 @@ def run(argv: list = None) -> int:
     # LongevityMods tree rewritten on the way to being told to stop.
     # Launched FROM the game: let it finish exiting before anything is checked or fetched.
     # (Generation 2 has its own --wait-pid: generation 1's.)
-    inst.wait_for_game(args.wait_pid)
+    if args.from_fix_thinker and args.wait_pid:
+        ix.say("\nWaiting for the previous window to close.")
+        _wait_for_pid(int(args.wait_pid))
+    else:
+        inst.wait_for_game(args.wait_pid)
+    # The game's (or the repair window's) Thinker consent: checked and deleted HERE, after its writer has
+    # gone, and handed to the worker in its environment only (section 8; round-6 finding B5).
+    try:
+        import thinker_flow
+        _consent = thinker_flow.take_for_generation_one(game_dir)
+    except Exception:  # noqa: BLE001 - no consent is the safe outcome: the worker asks
+        _consent = None
+    if _consent:
+        os.environ[thinker_flow.CONSENT_ENV] = _consent
+    if args.no_prompt:
+        os.environ["LONGEVITY_PLAYER_NO_PROMPT"] = "1"
     explicit = []
     if args.modules:
         # BEFORE the fetch: a typo here used to cache the manifest, reconcile the tree, download
@@ -621,7 +681,7 @@ def run(argv: list = None) -> int:
         # --repair must work in the state it exists for: a corrupt resident copy, which is
         # usually ALSO "already current". Checking the version first made it a no-op precisely
         # when it was needed.
-        ix.say("  --repair: re-deploying the resident updater from the downloaded installer")
+        ix.say("  --repair: reinstalling Longevity Vaccine's updater from the downloaded installer")
     elif decision.action == mfmod.NOTHING and not args.modules:
         ix.say(f"  already current (v{installed}); nothing needs updating")
         for n in sorted(content):
@@ -629,14 +689,24 @@ def run(argv: list = None) -> int:
                    else f"  {inst.MODULE_LABELS.get(n, n)} v{_offered(doc, n) or '?'}: not part "
                         f"of this update (stays at v{content[n]})")
         rc.note_check(game_dir)
+        # The retry of an update that failed past its receipt write (audit-h L1, W23): "See what's new" still closes
+        # this verdict, and the kept file goes.
+        inst.finish_whats_new(game_dir, recorded, recorded)
+        # Wine: a GOG / Heroic file check may have put DDrawCompat back since the install, and this branch is
+        # what a player's `--update` with nothing new reaches (install.py never runs). getattr: an install.py
+        # from before this step must not break the idle answer.
+        ddraw_step = getattr(inst, "wine_ddrawcompat", None)
+        ddraw_status = ddraw_step(game_dir) if ddraw_step else ""
         # The one thing an up-to-date player has not been told: a pack they could add.
         inst.offer_optional_modules(game_dir, doc, sorted(content), args)
         global _VERDICT, _NOTE_ARGS
         current = {n: v for n, v in content.items() if n not in left}
-        _VERDICT = ("ALREADY UP TO DATE", _idle_verdict(inst, installed, current,
-                                                        inst.announced_modules(game_dir, doc, sorted(content)),
-                                                        left=[inst.MODULE_LABELS.get(n, n)
-                                                              for n in sorted(left)]))
+        idle = _idle_verdict(inst, installed, current, inst.announced_modules(game_dir, doc, sorted(content)),
+                             left=[inst.MODULE_LABELS.get(n, n) for n in sorted(left)])
+        if ddraw_status in ("moved", "restored", "dropped"):
+            idle = idle.replace("Nothing was changed", "Nothing else was changed (ddraw.dll: see above)")
+        _VERDICT = ("ALREADY UP TO DATE", idle)
+        _offer_start()                          # nothing changed: [y/N]
         return ix.EXIT_OK
     elif decision.action == mfmod.UPDATE and decision.modules \
             and not ver.is_newer(decision.version or installed, installed):
@@ -724,6 +794,10 @@ def run(argv: list = None) -> int:
         cmd += ["--no-prompt"]
     if args.no_wait:
         cmd += ["--no-wait"]
+    if args.with_thinker:
+        cmd += ["--with-thinker"]
+    if args.keep_thinker:
+        cmd += ["--keep-thinker"]
     ix.say(f"  handing over to the new installer ({latest})")
     # A NEW CONSOLE. Inheriting this one meant generation 2 wrote over generation 1's own
     # "press Enter to close this window" and the two interleaved.
@@ -745,7 +819,7 @@ def run(argv: list = None) -> int:
     # say -- if gen 2 then fails they have already been told otherwise.
     _VERDICT = ("UPDATE HANDED OVER",
                 f"A newer installer (v{latest}) was downloaded and has taken over in a new "
-                "window. Watch THAT window for the result -- nothing has been changed in "
+                "window. Watch THAT window for the result. Nothing has been changed in "
                 "your game yet.")
     # EXIT WITHOUT A KEYPRESS. Generation 2 waits for THIS process to exit before it swaps the
     # resident updater (PARENT_WAIT_SECONDS); a "Press Enter to close this window" here left
@@ -770,7 +844,7 @@ def _idle_verdict(inst, installed: str, content: dict, absent: list, left=()) ->
         text = f"Everything you have installed is current ({', '.join(have)}). Nothing was changed."
     if absent:
         text += (" " + " and ".join(inst.MODULE_LABELS.get(n, n) for n in absent)
-                 + " can be added -- see \"optional extras\" above.")
+                 + " can be added (see \"optional extras\" above).")
     return text
 
 
@@ -804,14 +878,24 @@ def _download_new_payload(game_dir: Path, base: dict, latest: str, args) -> Path
         local_manifest = bool(getattr(args, "manifest", None)) and not str(
             args.manifest).lower().startswith(("http://", "https://"))
         fetchmod.download(url, archive, sha256=digest, size=size,
-                          mirror=base.get("mirror"), allow_file=local_manifest, label="installer")
+                          mirror=base.get("mirror"), allow_file=local_manifest, label="installer", root=game_dir)
+    except fetchmod.LinkError as e:
+        # A link on the way into the game folder: the approved line alone, uncut (audit-g LOW-1).
+        raise ix.InstallerError(str(e), code=ix.EXIT_ABORTED, changed=False) from e
+    except fetchmod.MismatchError as e:
+        # Arrived whole and is not the release: not a connection problem (verification 2026-11-15). User-approved
+        # message (2026-11-15); the remedy is this file's own (the manifest-fetch failure's).
+        raise ix.InstallerError(
+            "The new installer that was downloaded did not match the release, so nothing was changed.",
+            code=ix.EXIT_ABORTED, detail=f"  {e}", changed=False,
+            remedy=f"try again later, or download the latest version from {mfmod.DOWNLOAD_URL}")
     except fetchmod.FetchError as e:
         raise ix.InstallerError(
             "The new installer could not be downloaded, so nothing was changed.",
             code=ix.EXIT_ABORTED, detail=f"  {e}", changed=False,
             remedy="check your connection and try again.")
     out = staging / f"base-{latest}"
-    shutil.rmtree(out, ignore_errors=True)
+    _rm_tree(game_dir, out)
     out.mkdir(parents=True, exist_ok=True)
     try:
         with zipfile.ZipFile(archive) as z:
@@ -821,7 +905,7 @@ def _download_new_payload(game_dir: Path, base: dict, latest: str, args) -> Path
                                 code=ix.EXIT_ABORTED, detail=f"  {e}", changed=False)
     # The archive is repo-shaped; the resident layout is flatter.
     flat = staging / f"payload-{latest}"
-    shutil.rmtree(flat, ignore_errors=True)
+    _rm_tree(game_dir, flat)
     try:
         deploy(game_dir, out, latest, dest=flat, say=ix.say)
     except OSError as e:
@@ -882,11 +966,13 @@ def _generation_two(game_dir: Path, args) -> int:
             ix.say("  Continuing with the update; run --repair afterwards to refresh it.")
 
     ix.say("  generation 2: applying the update")
+    if args.no_prompt:
+        os.environ["LONGEVITY_PLAYER_NO_PROMPT"] = "1"
     code = _run_installer(_SCRIPTS, game_dir, args)
-    if code != ix.EXIT_OK:
+    if code not in (ix.EXIT_OK, ix.EXIT_DECLINED, ix.EXIT_ABORTED):
         ix.say("  The update did not complete. The NEW installer is already in place, so simply "
-               "running it again retries from here -- nothing needs downloading twice.")
-    else:
+               "running it again retries from here; nothing needs downloading twice.")
+    elif code == ix.EXIT_OK:
         # Name what was installed, from the receipt the worker just wrote. "Your installation
         # is up to date" said nothing about what changed.
         import install as inst
@@ -936,6 +1022,10 @@ def _run_installer(scripts: Path, game_dir: Path, args) -> int:
         cmd += ["--no-wait"]
     if args.offline:
         cmd += ["--offline"]
+    if getattr(args, "with_thinker", False):
+        cmd += ["--with-thinker"]
+    if getattr(args, "keep_thinker", False):
+        cmd += ["--keep-thinker"]
     # --no-prompt: a generation spawned by the bootstrap has no one watching it.
     cmd += ["--no-prompt"]
     # The child is a WORKER. Without this the player saw TWO verdict banners and was asked
@@ -952,7 +1042,23 @@ def _run_installer(scripts: Path, game_dir: Path, args) -> int:
             sys.stdout.flush()
         except (OSError, ValueError, AttributeError):
             pass
-        return int(subprocess.call(cmd, cwd=str(scripts), env=env))
+        # Ctrl-C reaches every process on the console: only the worker, which put the question,
+        # handles it (R-STOP, "nothing was changed"); this parent ignores it while it waits
+        # (thinker-updater-design.md section 3E; round-6 finding B1).
+        import signal
+        import receipt as rc
+        # The base version before and after the worker: "See what's new" closes this verdict only when the worker
+        # brought Longevity Vaccine up from an older one (never on --repair, a pack-only update or a failure).
+        before = rc.module_version(rc.read(game_dir), "base")
+        old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            code = int(subprocess.call(cmd, cwd=str(scripts), env=env))
+        finally:
+            signal.signal(signal.SIGINT, old)
+        if code == ix.EXIT_OK and not args.repair:
+            after = rc.module_version(rc.read(game_dir), "base")
+            inst.finish_whats_new(game_dir, before, after)    # the rule and the kept file (audit-h M2)
+        return code
     except OSError as e:
         raise ix.InstallerError("The installer could not be started.",
                                 code=ix.EXIT_ABORTED, detail=f"  {e}", changed=False)
@@ -960,7 +1066,15 @@ def _run_installer(scripts: Path, game_dir: Path, args) -> int:
 
 def main() -> int:
     try:
-        return run()
+        code = run()
+        if code in (ix.EXIT_DECLINED, ix.EXIT_ABORTED):
+            _offer_start()                      # the worker changed nothing: run_guarded offers [y/N]
+        return code
+    except ix.InstallerError as e:
+        # A refusal that changed nothing ends like journey R's: `Start the game ... [y/N]` (user 2026-11-14).
+        if e.changed is False and not e.offer_play and _offer_start():
+            e.offer_play, e.offer_play_default = True, False
+        raise
     finally:
         # Let go BEFORE run_guarded's verdict waits for Enter: a window left open on "UPDATE
         # FAILED -- simply run it again" must not refuse that very retry.
@@ -976,23 +1090,54 @@ _VERDICT = None
 #: (game_dir, target_id) once an update really completed here (never on a hand-over: generation
 #: 2 prints the closing note itself). The worker's own note is muted, so the parent prints it.
 _NOTE_ARGS = None
+#: (game_dir, target_id) of an outcome that changed nothing but may still offer `Start the game ... [y/N]`.
+_OFFER = None
+#: The game folder and the --wait-pid of this run, once known (for _offer_start).
+_GAME_DIR = None
+_WAIT_PID = None
+
+
+def _offer_start() -> bool:
+    """Arm `Start the game ... [y/N]` for an outcome that changed nothing (user 2026-11-14): only for a
+    folder Longevity Vaccine is installed in, and never while the game that started us is still running."""
+    global _OFFER
+    try:
+        if _GAME_DIR is None or _NOTE_ARGS:
+            return False
+        import preflight
+        if _WAIT_PID and preflight._pid_alive(int(_WAIT_PID)):
+            return False
+        import receipt as rc
+        tid = rc.read(_GAME_DIR).get("target_id")
+        if not tid:
+            return False
+        _OFFER = (_GAME_DIR, tid)
+        return _relaunch_exe() is not None
+    except Exception:  # noqa: BLE001 - an offer is never worth failing a verdict
+        _OFFER = None
+        return False
 
 
 def _closing_note() -> None:
     if _NOTE_ARGS:
         import install as inst
         inst.print_play_note(*_NOTE_ARGS)
+    elif sys.modules.get("install") is not None:
+        # ALREADY UP TO DATE after a run that failed past its receipt write (audit-h L1, W23): the armed line alone.
+        sys.modules["install"]._say_whats_new()
 
 
 def _relaunch_exe():
     """The program to offer to start after an update that completed here: the one the closing note
     names (thinker.exe in a Thinker folder). An update ended without the offer a first install
-    makes, though the game had just been closed for it (user 2026-11-05). None on a hand-over or a
-    failure, where there is no closing note either."""
-    if not _NOTE_ARGS:
+    makes, though the game had just been closed for it (user 2026-11-05). After an outcome that
+    changed nothing, the same program when _offer_start armed it ([y/N], user 2026-11-14). None on a
+    hand-over or a failure."""
+    where = _NOTE_ARGS or _OFFER
+    if not where:
         return None
     import install as inst
-    return inst.mod_exe(*_NOTE_ARGS)
+    return inst.mod_exe(*where)
 
 
 def _crash_log_dir():
@@ -1006,6 +1151,7 @@ if __name__ == "__main__":
         main,
         log_dir=_crash_log_dir,
         relaunch_exe=_relaunch_exe,
+        relaunch_default=lambda: bool(_NOTE_ARGS),        # [Y/n] after a change, [y/N] otherwise
         success_title=lambda: _VERDICT[0] if _VERDICT else "UPDATE COMPLETE",
         success_body=lambda: _VERDICT[1] if _VERDICT else
         "Your installation is up to date.",

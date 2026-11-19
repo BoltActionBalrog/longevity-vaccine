@@ -16,6 +16,14 @@ import install as inst        # noqa: E402
 
 inst._load_modules()          # apply_patches etc.; run alone, nothing else in the worker loads them
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_arrow_choices import _keys  # noqa: E402  (the question is an arrow choice, user-approved 2026-11-15)
+
+
+def _never_asked(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("must not ask"))
+    monkeypatch.setattr(inst, "_read_key", lambda: pytest.fail("must not ask"))
+
 
 @pytest.mark.parametrize("w,h,display,want", [
     ("1920", "1080", (3840, 2160), (1920, 1080)),      # pinned below native: stretched
@@ -47,7 +55,7 @@ def test_yes_resets_both_keys_to_default(tmp_path, monkeypatch, capsys):
     g = _game(tmp_path, "ScreenWidth=1920\nScreenHeight=1080\nZoomLevels=<DEFAULT>")
     monkeypatch.setattr(inst, "current_display_mode", lambda: (3840, 2160))
     monkeypatch.setattr(ix, "can_ask", lambda: True)                     # a keyboard is attached
-    monkeypatch.setattr("builtins.input", lambda prompt="": "")          # Enter = the default, yes
+    _keys(monkeypatch, "enter")                                          # Enter = the default: the display's
     inst.check_display_resolution(g, "pracx")
     out = capsys.readouterr().out
     assert "1920x1080" in out and "3840x2160" in out and "stretched" in out
@@ -62,7 +70,7 @@ def test_no_leaves_the_ini_alone(tmp_path, monkeypatch, capsys):
     g = _game(tmp_path, "ScreenWidth=1920\nScreenHeight=1080")
     monkeypatch.setattr(inst, "current_display_mode", lambda: (3840, 2160))
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    _keys(monkeypatch, "down", "enter")                                  # Keep 1920x1080
     inst.check_display_resolution(g, "pracx")
     assert inst.read_ini_str(g, "PRACX", "ScreenWidth", "") == "1920"
     assert "Left your resolution as is. Your game will likely appear stretched" in capsys.readouterr().out
@@ -74,7 +82,7 @@ def test_the_question_is_asked_even_under_the_workers_no_prompt(tmp_path, monkey
     g = _game(tmp_path, "ScreenWidth=1920\nScreenHeight=1080")
     monkeypatch.setattr(inst, "current_display_mode", lambda: (3840, 2160))
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+    _keys(monkeypatch, "enter")
     inst.check_display_resolution(g, "pracx", no_prompt=True)
     assert inst.read_ini_str(g, "PRACX", "ScreenWidth", "") == "<DEFAULT>"
 
@@ -85,7 +93,7 @@ def test_a_first_installs_no_prompt_only_warns(tmp_path, monkeypatch, capsys):
     g = _game(tmp_path, "ScreenWidth=1920\nScreenHeight=1080")
     monkeypatch.setattr(inst, "current_display_mode", lambda: (3840, 2160))
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    _never_asked(monkeypatch)
     inst.check_display_resolution(g, "pracx", ask=False)
     assert inst.read_ini_str(g, "PRACX", "ScreenWidth", "") == "1920"
     assert "Set [PRACX] ScreenWidth and ScreenHeight to <DEFAULT>" in capsys.readouterr().out
@@ -95,17 +103,14 @@ def test_without_a_keyboard_it_only_warns(tmp_path, monkeypatch, capsys):
     g = _game(tmp_path, "ScreenWidth=1920\nScreenHeight=1080")
     monkeypatch.setattr(inst, "current_display_mode", lambda: (3840, 2160))
     monkeypatch.setattr(ix, "can_ask", lambda: False)                    # piped / scripted stdin
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    _never_asked(monkeypatch)
     inst.check_display_resolution(g, "pracx")
     out = capsys.readouterr().out
     assert "WARNING" in out and "<DEFAULT>" in out
     assert inst.read_ini_str(g, "PRACX", "ScreenWidth", "") == "1920"
     # a keyboard that then goes away (EOF) is the same: left alone, told how to fix it
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-
-    def eof(prompt=""):
-        raise EOFError
-    monkeypatch.setattr("builtins.input", eof)
+    _keys(monkeypatch, EOFError())
     inst.check_display_resolution(g, "pracx")
     assert "Left your resolution as is" in capsys.readouterr().out
     assert inst.read_ini_str(g, "PRACX", "ScreenWidth", "") == "1920"

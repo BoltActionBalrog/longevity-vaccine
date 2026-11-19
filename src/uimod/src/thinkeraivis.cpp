@@ -57,6 +57,7 @@
 #include "aivis.h"           // the predicate, the setting, the bump, the engine-side viewer wrapper
 #include "modernctl.h"       // ModernCtlVehs(): the live (relocated) unit array
 #include "thinkercompat.h"   // ThinkerLoaded() / ThinkerRange()
+#include "thinkerversion.h"  // ThinkerOnPin(): the startup check's one decision
 #include "version.h"        // UIMOD_THINKER_SUPPORTED_*: the Thinker build this half is measured on
 
 void UimodLog(const char* msg);   // init.cpp
@@ -129,6 +130,25 @@ const BYTE kZocAnyHead[2] = { 0x55, 0xBD };                               // + i
 const BYTE kZocVehHead[6] = { 0x55, 0x57, 0x56, 0x31, 0xF6, 0x53 };
 const BYTE kZocSeaHead[5] = { 0x55, 0x57, 0x56, 0x53, 0xBB };             // + imm32 NearbyTiles
 
+// ---- 1.0.1 groups, Thinker 5.5 halves (work\briefs\cloak-filter-1.0.1-spec.md; audits 2026-11-14/15) -----------
+// fix 1 (combat reveal): mod_battle_fight_2 +0xA7350 is realigned (ebp-relative locals only); its branch split is
+// `cmp dword [ebp-0xD4],1` (combat_type) then `je` -> artillery. Attacker id [ebp-0xD8], defending faction [ebp-0x108].
+constexpr uint32_t kRevealSite = 0xA8022, kRevealResume = 0xA8029;
+// fix 2 (bombard scan): Thinker's action_destroy +0xA0AC0 asks mod_stack_check(stack, 15, owner, -1, -1) at +0xA1396;
+// the firer is [esp+0x60] in that frame (no ebp frame), [esp+0x64] inside the stub.
+constexpr uint32_t kBombScanCall = 0xA1396, kModStackCheck = 0x8DC30;
+// fix 3 (duel): its veh_skip at entry (+0xA0AF0 -> Thinker's own veh_skip +0x8E490, just before Thinker zeroes
+// VehAttackFlags), the combat call (+0xA13C4, WrapPillageFight below) and the nerve-gas gate in mod_battle_fight_2.
+constexpr uint32_t kDestroySkipCall = 0xA0AF0, kThinkerVehSkip = 0x8E490, kThinkerDestroy = 0xA0AC0;
+constexpr uint32_t kNerveSite = 0xA97CF, kNerveResume = 0xA97D5, kNerveJoin = 0xA981A;
+// fix 4 (#HASTY): Thinker's action_arty calls mod_battle_fight at +0xA17E7 (single player, flags 3) and +0xA16E4
+// (network check pass, flags 1); the ask point is the first instruction of mod_battle_fight_2's non-odds path, before
+// its treaty question; the cancel returns 1 through the odds return's bare epilogue (the function has no return-1 one).
+constexpr uint32_t kArtySpCall = 0xA17E7, kArtyNetCall = 0xA16E4;
+constexpr uint32_t kAskSite = 0xA7980, kAskResume = 0xA7987, kAskCancel = 0xA77E2;
+constexpr uintptr_t kVA_EngineDestroy = 0x004CAA50;   // Thinker's write_jump -> kThinkerDestroy
+constexpr uintptr_t kVA_EngineVehSpeed = 0x005C1540;
+
 // ---- state ----------------------------------------------------------------------------------------------
 using FDiplo       = int(__cdecl*)(int f1, int f2);
 using FNonAlly     = int(__cdecl*)(int x, int y, int f);
@@ -200,9 +220,146 @@ int __cdecl WrapPillageFight(int veh, int offset, int a3, int a4, int a5)
             const int w = *reinterpret_cast<const int*>(At(kVA_MapAreaX));
             if (tx < 0) tx += w; else if (tx >= w) tx -= w;
         }
-        if (AiVisFactionFiltered(f) && AiVisTileHidden(tx, ty, f)) return 0;
+        if (AiVisFactionFiltered(f) && AiVisTileHidden(tx, ty, f)) return 0;   // (a) unconditional on the duel
     }
-    return g_battleFight(veh, offset, a3, a4, a5);
+    // (b) the repaired counter-battery duel (fix 3's Thinker half): DuelSafe else BLOCK, flags 2 around the call,
+    // the firer's moves restored, restored to Thinker's 0 afterwards -- see aivis.cpp DuelRun
+    if (AiVisDuelActive()) return AiVisDuelRun(veh, offset, a3, a4, a5, reinterpret_cast<void*>(g_battleFight));
+    return g_battleFight(veh, offset, a3, a4, a5);   // (c)
+}
+
+// ---- 1.0.1 groups: the Thinker halves --------------------------------------------------------------------------
+using FStackCk5 = int(__cdecl*)(int stack, int type, int a3, int a4, int a5);
+using FVehSkipT = void(__cdecl*)(int veh);
+FStackCk5 g_modStackCheck = nullptr;
+FVehSkipT g_thinkerVehSkip = nullptr;
+void* g_tRevealResume = nullptr;
+void* g_tNerveResume = nullptr;
+void* g_tNerveJoin = nullptr;
+void* g_tAskResume = nullptr;
+void* g_tAskCancel = nullptr;
+
+// fix 1: replays `cmp dword [ebp-0xD4],1`; the je at +0xA8029 reads the flags.
+void __declspec(naked) StubCombatRevealT()
+{
+    __asm {
+        pushad
+        pushfd
+        push dword ptr [ebp - 0x108]
+        push dword ptr [ebp - 0xD8]
+        call AiVisCombatReveal
+        add  esp, 8
+        popfd
+        popad
+        cmp  dword ptr [ebp - 0xD4], 1
+        jmp  dword ptr [g_tRevealResume]
+    }
+}
+
+// fix 2
+int __cdecl BombardStackCheckT(int stack, int type, int a3, int a4, int a5, int actor)
+{
+    if (AiVisBombardSkip(stack, actor, a3)) return 0;   // a3 = the territory owner (mod_stack_check type 15's filter)
+    return g_modStackCheck(stack, type, a3, a4, a5);
+}
+
+void __declspec(naked) StubBombardStackCheckT()
+{
+    __asm {
+        push dword ptr [esp + 0x64]
+        push dword ptr [esp + 0x18]
+        push dword ptr [esp + 0x18]
+        push dword ptr [esp + 0x18]
+        push dword ptr [esp + 0x18]
+        push dword ptr [esp + 0x18]
+        call BombardStackCheckT
+        add  esp, 0x18
+        ret
+    }
+}
+
+// fix 3: the firer's moves before Thinker's veh_skip spends them
+void __cdecl WrapDestroySkipT(int veh)
+{
+    AiVisDuelRecord(veh);
+    g_thinkerVehSkip(veh);
+}
+
+// fix 3: the nerve gate. Live on the replay path: eax (state) and edi; EFLAGS dead.
+void __declspec(naked) StubNerveGateT()
+{
+    __asm {
+        cmp  dword ptr [g_aivisInDuel], 0
+        jne  in_duel
+        mov  esi, dword ptr [ebp - 0xBC]
+        jmp  dword ptr [g_tNerveResume]
+    in_duel:
+        jmp  dword ptr [g_tNerveJoin]
+    }
+}
+
+// fix 4: Long Range Fire marks its mod_battle_fight calls
+int __cdecl WrapArtyFightT(int veh, int offset, int a3, int a4, int a5)
+{
+    int* mark = AiVisAskHastyMark();
+    const int saved = *mark;
+    *mark = 1;
+    const int r = g_battleFight(veh, offset, a3, a4, a5);
+    *mark = saved;
+    return r;
+}
+
+// fix 4: Thinker computes the moves left later than this point, so the stub does it (as its haste block will).
+int __cdecl AskHastyT(int atk, int f, int local, int ctype, int defUnitWord)
+{
+    if (*AiVisAskHastyMark() == 0) return 0;   // the common case: no Long Range Fire / redirect mark, no work
+    int left = 0;
+    if (atk >= 0 && atk < *reinterpret_cast<const int*>(At(0x009A64C8))) {
+        const int speed = reinterpret_cast<int(__cdecl*)(int, int)>(At(kVA_EngineVehSpeed))(atk, 0);
+        left = speed - g_vehs[atk * kVehSize + 0x28];
+        if (left < 0) left = 0; else if (left > 999) left = 999;
+    }
+    return AiVisAskHasty(atk, f, local, ctype, left, static_cast<int16_t>(defUnitWord & 0xFFFF));
+}
+
+// +0xA7980 `movzx eax, byte [ebp-0x125]` (7 bytes) -> here. Slots: [ebp-0xD8] attacker id, [ebp-0xF8] attacker
+// faction, [ebp-0x120] MapWin owner, [ebp-0xD4] combat_type, [ebp-0x128] defender unit id (word).
+void __declspec(naked) StubPreAttackT()
+{
+    __asm {
+        pushad
+        push dword ptr [ebp - 0x128]
+        push dword ptr [ebp - 0xD4]
+        push dword ptr [ebp - 0x120]
+        push dword ptr [ebp - 0xF8]
+        push dword ptr [ebp - 0xD8]
+        call AskHastyT
+        add  esp, 0x14
+        test eax, eax
+        popad
+        jnz  cancel
+        movzx eax, byte ptr [ebp - 0x125]
+        jmp  dword ptr [g_tAskResume]
+    cancel:
+        mov  eax, 1
+        jmp  dword ptr [g_tAskCancel]
+    }
+}
+
+bool BytesAtT(uint32_t off, const char* hex)   // "8B 45 ..." against thinker.dll + off
+{
+    const BYTE* p = g_base + off;
+    auto nib = [](char c) -> int {
+        return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+    };
+    for (size_t i = 0;; ++i) {
+        while (*hex == ' ') ++hex;
+        if (!hex[0]) return true;
+        const int hi = nib(hex[0]), lo = hex[1] ? nib(hex[1]) : -1;
+        if (hi < 0 || lo < 0) return false;
+        if (p[i] != static_cast<BYTE>(hi * 16 + lo)) return false;
+        hex += 2;
+    }
 }
 
 // at_war(f1, v->faction_id) with v the unit the loop is looking at: "not at war" when f1 has never seen v's stack.
@@ -374,30 +531,27 @@ bool ZocPortsLookRight(uintptr_t lo, uintptr_t hi)
     return seaCall;
 }
 
-const char* Version(uintptr_t lo, uintptr_t hi)   // "Thinker Mod v5.5" lives in .rdata; for the log only
-{
-    static char v[40] = "unknown";
-    const char key[] = "Thinker Mod v";
-    const BYTE* p = reinterpret_cast<const BYTE*>(lo);
-    for (size_t i = 0, n = hi - lo; i + sizeof key < n; ++i) {
-        if (p[i] == 'T' && memcmp(p + i, key, sizeof key - 1) == 0) {
-            size_t k = 0;
-            while (k + 1 < sizeof v && i + k < n && p[i + k] >= 0x20 && p[i + k] < 0x7F) { v[k] = static_cast<char>(p[i + k]); ++k; }
-            v[k] = '\0';
-            break;
-        }
-    }
-    return v;
-}
-
 } // namespace
+
+void InstallThinkerArtilleryGroups();   // below
 
 void InstallThinkerAiVis()
 {
     uintptr_t lo, hi;
-    if (!ThinkerLoaded() || !ThinkerRange(&lo, &hi)) return;
+    if (!ThinkerLoaded()) return;                       // no Thinker: aivis.cpp installed the engine halves
+    if (!ThinkerRange(&lo, &hi)) {
+        AiVisSetThinkerGroups(false, false, false, false);
+        return;
+    }
+    if (!ThinkerOnPin()) {                                     // reduced mode: nothing of ours touches thinker.dll
+        UimodLog("[uimod] thinker: not the supported Thinker Mod build -> the AI perception filter is OFF for this game "
+                 "(its Thinker half is measured on one build only; aivis.cpp Enabled() answers false)\n");
+        AiVisSetThinkerGroups(false, false, false, false);
+        return;
+    }
     if (!AiVisCoreInstalled()) {
         UimodLog("[uimod] thinker: the AI perception filter's engine half is not installed -> its Thinker half is skipped too\n");
+        AiVisSetThinkerGroups(false, false, false, false);
         return;
     }
     g_base = reinterpret_cast<BYTE*>(lo);
@@ -407,10 +561,11 @@ void InstallThinkerAiVis()
     const IMAGE_DOS_HEADER* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(g_base);
     const IMAGE_NT_HEADERS32* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(g_base + dos->e_lfanew);
     if (nt->FileHeader.TimeDateStamp != kStamp || nt->OptionalHeader.SizeOfImage != kSizeOfImage) {
-        Log("[uimod] thinker: thinker.dll is \"%s\" (stamp 0x%08X, image 0x%X), not the 5.5 build this mod was measured on "
-            "(0x%08X, 0x%X) -> Thinker's own AI keeps seeing cloaked units; the engine's planner is still filtered\n",
-            Version(lo, hi), static_cast<unsigned>(nt->FileHeader.TimeDateStamp), static_cast<unsigned>(nt->OptionalHeader.SizeOfImage),
+        Log("[uimod] thinker: thinker.dll (stamp 0x%08X, image 0x%X) is not the 5.5 build this mod was measured on "
+            "(0x%08X, 0x%X) -> the AI perception filter is OFF for this game\n",
+            static_cast<unsigned>(nt->FileHeader.TimeDateStamp), static_cast<unsigned>(nt->OptionalHeader.SizeOfImage),
             kStamp, kSizeOfImage);
+        AiVisSetThinkerGroups(false, false, false, false);
         return;
     }
 
@@ -440,8 +595,9 @@ void InstallThinkerAiVis()
     if (!TransfersTo(At(kVA_EngineOrderVeh), 0xE9, g_base + kOrderVeh)) bad = "the engine's order_veh jump (not to Thinker's order_veh)";
     if (!TransfersTo(At(kVA_EnemyVehCallSite), 0xE8, g_base + kModEnemyMove)) bad = "enemy_veh's call (not to Thinker's mod_enemy_move)";
     if (bad) {
-        Log("[uimod] thinker: %s does not hold the expected 5.5 bytes (another mod on thinker.dll?) -> Thinker's own AI keeps "
-            "seeing cloaked units; the engine's planner is still filtered\n", bad);
+        Log("[uimod] thinker: %s does not hold the expected 5.5 bytes (another mod on thinker.dll?) -> the AI perception "
+            "filter is OFF for this game\n", bad);
+        AiVisSetThinkerGroups(false, false, false, false);
         return;
     }
 
@@ -455,7 +611,8 @@ void InstallThinkerAiVis()
     // the bump first: without it a filtered unit walking into a hidden stack would attack it blind
     g_orderVehTramp = reinterpret_cast<FOrder>(DetourEntry6(g_base + kOrderVeh, &HookThinkerOrderVeh));
     if (!g_orderVehTramp) {
-        UimodLog("[uimod] thinker: order_veh detour failed -> Thinker's own AI keeps seeing cloaked units\n");
+        UimodLog("[uimod] thinker: order_veh detour failed -> the AI perception filter is OFF for this game\n");
+        AiVisSetThinkerGroups(false, false, false, false);
         return;
     }
     int sites = 0;
@@ -469,13 +626,22 @@ void InstallThinkerAiVis()
     if (airdropTramp) AiVisAirdropSetNext(airdropTramp);
     else UimodLog("[uimod] thinker: action_airdrop detour failed -> airdrop diversion off under Thinker\n");
     // zone of control: Thinker's three ports onto the hidden-unit exemption (its planner and order_veh use these)
-    bool zocOk = false;
+    const char* zocState = "NOT detoured";
     if (ZocPortsLookRight(lo, hi)) {
         g_zocAnyTramp = reinterpret_cast<FZoc>(DetourEntryN(g_base + kModZocAny, 6, &HookThinkerZocAny));
         if (g_zocAnyTramp) g_zocVehTramp = reinterpret_cast<FZoc>(DetourEntryN(g_base + kModZocVeh, 6, &HookThinkerZocVeh));
         if (g_zocVehTramp) g_zocSeaTramp = reinterpret_cast<FZoc>(DetourEntryN(g_base + kModZocSea, 9, &HookThinkerZocSea));
-        zocOk = g_zocSeaTramp != nullptr;
-        if (!zocOk) UimodLog("[uimod] thinker: mod_zoc_* detour failed -> undetected hidden units still exert zone of control on Thinker's AI\n");
+        // the three are installed in order and each only after the one before it, so the count names which stand
+        const int zocDone = (g_zocAnyTramp ? 1 : 0) + (g_zocVehTramp ? 1 : 0) + (g_zocSeaTramp ? 1 : 0);
+        if (zocDone == 3) {
+            zocState = "detoured";
+        } else {
+            if (zocDone > 0) zocState = "PARTIALLY detoured";
+            Log("[uimod] thinker: mod_zoc_* detour failed after %d of 3 (mod_zoc_any %s, mod_zoc_veh %s, mod_zoc_sea %s) -> "
+                "undetected hidden units still exert zone of control on Thinker's AI%s\n", zocDone,
+                g_zocAnyTramp ? "detoured" : "not", g_zocVehTramp ? "detoured" : "not", g_zocSeaTramp ? "detoured" : "not",
+                zocDone > 0 ? " through the ones not detoured" : "");
+        }
     } else {
         UimodLog("[uimod] thinker: mod_zoc_* do not hold the expected 5.5 bytes -> undetected hidden units still exert zone of control on Thinker's AI\n");
     }
@@ -490,5 +656,69 @@ void InstallThinkerAiVis()
         "engine enemy_move pointer %s, airdrop diversion on Thinker's action_airdrop %s, zone of control (mod_zoc_any/veh/sea) %s -> Thinker's AI plans against the units it has actually seen\n",
         partial ? " PARTIALLY (a write failed; some planner paths still see hidden units)" : "", sites, total,
         g_orderVehTramp, ptrOk ? "wrapped" : "NOT wrapped (write failed)", airdropTramp ? "detoured" : "NOT detoured",
-        zocOk ? "detoured" : "NOT detoured");
+        zocState);
+    InstallThinkerArtilleryGroups();                            // the 1.0.1 groups: each byte-checked on its own
+    AiVisThinkerHalfInstalled();                                // aivis.cpp Enabled(): under Thinker the filter needs this half
+}
+
+// The four 1.0.1 groups' Thinker halves (pinned to 5.5 by the checks above; each group all-or-nothing; every check of
+// every group runs before any of them writes, since fix 1's witnesses overlap fix 4's site).
+void InstallThinkerArtilleryGroups()
+{
+    const bool chk1 = BytesAtT(kRevealSite, "83 BD 2C FF FF FF 01 0F 84 85 33 00 00") && BytesAtT(0xA73A3, "89 BD 28 FF FF FF") &&
+                      BytesAtT(0xA7980, "0F B6 85 DB FE FF FF 89 85 F8 FE FF FF") &&
+                      BytesAtT(0xAB3E0, "8B B5 F8 FE FF FF 89 34 24 E8") && BytesAtT(0xA9965, "8B B5 28 FF FF FF");
+    const bool chk2 = IsCallTo(g_base + kBombScanCall, g_base + kModStackCheck) &&
+                      BytesAtT(0xA1373, "8B 7C 24 2C C7 44 24 10 FF FF FF FF C7 44 24 0C FF FF FF FF 89 7C 24 08 C7 44 24 04 0F 00 00 00 89 04 24") &&
+                      BytesAtT(0xA13A3, "8B 44 24 60");
+    const bool pill = IsCallTo(g_base + kSitePillageFight, reinterpret_cast<const BYTE*>(&WrapPillageFight));   // ours since the install above
+    const bool chk3 = pill && IsCallTo(g_base + kDestroySkipCall, g_base + kThinkerVehSkip) &&
+                      BytesAtT(0xA0AE9, "8B 44 24 60 89 04 24") && BytesAtT(0xA0AFA, "C7 00 00 00 00 00") &&
+                      TransfersTo(At(kVA_EngineDestroy), 0xE9, g_base + kThinkerDestroy) &&
+                      BytesAtT(kNerveSite, "8B B5 44 FF FF FF 25 FF FF F7 FF 89 46 04") && BytesAtT(kNerveJoin, "A1");
+    const bool chk4 = IsCallTo(g_base + kArtySpCall, g_base + kModBattleFight) &&
+                      IsCallTo(g_base + kArtyNetCall, g_base + kModBattleFight) &&
+                      BytesAtT(kAskSite, "0F B6 85 DB FE FF FF 89 85 F8 FE FF FF") && BytesAtT(0xA7733, "0F 85 47 02 00 00") &&
+                      BytesAtT(kAskCancel, "8D 65 F0 59 5B 5E 5F 5D 8D 61 FC C3") &&
+                      BytesAtT(0xA7520, "66 89 85 D8 FE FF FF");   // the defender's unit id word, [ebp-0x128]
+
+    auto siteJmp = [](uint32_t off, size_t n, void* stub) -> bool {
+        BYTE patch[16];
+        if (n < 5 || n > sizeof patch) return false;
+        memset(patch, 0x90, sizeof patch);
+        patch[0] = 0xE9;
+        const int32_t rel = static_cast<int32_t>(static_cast<BYTE*>(stub) - (g_base + off + 5));
+        memcpy(patch + 1, &rel, 4);
+        return WriteCode(g_base + off, patch, n);
+    };
+
+    bool ok1 = false, ok2 = false, ok3 = false, ok4 = false;
+    if (chk1) {
+        g_tRevealResume = g_base + kRevealResume;
+        ok1 = siteJmp(kRevealSite, 7, &StubCombatRevealT);
+    }
+    if (chk2) {
+        g_modStackCheck = reinterpret_cast<FStackCk5>(g_base + kModStackCheck);
+        ok2 = Retarget(g_base + kBombScanCall, &StubBombardStackCheckT);
+    }
+    if (chk3) {
+        g_thinkerVehSkip = reinterpret_cast<FVehSkipT>(g_base + kThinkerVehSkip);
+        g_tNerveResume = g_base + kNerveResume;
+        g_tNerveJoin = g_base + kNerveJoin;
+        // the record first (harmless alone), the nerve gate last: a failed write leaves nothing half-active (the duel
+        // itself only runs when AiVisSetThinkerGroups reports this group on)
+        ok3 = Retarget(g_base + kDestroySkipCall, &WrapDestroySkipT) && siteJmp(kNerveSite, 6, &StubNerveGateT);
+    }
+    if (chk4) {
+        g_tAskResume = g_base + kAskResume;
+        g_tAskCancel = g_base + kAskCancel;
+        // the marks first (a mark nobody consumes is reset by its own wrapper), the ask stub last
+        ok4 = Retarget(g_base + kArtySpCall, &WrapArtyFightT) && Retarget(g_base + kArtyNetCall, &WrapArtyFightT) &&
+              siteJmp(kAskSite, 7, &StubPreAttackT);
+    }
+    if (!chk1 || !chk2 || !chk3 || !chk4)
+        Log("[uimod] thinker: 1.0.1 byte checks: reveal %s, bombard scan %s, duel %s, hasty ask %s (a failed group stays as Thinker has it)\n",
+            chk1 ? "ok" : "FAILED", chk2 ? "ok" : "FAILED", chk3 ? "ok" : "FAILED", chk4 ? "ok" : "FAILED");
+    // the duel never runs without the scan skip: otherwise a human (or a filtered AI) could duel a stack it never saw
+    AiVisSetThinkerGroups(ok1, ok2, ok3 && ok2, ok4);
 }

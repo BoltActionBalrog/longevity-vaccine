@@ -83,6 +83,16 @@ HQ report rows, COMMLINK rows, PrefWin text and the MP-lobby body font all went 
 3. **Vanilla reuses a Font object** (`[0x9B8DA8]` trio, scratch fonts) → reuse the scaled twin
    that was built from the same native trio; never build a "comfortable" size.
 
+**First find which font vanilla actually draws with — never infer it from a sibling.** A label
+that INHERITS its font (canvas font, def-dialog font, default label font) can come from a
+different source than a look-alike button: TutWin's TOUR/Close are popup dialog-row buttons on
+the def-dialog font (Arial Narrow 16 bold, the body font), not the default label font a probe
+read on COUNCIL (2026-11-10 player report). Pin it with a pristine glyph map (resample the
+capture at native pixel centres; render GDI non-antialiased with the game's `arialn.ttf` only)
+or a runtime read of that exact object, and put the evidence in a test
+(`work\tests\test_scaling_font_face_sites.py` has the helpers). A raw
+`find_font(popup_scale(S), v)` with S ≤ 12 is always wrong: it crosses into Arial Narrow bold.
+
 Facts you will otherwise re-probe: the default FlatButton label Font `0x7D3948` is created as
 TNR 12 and re-inited **Arial 12 regular** at startup; PrefWin buttons and the HUD M/I buttons use
 `0x6E84B4` / `0x7CFE8C` = **Arial 14 bold**; `[0x9B8E34]` is NULL. Variants 0 and 1 are the same

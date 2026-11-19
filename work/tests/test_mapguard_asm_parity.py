@@ -8,7 +8,8 @@ either axis (OddX+EvenX >= mapW, OddY+EvenY >= mapH), replays the cmp and
 resumes at the je @0x46A5B4 -- ZF set = full redraw, clear = scroll-blit.
 
 The site detour itself (push imm32; ret) is run too, so a yaml/site desync or
-a wrong thunk VA fails here.  Bytes come from patches.yaml resolved with the
+a wrong thunk VA fails here.  Since 2026-11-15 the site pushes replay_scale's t_rp_rows, which acts only on the
+live end-game replay's MapWin (g_rp_map) and otherwise jumps here; the whole chain runs (the main map: pass-through).  Bytes come from patches.yaml resolved with the
 real symbol table; the assembler script must reproduce them exactly.
 """
 from __future__ import annotations
@@ -50,19 +51,20 @@ def _load():
     import yaml
     doc = ap._yaml_load(pathlib.Path(ap.DEFAULT_PATCHES).read_text(encoding="utf-8"))
     symtab = ap.build_symbol_table(doc["symbols"], doc["code_caves"])
-    thunk = None
+    found = {}
     for cave in doc["code_caves"]:
         for c in cave.get("contents", []) or []:
-            if c["id"] == "thunk_drawmap_fullguard":
+            if c["id"] in ("thunk_drawmap_fullguard", "t_rp_rows", "g_rp_map"):
                 va = _int(cave["virtual_addr"]) + _int(c["offset"])
-                thunk = (va, ap.ByteTemplate(c["bytes"]).resolve(va, symtab))
-    assert thunk, "thunk_drawmap_fullguard content entry not found"
+                found[c["id"]] = (va, ap.ByteTemplate(c["bytes"]).resolve(va, symtab))
+    assert "thunk_drawmap_fullguard" in found, "thunk_drawmap_fullguard content entry not found"
     site = next(s for s in doc["sites"] if s["id"] == "MapWin_draw_map.postcalc_guard")
     assert _int(site["virtual_addr"]) == SITE
-    return thunk[0], thunk[1], ap.ByteTemplate(site["new_bytes"]).resolve(SITE, symtab)
+    thunk = found["thunk_drawmap_fullguard"]
+    return thunk[0], thunk[1], ap.ByteTemplate(site["new_bytes"]).resolve(SITE, symtab), found
 
 
-THUNK_VA, THUNK_CODE, SITE_CODE = _load()
+THUNK_VA, THUNK_CODE, SITE_CODE, _FOUND = _load()
 
 
 def _run(flag=1, pxl=0, pxt=0, oddx=20, evenx=21, oddy=30, eveny=31, mapw=80, maph=160):
@@ -73,6 +75,14 @@ def _run(flag=1, pxl=0, pxt=0, oddx=20, evenx=21, oddy=30, eveny=31, mapw=80, ma
     uc.mem_map(MAP_W & ~0xFFF, 0x1000)
     uc.mem_map(STACK, 0x10000)
     uc.mem_write(THUNK_VA, THUNK_CODE)
+    for name in ("t_rp_rows", "g_rp_map"):        # replay_scale's chain head and its (zero) MapWin cell
+        if name in _FOUND:
+            va, code = _FOUND[name]
+            try:
+                uc.mem_map(va & ~0xFFF, 0x1000)
+            except unicorn.UcError:
+                pass
+            uc.mem_write(va, code)
     uc.mem_write(SITE, SITE_CODE)
     uc.mem_write(RESUME, b"\xF4")          # hlt sentinel
     for off, v in ((F_FLAG, flag), (F_PXL, pxl), (F_PXT, pxt), (F_ODDX, oddx),

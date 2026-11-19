@@ -2,6 +2,48 @@
 
 UI Scaling + HD Cinematics for Sid Meier's Alpha Centauri.
 
+## 1.0.1
+
+### Cinematics
+- The optional HD Cinematics pack is now Z2k Retro's HD Cinematics (https://www.youtube.com/@Z2KRetroGaming, https://www.youtube.com/@Z2kRetroVideo): new upscales of all 61 movies at a smoother 30 frames per second. May perform worse on slower PCs.
+
+### Mod settings
+- New Hide Move Line setting for the Modern Control Set hides the move line that follows the pointer. The line still shows while you hold Ctrl or place waypoints.
+- Longevity Preferences now has two pages, switched with a yellow More / Back button.
+- Settings that don't apply right now show unchecked as well as greyed out.
+- Warning Preferences' second page no longer leaves four of its rows drawn over Longevity Preferences.
+- Longevity Mod Preferences is now called Longevity Preferences.
+
+### UI fixes
+- The end-of-game Planetary Archives screen and the end-game replay both now scale to your resolution.
+- Tutorial buttons, multiplayer lobby chat, the multiplayer turn clock, the COMMLINK panel's "NO CONTACTS" and the Preferences window's More and Back buttons now use the game's original fonts at every resolution.
+
+### Thinker Mod
+- If the game is running a different version of Thinker Mod from the one Longevity Vaccine was made for, it now tells you at startup and can open the installer to install the matching version. Until then, the parts of Longevity Vaccine that depend on Thinker Mod are switched off and greyed out in Preferences.
+- When a Longevity Vaccine update needs a different Thinker Mod, the game's update offer now updates both together.
+- With Thinker Mod, the game now offers available updates at the main menu and at the start of your turn. In 1.0.0 the offer never appeared under Thinker.
+- With Thinker Mod, a captured base's PSYCH tab shows Thinker Mod's "Captured Base: N turns" countdown again. In 1.0.0 it was missing.
+- With Thinker Mod, the in-game MENU button no longer turns coarsely banded after you start a game by choosing your faction (Make Random Map and the other setup routes).
+
+### Linux (Wine / Proton)
+- The game no longer crashes at launch under Wine or Proton when a ddraw DLL override is set. GOG's bundled DDrawCompat ddraw.dll does not support Wine and crashed it, so the installer now sets it aside on Linux; uninstalling puts it back (a GOG and Wine bug).
+
+### Base-game fixes
+- An AI probe team that frees a leader held by another faction now frees that leader, instead of resetting a living faction (usually the player). If the captive was yours, you are told who took them, rather than being told you liberated them yourself; that message is also corrected under Thinker Mod.
+- A faction whose leader is freed by a probe team now lands on open ground chosen from the whole map, instead of sometimes appearing in the sea or on top of another faction's base when the map is crowded.
+- A probe team with no home base that frees a captured leader no longer damages an unrelated unit.
+- The Design Workshop opened from a base no longer shows a stray, dead scroll arrow over its unit row.
+- Long Range Fire at an empty square no longer sends the firing unit into an artillery duel it could not win (a base-game bug that Thinker Mod had worked around by switching the duel off). When enemy artillery in range returns fire, you now see a message and fight a fair Artillery Duel. Artillery of factions you are not at war with, enemy artillery sharing a square with their units, and enemy artillery in a base no longer stop the bombardment. Undetected cloaked or submerged units nearby are ignored.
+- Long Range Fire now asks first, like any other attack, when the unit has fractional movement left and would fight an Artillery Duel at reduced strength.
+- AI factions now notice a cloaked or submerged unit that attacks them, as human players always have.
+- The end-game replay map no longer draws its bottom row of tiles off to the side, or leaves out its top rows.
+
+### PRACX fixes
+- The mouse wheel now scrolls the Design Workshop's unit row (up moves it left, down moves it right, as it already did with Thinker Mod)
+- In the Design Workshop or the Datalinks opened from a base, the mouse wheel no longer zooms the map.
+- PRACX's Preferences: Esc now closes it even after you have clicked something in it, and under Wine or Proton (Linux) closing it no longer leaves mouse-wheel zoom and drag scrolling on the map dead (Wine hands keyboard focus back differently from Windows).
+- PRACX's "Show Unworked City Resources" (or holding Shift on a base's resource map) now shows the grey yields of unworked tiles, and the Alt+T map views have their colour keys. GOG's Planetary Pack installs PRACX without PRACX's icon art, so on GOG both drew nothing.
+
 ## 1.0.0 -- 2026-11-08
 
 ### High-resolution UI scaling

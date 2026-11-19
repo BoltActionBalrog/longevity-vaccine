@@ -99,10 +99,10 @@
         bytes: "9C 83 3D {abs32:g_hof_armed} 00 74 0C 8B 0D {abs32:g_hof_f14} 9D E9 E9 12 A1 FF 8B 0D C8 40 8A 00 9D E9 DD 12 A1 FF"
       - id: t_hof_bd_field
         offset: 0x1af00
-        bytes: "C7 05 {abs32:g_hof_field} 01 00 00 00 FF 74 24 1C FF 74 24 1C FF 74 24 1C FF 74 24 1C FF 74 24 1C FF 74 24 1C FF 74 24 1C E8 {rel32:t_hof_bd_hof} C7 05 {abs32:g_hof_field} 00 00 00 00 C2 1C 00"
+        bytes: "C7 05 {abs32:g_hof_field} 41 C5 00 00 FF 74 24 1C FF 74 24 1C FF 74 24 1C FF 74 24 1C FF 74 24 1C FF 74 24 1C FF 74 24 1C E8 {rel32:t_hof_bd_hof} C7 05 {abs32:g_hof_field} 00 00 00 00 C2 1C 00"
       - id: t_hof_pairfld
         offset: 0x1af40
-        bytes: "E8 {rel32:t_hof_pairtex} 83 F8 FF 75 56 83 3D {abs32:g_hof_field} 00 74 4D 83 FB 41 74 08 81 FB C5 00 00 00 75 40 51 52 BA 06 01 00 00 29 DA 8B 4D 0C 8B 45 CC 3B 45 14 7E 0C F7 D9 0F B6 04 0E F7 D9 39 D0 74 1C 8B 45 14 03 45 1C 48 39 45 CC 7D 08 0F B6 04 0E 39 D0 74 08 B8 FF FF FF FF 5A 59 C3 89 D0 5A 59 C3"
+        bytes: "E8 {rel32:t_hof_pairtex} 83 F8 FF 75 5B 51 52 8B 0D {abs32:g_hof_field} 85 C9 74 43 0F B6 D1 C1 E9 08 81 E1 FF 00 00 00 39 D3 74 04 39 CB 75 2F 01 CA 29 DA 8B 4D 0C 8B 45 CC 3B 45 14 7E 0C F7 D9 0F B6 04 0E F7 D9 39 D0 74 1C 8B 45 14 03 45 1C 48 39 45 CC 7D 08 0F B6 04 0E 39 D0 74 08 B8 FF FF FF FF 5A 59 C3 89 D0 5A 59 C3"
       - id: g_mon_lut_lo
         offset: 0xdee0
         bytes: "00 00 00 00"

@@ -89,7 +89,9 @@ extern void* g_game_hwnd;                     // addr: 0x009B7B28  thinker   HWN
 extern struct Buffer g_screen_buffer;         // addr: 0x009B7490  observed  global screen DIB Buffer; Win_update_screen composites window buffers into it
 extern struct Win* g_win_zlist[];             // addr: 0x009B6630  observed  window z-order list walked by Win_update_screen (top at [count-1])
 extern int  g_win_zlist_count;                // addr: 0x009B7B30  observed  live entry count of g_win_zlist
+extern int  g_popup_scale_num;                // addr: 0x00668740  observed  patcher global: popup scale g (16 = native); zeroed .data on the unpatched exe
 extern void* FlatButton_vtbl;                 // addr: 0x00669754  observed  FlatButton vtable: +0x30=FlatButton_content_draw, +0xF8=GraphicWin_redraw, +0x124=GraphicWin_on_paint
+extern void FlatButton_hide(/*ecx*/ struct FlatButton* self); // addr: 0x00406860  observed  thiscall; FlatButton vtbl+8: zeroes +0xA9C unless +0xAA8, tail-jmp Win_hide
 extern void* BorderButton_vtbl;               // addr: 0x00670C60  guess     sibling button-class vtable; +0x30=BorderButton_content_draw; canvas subobject vtbl 0x670C58
 extern void BorderButton_content_draw(void* self); // addr: 0x0062C110  observed  thiscall; fill(+0xa84) + 4 corner Sprite_draw_2 (+0xac8/+0xacc/+0xad0/+0xad4) + edge tiles; vtable-only xref (undefined in Ghidra)
 extern void BorderButton_ctor(void* self);    // addr: 0x0062BF20  observed  thiscall; installs vtbl 0x670C60 + canvas vtbl 0x670C58
@@ -161,7 +163,8 @@ extern int  tile_on_screen_margin(int x, int y, int margin); // addr: 0x004216F0
 extern void BaseWin_show(struct BaseWindow* self); // addr: 0x0041E890  thinker  thiscall
 extern void BaseWin_hide(struct BaseWindow* self); // addr: 0x0041E8B0  thinker  thiscall
 extern void BaseWin_on_redraw(struct BaseWindow* self); // addr: 0x0041E790  thinker  thiscall
-extern void BaseWin_on_status(struct BaseWindow* self, int is_visible); // addr: 0x0041DAD0  thinker  thiscall; base-mode enter/leave
+extern void BaseWin_on_status(struct BaseWindow* self, int is_visible); // addr: 0x0041DAD0  thinker  thiscall RET 4; base-mode enter/leave; this = BaseWin+0xA14 iface
+extern void* BaseWinIface_vtbl;                 // addr: 0x0066A3B8  observed  BaseWin iface (BaseWin+0xA14) vtable; +0 BaseWin_on_status
 // field: BaseWindow +0xB194 int prodPickerAction   production-picker result action; 1 = Help
 extern void BaseWin_draw_nutrients(struct BaseWindow* self, int a2);   // addr: 0x00411240  thinker  thiscall; G2 panel
 extern void BaseWin_draw_commerce(struct BaseWindow* self, int a2);    // addr: 0x00410870  thinker  thiscall; G3 panel
@@ -215,7 +218,7 @@ extern void ProdPicker_scroll_to(struct ProdPicker* self, int a2, int row); // a
 extern void ProdPicker_on_scroll_drag(/*ecx*/ struct ProdPicker* self, int id, int value); // addr: 0x00493E70  observed  thiscall RET 8; vtbl+0xC4 (drag/repeat notify)
 extern void ProdPicker_select_from_xy(struct ProdPicker* self, int x, int y); // addr: 0x004941C0  observed  thiscall RET 8; vtbl+0x4C; LOCAL coords, sel=[+0xA77C]+(y/pitch)*count+x/colw (no inset sub); redraws old+new selected cell
 extern void ProdPicker_page_nav(struct ProdPicker* self, int delta);   // addr: 0x00494280  observed  thiscall; scroll paging + ScrollBar_set_pos
-extern void ProdPicker_on_button_clicked(struct ProdPicker* self, int id); // addr: 0x004945D0  observed  thiscall; btn ids: -2 HELP, -1 CANCEL, 0 OK, 1 (4-btn variant), 6 WORKSHOP, 4/5/7 queue REPLACE/INSERT/DELETE -> result [+0xA778]
+extern void ProdPicker_on_button_clicked(struct ProdPicker* self, int id); // addr: 0x004945D0  observed  thiscall; btn id -> result [+0xA778]: -2/-1 -> 0, 0 -> 1 (needs sel), 1 -> 2, 3 -> 3, 4 -> 4, 5 -> 5 (sel), 6 -> 6, 2/7 -> 7 (sel); BaseWin_production: 2 = DesignWin_exec(selected unit), 3 = DesignWin_exec(-1)
 extern void ProdPicker_anim_tick(int a1, struct ProdPicker* self);     // addr: 0x004946D0  observed  cdecl; pop_expire cb: [+0xB64]++ then redraw selected cell (flag wave)
 extern void ProdPicker_right_menu(struct ProdPicker* self, int a2, int a3); // addr: 0x00493EA0  observed  thiscall; right-click context Menu
 extern void* ProdPicker_vtbl;                  // addr: 0x0066A250  observed  picker vtable; +0x30=draw_visible +0x3C=scroll-delta +0x4C=select_from_xy +0x58=right_menu +0xB0=on_button_clicked +0xC0=scroll_to +0xE4=modal exec
@@ -252,10 +255,33 @@ extern void* ProdPicker_vtbl;                  // addr: 0x0066A250  observed  pi
 extern struct Holobook* Holobook_g;            // addr: 0x00872CB0  observed  function-local static; lazy ctor stub 0x495170
 extern struct Holobook* Holobook_ctor(struct Holobook* self); // addr: 0x00496810  observed  installs vtbl 0x66D598 @ctor end 0x4968B3
 extern void* Holobook_vtbl;                    // addr: 0x0066D598  observed  +0x30=draw 0x4956D0 +0xE4=modal exec
-extern void Holobook_draw(struct Holobook* self); // addr: 0x004956D0  observed  vtbl+0x30; BOOKTITLE/BOOKINTRO/art; canvas self+0x444; native rect seeds from gwinit; fonts [0x8A40E4]/[0x8A40E8]/[0x8A40F0]
+extern void Holobook_draw(struct Holobook* self); // addr: 0x004956D0  observed  vtbl+0x30; BOOKTITLE/BOOKINTRO/art; canvas self+0x444; native rect seeds from gwinit; fonts [0x8A40E0]/[0x8A40E4]/[0x8A40E8]/[0x8A40F0]
 extern void Holobook_gwinit(struct Holobook* self); // addr: 0x004951A0  observed  800x600 if [0x8A4168]==0 else 1024x768 @(0x77,0x50); rect seeds 0x4952E9-0x4953C6 all native immediates
-extern int  Holobook_open_item(int item_id);   // addr: 0x00496610  observed  open on facility/project entry
-extern int  Holobook_open_unit(int unit_id);   // addr: 0x00496670  observed  triangular chapter index; callers 0x514CE9/0x5256A4
+extern int  Holobook_open_item(int tier);      // addr: 0x00496610  observed  cdecl; opens the list at a given tier (clamped -1..24); no callers
+extern void quayle(int faction_id);            // addr: 0x00496670  thinker   cdecl; rating -> tier (first n with rating < n*n/2), gwinit, list page, modal exec
+extern void Holobook_on_lclick(/*ecx*/ struct Holobook* self, int x, int y); // addr: 0x004964D0  observed  vtbl+0x4C RET 8; Spot_check hit -> page := spot id, repaint
+extern int  Holobook_on_key(/*ecx*/ struct Holobook* self, int key, int vk);  // addr: 0x004965C0  observed  vtbl+0x64; book page -> list, list -> close
+extern void Holobook_on_button_clicked(/*ecx*/ struct Holobook* self, int id); // addr: 0x00496560  observed  vtbl+0xB0 RET 4; id 0x3E7: book page -> list, list -> close
+extern void Holobook_on_list_pick(/*ecx*/ struct Holobook* self, int item);  // addr: 0x00496540  observed  vtbl+0xD4 RET 4; page := item, repaint
+// field: Holobook +0xA14 RECT scratch       content origin at build; per-entry text rect in the list painter
+// field: Holobook +0xA24 RECT content       (119,80,919,680) wide, (0,0,800,600) at 800x600
+// field: Holobook +0xA34 RECT list_rect     content + (0x13A,0x19,0x301,0x235)
+// field: Holobook +0xA44 RECT art_rect      content + (0x14C,0x26,0x2F0,0x22E); artbox<page>.pcx 420x520 key 9
+// field: Holobook +0xA54 RECT button_rect   content + (0x289,0x239,0x301,0x24D); both FlatButtons
+// field: Holobook +0xA64 RECT title_rect    content + (0x2A,0x22,0x116,0x81); BOOKTITLE, font [0x8A40E4]
+// field: Holobook +0xA74 RECT intro_rect    content + (0x1E,0x13E,0x11E,0x1B0); BOOKINTRO / BOOKLIST<page>, font [0x8A40E8]
+// field: Holobook +0xA84 RECT rating_rect   content + (0x16C,0x239,0x27A,0x24D); rating line, font [0x8A40E8]
+// field: Holobook +0xA94 RECT text_rect     painter scratch (list entry / art caption)
+// field: Holobook +0xAA4 int  line_h        of font [0x8A40BC]
+// field: Holobook +0xAA8 int  wide          copy of 0x8A4168
+// field: Holobook +0xAAC struct FlatButton btn_close   list page; label idx +0xA64, font 0x6E84B4, bevel 0x78DC80/58/30
+// field: Holobook +0x15F8 struct FlatButton btn_back   book page; label idx +0xB60, same rect/font/bevel
+// field: Holobook +0x2144 int  page         -1 = list; else the book shown (artbox<page>.pcx)
+// field: Holobook +0x2148 int  tier         books listed = 0..tier (-1 = none)
+// field: Holobook +0x214C struct Spot spots  one per listed book
+// field: Holobook +0x2158 struct ListBox list  list page when GameLanguage != 0
+// field: Holobook +0x2CAC struct Buffer frame_pcx      1024x768, copy_4 1:1 at (0,0) wide only
+// field: Holobook +0x3234 struct Buffer holobook_pcx   800x600, copy_4 1:1 at the content origin
 // ==== DATALINKS encyclopedia window (DatalinkWin, mode-8 SubInterface; static map work\_dl_static_map.md) ====
 extern struct DatalinkWindow DatalinkWin_g;                                    // addr: 0x00703EA0  thinker  global object; size 0x1B394; vtbl 0x66AF84, buffer vtbl 0x66AF7C @+0x444, iface vtbl 0x66AF30 @+0xA14
 extern void  DatalinkWin_ctor(/*ecx*/ struct DatalinkWindow* self);           // addr: 0x00428FC0  observed  fastcall; static-init thunk 0x428F90, atexit dtor thunk 0x428FB0; FlatButton[0x12] @+0x2A3C, ListBox @+0xF628, Font x11 @+0x1017C, TextScroll x4 @+0x10514
@@ -339,7 +365,7 @@ extern struct Label TextLabels;                                               //
 extern struct Strings TextTable;                                              // addr: 0x009B90D8  thinker   the labels' string pool
 // field: Strings +0x00 uint32 flags (bit 0 = fixed, no realloc) ; +0x04 char* base ; +0x08 char* cursor ; +0x0C uint32 size ; +0x10 uint32 free
 extern char* Strings_put(struct Strings* self, const char* s);                // addr: 0x00616970  thinker   thiscall RET 4; Strings_alloc(strlen+1) + strcpy, returns the pooled copy
-extern char* Strings_get(struct Strings* self, char* p);                      // addr: 0x006169A0  thinker   thiscall RET 4; validates p against [base, base+size): p, or 0 when outside (p <= base returned as is)
+extern char* Strings_get(struct Strings* self, char* p);                      // addr: 0x006169A0  thinker   thiscall RET 4; p when base < p <= base+size, base when p <= base, 0 above
 extern char* Strings_alloc(struct Strings* self, int n);                      // addr: 0x005D4680  observed  thiscall RET 4; bumps cursor; when free < n and !(flags&1) reallocs the pool by 0x400 (the base MOVES)
 extern char  g_str_scratch[];                                                  // addr: 0x009B86A0  observed  shared label compose buffer
 extern struct Sprite g_facility_sprites[];                                     // addr: 0x00787200  observed  Sprite[] stride 0x2C indexed by facility id (Datalinks facility art)
@@ -524,6 +550,10 @@ extern void go_reset(void);                    // addr: 0x0050EF50  observed  cd
 extern int  Console_on_key_click(struct Console* self, int a2, int key); // addr: 0x005178C0  thinker  thiscall; only Alt filtered up front; unhandled keys reach go_reset @0x517ED6
 extern int  g_go_win_idx;                      // addr: 0x0068A5CC  observed  MapWinPtr index of the armed goto drag, -1 idle
 extern struct Time g_go_timer;                 // addr: 0x00939E60  observed  Time object for go_timer
+extern void start_timers(void);                // addr: 0x0050F3D0  thinker   cdecl; starts the four map timers (0x915688 150 ms, 0x939EB0, 0x915658, 0x915628)
+extern void stop_timers(void);                 // addr: 0x0050F440  thinker   cdecl; Time_stop on the four map timers
+extern struct Time g_map_blink_timer;          // addr: 0x00915688  observed  map blink Time; started only by start_timers, stopped only by stop_timers
+// field: Time +0x4 int id   SetTimer / timeSetEvent id, nonzero while running (Time_stop zeroes it)
 // field: Console +0x1DD80 int goto_drag_active   1 while the goto line follows the mouse
 // field: Console +0x1DD84 int goto_group         group-move label variant
 // field: Console +0x1DD88 int swallow_click      MapWin_click returns at once when set; set by go_reset while g_go_win_idx>=0, CLEARED by MapWin_on_left_down (so it only eats a release whose press went elsewhere, or a release after a key-repeat go_reset)
@@ -586,7 +616,7 @@ extern POINT g_map_cursor_diamond[4];          // addr: 0x007D3BE8  observed  se
 // field: Console +0x21A44 int drawOnlyCursor   nonzero = MapWin_draw_map scroll-blits instead of a full redraw
 // field: Console +0x21A48 RECT map_strip_rect_a   exposed-strip tile rect, horizontal move
 // field: Console +0x21A58 RECT map_strip_rect_b   exposed-strip tile rect, vertical move
-// field: Console +0x1DD98 int map_zoom_idx   current map zoom index (dword idx 0x7766); draw_support fit loop writes 2..-15 via BaseWin+0x3C40C, MapWin_init_2 seeds -7/-8; tile w = (800+50*idx)/16 when g_map_zoom_num unarmed
+// field: Console +0x1DD98 int map_zoom_idx   current map zoom index (dword idx 0x7766); draw_support fit loop writes 2..-15 via BaseWin+0x3C40C, MapWin_init_2 seeds -7/-8; unarmed: u = fl((fl((idx+16)*50/16)+1)/4), tile w = 8u
 // field: Console +0x1DD9C int map_center_x   map view center tile x (BaseWin+0x3C410 in draw_support)
 // field: Console +0x1DDA0 int map_center_y   map view center tile y (BaseWin+0x3C414)
 // field: Console +0x1EEC0 int map_label_zoom_cache   last-zoom gate for the 3 map-label Font_inits (cmp [0x7766] copy)
@@ -616,7 +646,7 @@ extern void WorldWin_hide_all(void);                     // addr: 0x004C3A40  th
 extern void WorldWin_show_all(struct WorldWindow* self); // addr: 0x004C39D0  thinker  thiscall; re-applies current mode
 extern void WorldWin_on_redraw(struct WorldWindow* self); // addr: 0x004C3EC0  observed  thiscall; minimap render; fit-check +0xa14/+0xa18 buf vs +0x4c4/+0x4c8 win (center 1:1 else stretch); calls WorldWin_draw_box
 extern void WorldWin_draw_box(struct WorldWindow* self); // addr: 0x004C4630  observed  thiscall; draws the white viewport rectangle on the minimap; gated on g_view_w!=0 (native also &&g_scroll_susp1==0&&g_scroll_susp2==0)
-extern void Win_show(struct Win* self, int a2); // addr: 0x005ED9D0  thinker  thiscall
+extern void Win_show(struct Win* self, int a2); // addr: 0x005ED9D0  thinker  thiscall; no-op while +0x9C bit0 (shown)
 extern void Win_hide(struct Win* self);        // addr: 0x005EDCD0  thinker  thiscall
 extern int  WinProc(void* hWnd, unsigned Msg, unsigned wParam, int lParam); // addr: 0x005F0650  thinker  stdcall RET 0x10; game WndProc (PRACX subclasses + forwards here)
 extern struct Win* Win_get_active_target(void);  // addr: 0x005F6A50  observed  cdecl no-args; modal top [0x9B7AE0] (basepop [0x9B8D7C] overrides) else [0x9B7AC4]/[0x9B7AEC] -> caches [0x9B7AC8] -> ->[0xA8] key target; WinProc WM_KEYDOWN call @0x5F07B0, WM_KEYUP @0x5F07F0 (wParam [esp+0x64], lParam [esp+0x68] in WinProc's frame)
@@ -855,7 +885,7 @@ extern const char** g_hud_font_name_narrow;    // addr: 0x00691B30  observed  "A
 extern int  g_hud_box6_rect[4];                // addr: 0x007AF50C  observed  HUD unit-row (box6) strip device rect {L,T,R,B}; T/R/B reads confirmed @0x4B80A4/0x4B8167
 extern struct NetMessage* NetMsg_g;            // addr: 0x00805338  thinker   notification/chat ticker popup above the HUD (NetMessage : Popup)
 extern struct NetMessage g_netmsg_2;          // addr: 0x007FFF80  observed  second NetMessage instance
-extern int  NetMsg_pop(struct NetMessage* self, const char* label, int delay_ms, int a4, const char* filename); // addr: 0x0047A890  thinker  thiscall
+extern int  NetMsg_pop(struct NetMessage* self, const char* label, int delay_ms, int a4, const char* filename); // addr: 0x0047A890  thinker  thiscall RET 0x10; label read from BasePop_def_file, last arg unused
 extern int  NetMsg_pop_2(const char* label, const char* filename); // addr: 0x0050B9E0  thinker
 extern void NetMsg_ctor();                     // addr: 0x0047ACF0  thinker  thiscall
 // field: NetMessage +0x537C int loc_x   NetMsg_ctor arg; BasePop_set_loc x at show (0x47A94F)
@@ -972,6 +1002,7 @@ extern int  Buffer_box_2(struct Buffer* self, RECT* rect, int color_h, int color
 extern void Sprite_draw_2(struct Sprite* self, struct Buffer* dest, int key, int x, int y, int scaleNum, int scaleDen); // addr: 0x005E4B4A  observed  thiscall (self=ecx); top-left (x,y), size *num/den (NN); 1,1 = native
 extern int  Buffer_draw_2(struct Buffer* src, void* dest, int keyColor, int X, int Y, int scaleNum, int scaleDen); // addr: 0x005D84C0  thinker  RET 0x18; keyed UNIFORM-scale blit
 extern int  Sprite_blit_scaled_core(struct Buffer* src, void* dest, unsigned int key, int x, int y); // addr: 0x005E4B9A  observed  thiscall; keyed NN scaled-blit core (Sprite_draw_2 wraps it, setting scale globals 0x696D18/0x696D1C); dispatches 1:1 / shrink(num<den) / expand(num>den)
+extern struct Sprite g_resource_icon_sprites[24];                              // addr: 0x007A72A0  observed  base RESOURCE-view yield orbs, 3 types x 8 counts, stride 0x2C
 extern void Sprite_fill_scaling_table(void);                                   // addr: 0x005EB20F  observed  rebuilds NN scale-ratio tables when num/den changes
 extern int* Sprite_get_clipped_x_table_expand(RECT* full, RECT* clip, short* outDx, short* outSx, int* a5, int* outRun); // addr: 0x005EAB0F  observed  per-src-column dest-run table (num>den)
 extern unsigned char* Sprite_get_clipped_y_table_expand(RECT* full, RECT* clip, short* outDy, short* outSy, int* a5, int* outRows); // addr: 0x005EABBF  observed  per-src-row dest-row repeat table (num>den)
@@ -1091,6 +1122,11 @@ extern void  config_popups(void);                                              /
 extern void  popups_normal(void);                                              // addr: 0x00588460  observed  installs popup default fonts (size 16); also rewrites g_menu_font from g_popup_menu_font_src @0x5886C1
 extern struct Font* g_popup_font_native;                                       // addr: 0x009403D8  observed  the native find_font(16,0) Font* popups_normal loads; stays native under the g_pf0 rewires (thunk_t16_measure_native's measure font)
 extern void  Dialog_set_def_dialog_font(struct Font* f0, struct Font* f1, struct Font* f2); // addr: 0x00609D20  observed  cdecl; stores the def-dialog font triple
+extern int   BasePop_set_def_file(const char* name);                   // addr: 0x006043D0  thinker  cdecl; 0, or 3 when longer than 12 chars
+extern char  BasePop_def_file[13];                                      // addr: 0x009B8AA8  observed  default script file name (Popup_start / NetMsg_pop)
+extern int   BasePop_set_def_button_font(struct Font* f0, struct Font* f1, struct Font* f2); // addr: 0x006049C0  thinker  cdecl; stores the popup reply-button default font triple
+extern int   BasePop_set_def_string_font(struct Font* f0, struct Font* f1, struct Font* f2, int a4); // addr: 0x006048C0  thinker  cdecl; stores the popup string default font triple
+extern void  popups_medium(void);                                             // addr: 0x005889C0  thinker  cdecl; installs the medium popup style (button triple as str/dlg/button defaults)
 extern struct Font* g_def_dialog_font0;                                        // addr: 0x009B8EC0  observed  def-dialog font triple -> Dialog +0x70/74/78 at build
 extern struct Font* g_def_dialog_font1;                                        // addr: 0x009B8EC4  observed
 extern struct Font* g_def_dialog_font2;                                       // addr: 0x009B8EC8  observed
@@ -1123,7 +1159,8 @@ extern void Popup_hide();                                                       
 extern void Popup_close();                                                      // addr: 0x00404900  thinker
 extern int  popb(const char* label, int flags, int sound_id, const char* pcx_filename, struct Sprite* a5); // addr: 0x0048C650  thinker  cdecl; picture popup; Console_focus on the base unless MPREF 0x4
 extern int  drop_range(int faction);                                           // addr: 0x00500320  observed  cdecl; airdrop limit: unlimited with the orbital-insertion tech (Rules+0x9497C8 via has_tech) or the Space Elevator, else Rules_max_airdrop_rng
-extern int  Rules_max_airdrop_rng;                                             // addr: 0x00949740  observed  Rules->max_airdrop_rng_wo_orbital_insert (drop_range's finite limit; action_airdrop's DROPRANGE number)
+extern int  action_airdrop(int veh_id, int x, int y, int flags);         // addr: 0x004CC360  thinker  cdecl; drops the unit at (x, y)
+extern int  Rules_max_airdrop_rng;                                          // addr: 0x00949740  observed  Rules->max_airdrop_rng_wo_orbital_insert (drop_range's finite limit; action_airdrop's DROPRANGE number)
 extern int  zoc_any(int x, int y, int faction);                                 // addr: 0x005C89F0  thinker  cdecl; any non-pact unit or base on a neighbour, no visibility test
 extern int  zoc_veh(int x, int y, int faction);                                 // addr: 0x005C8AC0  thinker  cdecl; land ZOC, no visibility test
 extern int  zoc_sea(int x, int y, int faction);                                 // addr: 0x005C8BA0  thinker  cdecl; per unit: seen bit, else single-player and no VFLAG_INVISIBLE
@@ -1482,6 +1519,14 @@ extern struct Sprite g_diplo_colour_bar_sprite;             // addr: 0x007D161C 
 //   NO g/16 scaling; only its CheckList child inherits the popup_list_* patches)
 // ============================================================================
 extern void Console_editor_diplomacy(struct Console* self);       // addr: 0x004DB870  thinker  thiscall; EDITORWHO faction picker then DiploEditWin_exec
+extern void Console_editor_on(struct Console* self);              // addr: 0x004D9970  thinker  fastcall; sets GameState 0x80
+extern void Console_editor_rules(struct Console* self);           // addr: 0x004DC230  thinker  thiscall
+extern void Console_editor_veh(struct Console* self);             // addr: 0x004DED00  thinker  thiscall
+extern void Console_editor_view(struct Console* self);            // addr: 0x004DF4F0  thinker  thiscall; can rewrite FactionStatus[0]
+extern void Console_editor_date(struct Console* self);            // addr: 0x004E0210  thinker  thiscall
+extern void Console_editor_eliminate(struct Console* self);       // addr: 0x004E05E0  thinker  thiscall; eliminate_player(f, -2)
+extern void BaseWin_base_editor(struct BaseWindow* self);         // addr: 0x0041C7A0  thinker  scenario-editor base menu
+extern void BaseWin_base_editor_fac(struct BaseWindow* self);     // addr: 0x0041B790  thinker  EDITORFAC list
 extern void DiploEditWin_exec(void* self, int faction);           // addr: 0x004DB080  observed  thiscall RET 4; builds+runs the 758x398 diplomacy modal; sole consumer = E8 @0x4DBB19 (whole-file census: NO vtable ref; 0x66E964 holds 0x4E23C0)
 extern void DiploEditWin_update(void* self);                      // addr: 0x004DADA0  observed  thiscall; pre-show populate
 extern void DiploEditWin_loop(void* self);                        // addr: 0x004DA990  observed  thiscall; modal event loop
@@ -1774,6 +1819,7 @@ extern void uimod_native_stub(void);                                           /
 // ============================================================================
 extern void crt_malloc(int size);                                              // addr: 0x0064558A  observed  cdecl (Ghidra names it operator_new)
 extern int  crt_strlen(const char* s);                                         // addr: 0x006453E0  observed  cdecl
+extern char* crt_strcat(char* dest, const char* src);                          // addr: 0x00645470  observed  cdecl; returns dest
 extern void crt_free(void* p);                                                 // addr: 0x0064557F  observed  cdecl (operator_delete -> free 0x644EF2; NULL ok)
 extern long crt_ftol(void);                                                    // addr: 0x006458C8  observed  MSVC _ftol: st0 -> edx:eax truncated, pops
 extern void _lock_file(void* file);                                            // addr: 0x00647C37  observed  cdecl; per-FILE lock
@@ -1920,6 +1966,9 @@ extern void BasePop_set_external_window(struct BasePop* self, struct GraphicWin*
 // field: BasePop +0xa48 char* title_str            ; popup title string; 0 = untitled (title chain skipped in Popup_on_draw_background)
 // field: BasePop +0x2118 Sprite art_sprite         ; embedded popup art bitmap (data@+0, w@+0x18=2130, h@+0x1c=2134); populated only for popups WITH an image
 // field: BasePop +0x2144 Sprite* art_ptr           ; observed; the art Sprite* drawn by the [+0x3168] custom-draw path; NON-ZERO only for popups with a real image (Quit) / 0 for text-only (Planetfall) -> the reliable "has art" discriminator. [+0x3168] is set on ALL popups so is NOT.
+// field: BasePop +0x30ac int extra   #extra value, default 0
+// field: BasePop +0x3100 int dialog_toggle   popp copies it to DialogToggle
+extern int  DialogToggle;                                           // addr: 0x009BC070  thinker  written by popp after its popup
 // field: BasePop +0x3104 int art_ratio_num   popup art sprite scale numerator
 // field: BasePop +0x3108 int art_ratio_den   popup art sprite scale denominator
 // field: BasePop +0x3168 void* art_draw_fn   custom art draw (cdecl); 0 = BasePop_on_redraw draws the art itself
@@ -2014,6 +2063,9 @@ extern void PrefWin_commit_close(/*ecx*/ void* self);                          /
 // field: PrefWin +0xA18 int prev_tab    only ever 0..5 (group_sel_changed clamps)
 // field: PrefWin +0xA1C int skip_prev_store   set by the key tab-cycle before ButtonGroup_select
 // field: PrefWin +0xA5C int ok_flag     commit-on-close ([0x297]; OK/Enter set it)
+// field: PrefWin +0x8614 struct CheckList warn_list   Warning Preferences page 1 (lists[4]); hidden by hide case 2
+// field: PrefWin +0x913C struct CheckList warn_more_list   Warning Preferences' More page (lists[5], tab 6); hidden only by hide case 6
+extern void PrefWin_close_tab0(/*ecx*/ void* self);                            // addr: 0x004926B0  observed  thiscall; cur tab := 0, tail-jmp GraphicWin_close 0x5D4E40
 extern struct ButtonGroup PrefWin_tab_group;                                   // addr: 0x008577F0  observed  the 6-tab radio group (id 0x5D); member cap 0x20
 extern struct FlatButton PrefWin_btn0;                                         // addr: 0x00858338  observed  first stock tab FlatButton (Game Preferences)
 extern int  g_prefwin_tab_x;                                                   // addr: 0x0085788C  observed  tab column x (native units)
@@ -2036,7 +2088,9 @@ extern void ButtonGroup_init(/*ecx*/ void* self, int gid, int flags);          /
 extern void ButtonGroup_add(/*ecx*/ void* self, void* btn);                    // addr: 0x0062B850  observed  thiscall; appends member, sets btn+0xAA8 group ptr
 extern int  ButtonGroup_select(/*ecx*/ void* self, int id);                    // addr: 0x0062B8A0  observed  thiscall; unpress old/press new, notifies owner vtbl+0xBC(old,new) then vtbl+0xB8(gid,old,new)
 // field: FlatButton +0xA78 int button_id     ; +0xAA8 ButtonGroup* group
-// field: FlatButton +0x970 struct Font* label_font   seeded native at init; thunk_pref_show rescales the 15 stock PrefWin ones per show
+// field: FlatButton +0x970 struct Font* label_font   = canvas Buffer +0x444's font (+0x52C); seeded from g_default_button_font at init
+extern struct Font* g_default_button_font;     // addr: 0x009B8E34  observed  BaseButton_init seeds the canvas font from it (0x60732F); = [0x9403DC] find_font(12,0)
+extern void BaseButton_set_def_font(struct Font* f);   // addr: 0x006074B0  observed  stores g_default_button_font
 extern void ScrollBar_ctor(/*ecx*/ struct ScrollBar* self);                    // addr: 0x006051D0  observed  thiscall; GraphicWin + 2 arrow FlatButtons; vtable 0x669D58; size 0x214C
 extern int  ScrollBar_init(/*ecx*/ struct ScrollBar* self, int x, int y, int w, void* parent, int id); // addr: 0x006058D0  observed  thiscall; h=g_scrollbar_w; -> ScrollBar_init_inner
 extern int  ScrollBar_init_v(/*ecx*/ struct ScrollBar* self, int x, int y, int h, void* parent, int id); // addr: 0x00605910  observed  thiscall RET 0x14; vertical: w=g_scrollbar_w (load @0x605938); -> ScrollBar_init_inner; Win V bar caller @0x5EC427
@@ -2049,7 +2103,7 @@ extern void prefs_put_2(const char* name, int value, int a3);                  /
 extern void prefs_save(int a1);                                                // addr: 0x0059E5D0  thinker   cdecl
 extern void prefs_use(void);                                                   // addr: 0x0059E950  thinker   cdecl
 extern void draw_map(int a1);                                                  // addr: 0x0046B190  thinker   cdecl; full map redraw
-extern void BaseButton_set_name(/*ecx*/ void* self, const char* name);         // addr: 0x006074E0  thinker   thiscall
+extern void BaseButton_set_name(/*ecx*/ void* self, const char* name);         // addr: 0x006074E0  thinker   thiscall; copies the text, no repaint
 
 // ==== Scrollbar RAIL slide helpers (console right-edge rail + embedded ScrollBar) ====
 extern void rail_slide_in(void* win, void* sb);                                // addr: 0x0045DEA0  observed  cdecl RETN; synthesizes the 47px right rail strip (console_x art: 32px rail + 15px wall) into a 47xH buffer, animates open, bakes to win canvas at clientW-47, then sb resize(0x18, railH-0xA)+move(clientW-0x2B, 0x15)+show
@@ -2396,6 +2450,8 @@ extern void Console_go_to_select_cb(void* popup, int index);                    
 // field: Console +0x21A70 Buffer planwin_save   PlanWin native render copy (window dims)
 // field: Console +0x21FF8 int32 planwin_nlines   PlanWin route-line count (<= 4)
 // field: Console +0x2200C RECT planwin_lines[4]   PlanWin route lines {x1,y1,x2,y2} in tile coords
+// field: Console +0x1DDB4 int tile_w  diamond width in px = 8 x zoom (+0x1DDC8)
+// field: Console +0x1DDB8 int half_tile_w  4 x zoom (+0x1DDC8)
 // field: Console +0x1DDBC int col_w   x-unit pixel step of the console's canvas (4 x zoom)
 // field: Console +0x1DDC8 int zoom    the console's zoom level (col_w = 4z, row_h = 2z)
 // field: Console +0x1DDC0 int row_h   tile row pitch of the console's canvas (2 at the BASE LOCATOR zoom; the base pass subtracts it from tile_to_pixel_y)
@@ -2585,7 +2641,7 @@ extern void mon_first_in_space();              // addr: 0x00477740  thinker   ki
 extern void mon_built_preserve();              // addr: 0x00477840  thinker   kind 0xC
 extern void mon_winning_unify();               // addr: 0x00477940  thinker   kind 0xD
 extern void mon_winning_trans();               // addr: 0x004779D0  thinker   kind 0xE
-extern void mon_killed_faction();              // addr: 0x00477A60  thinker   kinds 0xF..0x14 (first free kill slot)
+extern void mon_killed_faction(int killer, int victim); // addr: 0x00477A60  observed  cdecl; kinds 0xF..0x14 (first free of 6 kill slots); caller eliminate_player
 // field: MonumentWin +0xA14 int scratch_x ; +0xA18 int scratch_y   content origin at build start, then the sprite-extract cursor
 // field: MonumentWin +0xA1C int canvas_w = 800 ; +0xA20 int canvas_h = 600   constant in both modes
 // field: MonumentWin +0xA24 RECT content   (0,0,800,600) at 800x600, (112,84,912,684) at 1024x768
@@ -2614,6 +2670,8 @@ extern void mon_killed_faction();              // addr: 0x00477A60  thinker   ki
 // field: MonumentWin +0x36CC RECT rc_emblem   (364,111,435,175), or (328,6,470,107) when count==14
 // field: Monument +0x000 record[21]   stride 0x38; r 0..14 = milestone kinds, r 15..20 = killed-faction slots
 // field: MonumentRecord +0x00 int year ; +0x08 int payload ; +0x0C int other_faction ; +0x10 int achieved ; +0x14 int variant
+// field: Monument +0x350 int killed_faction[6]   stride 0x38 (kill records' payload; Thinker data2[i][7])
+// field: Monument +0x358 int captured[6]   stride 0x38 (kill records' achieved; Thinker data2[i][9]); a freed leader clears it
 // field: Monument +0x498 int selected   kind currently shown; -1 = none
 // field: Monument +0x4AC char name[0x18]   first base name (mon_colony_founded)
 
@@ -2621,6 +2679,9 @@ extern void mon_killed_faction();              // addr: 0x00477A60  thinker   ki
 extern int  enemy_move(int veh_id);                                  // addr: 0x0056B5B0  thinker  cdecl; AI per-unit decide
 extern int  enemy_veh(int veh_id);                                   // addr: 0x00579240  thinker  cdecl; enemy_move then action
 extern void enemy_turn(int faction_id);                              // addr: 0x00579510  thinker  cdecl; runs on every net peer
+extern int  air_power(int veh_id, int a2, int a3, int* a4, int* a5); // addr: 0x005678C0  thinker  cdecl; AI air-unit target planner
+extern int  battle_fight_2(int veh_id, int offset, int tx, int ty, int table_offset, int option, int* def_id); // addr: 0x00506AF0  thinker  cdecl; resolves one combat
+extern void action_destroy(int veh_id, int flags, int x, int y);     // addr: 0x004CAA50  thinker  cdecl; pillage or terrain bombard
 extern void spot_all(int veh_id, int flag);                          // addr: 0x005B6260  thinker  cdecl; recompute visibility on move
 extern void spot_stack(int veh_id, int faction_id);                  // addr: 0x005B58E0  thinker  cdecl; set visibility bit for stack
 extern void unspot_stack(int veh_id);                                // addr: 0x005B5A70  thinker  cdecl
@@ -2669,6 +2730,7 @@ extern int  g_pops_loc_x;                                            // addr: 0x
 extern int  g_pops_loc_y;                                            // addr: 0x006973E0  observed  pops_18 set_loc y (reset to 0x2000 after use)
 extern void tech_achieved(int faction, int tech, int a3, int a4);    // addr: 0x005BB000  thinker  cdecl; X_pop("ASKSEEDESIGN") @0x5BBCFA/0x5BBD6E -> design_new_veh
 extern void design_new_veh(int a1, int a2);                          // addr: 0x00583CB0  thinker  cdecl
+extern int  design_workshop(int faction, int a2);                    // addr: 0x00583E30  thinker  cdecl; 3D DesignWin, or the DESIGNSHOP list popup (popups_medium) when no design slot is free
 extern int  diplo_second_faction;                                    // addr: 0x0093F7CC  thinker  the faction that speaks
 extern int  whose_territory(int faction, int x, int y, int* base, int flag); // addr: 0x004E3EF0  thinker  cdecl
 extern int  base_find_2(int x, int y, int faction);                  // addr: 0x004E3C60  thinker  cdecl; nearest own base or -1
@@ -2701,6 +2763,10 @@ extern uint8_t FactionStatus[2];                                     // addr: 0x
 // field: Faction +0x18 uint32_t diplo_status[8]   bit0 pact, bit1 treaty, bit2 truce, bit3 commlink
 // field: UNIT +0x20 uint32_t ability_flags   0x2 deep radar, 0x4 cloaked, 0x40 deep pressure hull
 // field: UNIT +0x24 uint8_t chassis_id ; +0x28 uint8_t carry_capacity
+// field: UNIT +0x2C uint8_t obsolete_factions   bit = faction that marked it obsolete
+// field: UNIT +0x30 uint16_t unit_flags   bit0 active (slot in use)
+// field: Faction +0x858 uint8_t units_active[512]   fielded units per unit id
+// field: Faction +0xA58 uint8_t units_queue[512]   queued builds per unit id
 // field: CChassis +0x49 uint8_t triad   0 land, 1 sea, 2 air
 // field: VEH +0x04 uint32_t state ; +0x14 int16_t waypoint_x[4] ; +0x1C int16_t waypoint_y[4]
 // field: VEH +0x12 uint8_t waypoint_count   fixed waypoints (slot[count] = destination); state 0x2000000 = collecting
@@ -2710,6 +2776,71 @@ extern struct VEH Vehs[];                                            // addr: 0x
 extern int  VehCount;                                                // addr: 0x009A64C8  thinker
 extern struct MAP* MapTiles;                                         // addr: 0x0094A30C  thinker  stride 0x2C; index y*MapHalfX + (x>>1)
 extern int  MapHalfX;                                                // addr: 0x0068FAF0  thinker
+extern int  MapAreaSqRoot;                                           // addr: 0x00949888  thinker  sqrt of the tile count; 56 on a standard map
+extern struct Continent Continents[128];                             // addr: 0x009AA730  thinker  stride 0x1C, by region; +0 tile_count, +4 open_terrain
+extern int  BaseFindDist;                                            // addr: 0x0090EA04  thinker  distance to the base base_find / base_find_3 returned
+// field: MAP +0x00 uint8_t climate   top 3 bits altitude (>= 0x60 land, <= 0x40 sea), bits 3-4 rainfall
+// field: MAP +0x02 uint8_t val2   low nibble = owner of the units on the tile (>= 8 none), high nibble = site value
+// field: MAP +0x03 uint8_t region
+// field: MAP +0x05 uint8_t val3   top 2 bits rockiness
+// field: MAP +0x07 int8_t owner   territory owner
+// field: MAP +0x0C uint32_t landmarks
+// field: MFaction +0x508 uint32_t rule_flags   0x100 = aquatic; MFactions[f] at 0x946A50 + f * 0x59C
+// field: Faction +0x117C uint8_t region_total_bases[128]   the faction's bases per region
+extern int  probe(int veh_id, int base_id, int veh_id_2, int toggle); // addr: 0x0059F120  thinker  cdecl; probe-team action menu, AI choice and execution
+extern int  setup_player(int faction_id, int setup_id, int is_probe); // addr: 0x005B0E00  thinker  cdecl; kills the faction's bases + units, then lands it; 0 = no escape
+extern int  GenderDefault;                                          // addr: 0x009BBFEC  thinker  gender parse_says substitutes (get_noun sets it)
+extern int  PluralDefault;                                          // addr: 0x009BBFF0  thinker  plural flag parse_says substitutes (get_noun sets it)
+extern int  eliminate_player(int faction_id, int setup_id);         // addr: 0x005B3380  thinker  cdecl; setup_id = the eliminating faction
+extern void capture_base(int base_id, int faction_id, int is_probe); // addr: 0x0050C510  thinker  cdecl
+extern const char* get_title(int faction_id);                       // addr: 0x005590A0  thinker  cdecl
+extern const char* get_name(int faction_id);                        // addr: 0x00559060  thinker  cdecl
+extern const char* get_noun(int faction_id);                        // addr: 0x0050B930  thinker  cdecl; sets gender / plural defaults
+extern int  parse_says(int slot, const char* text, int gender, int plural); // addr: 0x00625EC0  thinker  cdecl
+extern int  has_tech(int tech_id, int faction_id);                  // addr: 0x005B9F20  thinker  cdecl
+extern int  net_tech(int faction_id, int tech_id, int from_faction, int a4); // addr: 0x005395F0  thinker  cdecl
+extern void faction_upkeep(int faction_id);                         // addr: 0x00527290  thinker  cdecl
+extern void treaty_off(int faction1, int faction2, uint32_t mask);  // addr: 0x0055B760  thinker  cdecl; both directions
+extern void treaty_on(int faction1, int faction2, uint32_t mask);   // addr: 0x0055B870  thinker  cdecl; both directions
+extern void set_treaty(int faction1, int faction2, uint32_t mask, int on); // addr: 0x0055BB30  thinker  cdecl; one direction
+extern int  has_treaty(int faction1, int faction2, uint32_t mask);  // addr: 0x005002F0  thinker  cdecl
+extern int  at_climax(int faction_id);                              // addr: 0x00539EF0  thinker  cdecl
+extern void go_to(int veh_id, int type, int x, int y);              // addr: 0x00560AD0  thinker  cdecl
+extern void veh_kill(int veh_id);                                   // addr: 0x005C08C0  thinker  cdecl; shifts later vehicles down
+extern void kill(int veh_id);                                       // addr: 0x005C0B00  thinker  cdecl
+extern int  veh_init(int unit_id, int faction_id, int x, int y);    // addr: 0x005C03D0  thinker  cdecl
+extern void veh_clear(int veh_id, int unit_id, int faction_id);     // addr: 0x005C02D0  thinker  cdecl
+extern int  morale_veh(int veh_id, int a2, int a3);                 // addr: 0x005C0E40  thinker  cdecl
+extern int  rnd(int range, const char* label);                      // addr: 0x00579770  thinker  cdecl; 0..range-1
+extern int  success_rates(int slot, int morale, int diff, int base_id); // addr: 0x0059EEE0  thinker  cdecl
+extern int  base_find(int x, int y);                                // addr: 0x004E3B80  thinker  cdecl; nearest base of any owner
+extern int  game_year(int turn);                                    // addr: 0x005C89A0  thinker  cdecl
+extern void bitmask(int bit, int* index, int* mask);                // addr: 0x0050BA00  thinker  cdecl
+extern int  has_abil(int unit_id, uint32_t ability);                // addr: 0x005BF1F0  thinker  cdecl
+extern int  has_fac(int fac_id, int base_id, int queued);           // addr: 0x00421670  thinker  cdecl
+extern int  VehAttackFlags;                                         // addr: 0x0093E904  thinker  order_veh arg 3
+extern int  ProbeHasAlgoEnhancement;                                // addr: 0x00945B30  thinker  probe state
+extern int  ProbeTargetFactionID;                                   // addr: 0x00945B34  thinker  probe state
+extern int  ProbeTargetHasHSA;                                      // addr: 0x00945B38  thinker  probe state
+// field: Faction +0x04 int32_t ranking   0..7
+// field: Faction +0x298 int32_t SE_probe
+// field: Faction +0x35C int32_t tech_ranking
+// field: VEH +0x24 uint8_t morale
+// field: VEH +0x2C uint8_t probe_action
+// field: VEH +0x2E int16_t home_base_id
+// field: BASE +0x30 int32 state_flags
+extern int  battle_fight(int veh_id, int offset, int table_offset, int option, int* def_id); // addr: 0x00506A60  thinker  cdecl; tile from offset, then battle_fight_2
+extern void action_arty(int veh_id, int tx, int ty);                // addr: 0x004CD090  thinker  cdecl; Long Range Fire
+extern int  can_arty(int unit_id, int allow_sea);                   // addr: 0x005C0DB0  thinker  cdecl; can bombard (air: never)
+extern int  veh_speed(int veh_id, int a2);                          // addr: 0x005C1540  thinker  cdecl; road moves per turn
+extern int  break_treaty(int faction_id, int faction_id_tgt, int bits); // addr: 0x0055F770  thinker  cdecl; asks only
+extern int  best_defender(int veh_id_def, int veh_id_atk, int combat_type); // addr: 0x005044D0  thinker  cdecl
+extern void parse_num(int slot, int value);                         // addr: 0x00625E30  thinker  cdecl; $NUMn
+extern int  CurrentVehID;                                           // addr: 0x009A64DC  observed  last unit order_veh sent into an attack
+extern int  move_rate_roads;                                        // addr: 0x00949738  thinker  Rules field
+extern char* ScriptFile;                                            // addr: 0x00691B0C  thinker  popp file name
+// field: VEH +0x04 uint32_t state   0x4 has_moved, 0x1000 no haste, 0x80000 used nerve gas
+// field: VEH +0x28 uint8_t moves_spent
 
 // ==== Turn / game flow (control_game / control_turn; the update prompt's gates) ====
 extern void control_game(void);                                      // addr: 0x0052AA30  thinker  cdecl; WinMain body: top_menu/desktop_init/control_turn loop; exits when ControlTurnB==0
@@ -2722,7 +2853,7 @@ extern int  ControlTurnB;                                            // addr: 0x
 extern int  ControlTurnMove;                                         // addr: 0x009B2070  thinker  resume-turn faction (set on load); Console_human_turn zeroes it
 extern int  GameHalted;                                              // addr: 0x0068F21C  thinker  1 = main menu / setup, 0 = game running
 extern int  PbemActive;                                              // addr: 0x0093A95C  thinker  hotseat/PBEM flag
-extern int  GameRules;                                               // addr: 0x009A649C  thinker  rules bits; 0x400 = RULES_IRONMAN
+extern int  GameRules;                                               // addr: 0x009A649C  thinker  rules bits; 0x1 = RULES_DO_OR_DIE, 0x400 = RULES_IRONMAN
 extern int  SaveFileMenu;                                            // addr: 0x00945D78  thinker  set around load_game from top_menu
 extern void game_close(int a1);                                      // addr: 0x0058F430  thinker  cdecl; stop_timers + labels/Strings shutdown (Thinker 5.5 write_jumps here)
 extern void system_close(void);                                      // addr: 0x0058F250  thinker  cdecl; release_sound, backbuffer, Console_close, Path/map shutdown
@@ -2749,6 +2880,39 @@ extern int  g_pop_default_result;                                    // addr: 0x
 // field: BasePop +0x30B8 int   placed_y        BasePop_exec_3 placed window y (from the +0x30FC request)
 // field: BasePop +0x30F8 int   loc_req_x       placement request: 0x1000 centre, <0 far-edge gap, else literal (set_loc / #x)
 // field: BasePop +0x30FC int   loc_req_y       placement request y (set_loc / #y); 0x2000 = keep
+extern const char* EngineVersion;                                  // addr: 0x00691870  thinker   version string pointer
+extern const char* EngineDate;                                     // addr: 0x00691874  thinker   build date string
+
+// ==== End-game REPLAY window (stack-local ReplayWin in show_replay) ====
+extern void show_replay(void);                     // addr: 0x005ADBF0  thinker   cdecl; autosave, build+run ReplayWin, reload autosave; callers end_of_game / Console_retire_game / Console_menu_proc / Console_on_key_click
+extern int  replay_base(int event, int x, int y, int faction_id); // addr: 0x005ADE80  thinker   cdecl; appends a ReplayEvent (0 found / 1 capture / 2 kill)
+extern int  ReplayEventSize;                       // addr: 0x009469F8  thinker   byte length of ReplayEvents
+extern struct ReplayEvent ReplayEvents[];          // addr: 0x00950324  thinker   8-byte records
+extern void* ReplayWin_vtbl;                       // addr: 0x0066F8F0  observed  GraphicWin-derived; +0x30 = ReplayWin_draw
+extern void ReplayWin_draw(/*ecx*/ struct GraphicWin* self); // addr: 0x005AD610  observed  fastcall; vtbl+0x30; fill 9, outer box 0x78D690, title box 0x78D618 {L+4,T+4,R-4,T+0x18}, title text in g_popup_title_font, then MapWin draw
+extern void ReplayWin_build(/*ecx*/ struct GraphicWin* self); // addr: 0x005AD720  observed  fastcall; 800x600 GraphicWin_init_2 + Win_center, map zoom fit, MapWin_init inset (3, 0x1A), Close FlatButton 20 high, Time_start(ReplayWin_tick, 100 ms)
+extern void ReplayWin_close(/*ecx*/ struct GraphicWin* self); // addr: 0x005AD9A0  observed  fastcall; GraphicWin_close + MapWin_close + free +0x2324
+extern void ReplayWin_step(/*ecx*/ struct GraphicWin* self); // addr: 0x005AD9E0  observed  fastcall; advances one turn, rewrites the title, redraws; closes 50 turns after CurrentTurn
+extern void ReplayWin_tick(int self);              // addr: 0x005ADBD0  observed  cdecl Time callback; ReplayWin_step when self != 0
+extern void ReplayWin_on_left_click(/*ecx*/ struct GraphicWin* self, int x, int y); // addr: 0x005AD3B0  observed  thiscall RET 8; vtbl+0x4C; closes (vtbl+0xE8)
+extern void ReplayWin_on_right_click(/*ecx*/ struct GraphicWin* self, int x, int y); // addr: 0x005AD3C0  observed  thiscall RET 8; vtbl+0x58; closes (vtbl+0xE8)
+extern int  ReplayWin_on_key(/*ecx*/ struct GraphicWin* self, int key, int vk); // addr: 0x005AD440  observed  thiscall RET 8; vtbl+0x64; closes, returns 1
+extern void ReplayWin_on_button_clicked(/*ecx*/ struct GraphicWin* self, int id); // addr: 0x005AD430  observed  thiscall RET 4; vtbl+0xB0; closes
+extern void* ReplayWin_scalar_dtor(/*ecx*/ struct GraphicWin* self, int flags); // addr: 0x005AE0B0  observed  thiscall RET 4; vtbl+0x0; dtor body 0x5ADF10, frees when flags & 1
+extern void ReplayWin_apply_bases(/*ecx*/ struct GraphicWin* self); // addr: 0x005AD560  observed  fastcall; rebuilds Bases from the +0xA20 table, bit_set/owner_set, reset_territory
+// field: ReplayWin +0x0A14 int   field_A14          zeroed by ReplayWin_build
+// field: ReplayWin +0x0A18 int   replay_turn        turn being shown
+// field: ReplayWin +0x0A1C int   replay_event_ofs   byte offset into ReplayEvents
+// field: ReplayWin +0x0A20 int   bases[0x200][3]    x, y, owner (-1 = empty)
+// field: ReplayWin +0x2220 char  title[]            "Replay: <year>"
+// field: ReplayWin +0x2320 MapWin map               map_zoom_idx at +0x200B8 (= MapWin +0x1DD98), flags +0x20090
+// field: ReplayWin +0x247A0 FlatButton close_btn    faces 0x78D960 / 0x78D9B0 / 0x78D9B0
+// field: ReplayWin +0x252EC Time timer
+// field: ReplayEvent +0x0 char  type      0 found / 1 capture / 2 kill
+// field: ReplayEvent +0x1 char  faction
+// field: ReplayEvent +0x2 short turn
+// field: ReplayEvent +0x4 short x
+// field: ReplayEvent +0x6 short y
 
 // ==== Map effects: boom / Planet Buster ====
 extern int  planet_busting(int a1, int a2, int a3);                // addr: 0x00500B60  thinker   cdecl

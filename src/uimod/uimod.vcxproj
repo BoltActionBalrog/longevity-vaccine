@@ -48,7 +48,7 @@
       <ConformanceMode>true</ConformanceMode>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <!-- libav (x86 LGPL-shared) headers; see third_party\ffmpeg (gitignored). -->
+      <!-- libav (x86 LGPL-shared) headers; third_party\ffmpeg is tracked (test_ffmpeg_vendored.py pins it). -->
       <AdditionalIncludeDirectories>$(ProjectDir)third_party\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -117,12 +117,15 @@
     <ClCompile Include="src\lanjoin.cpp" />
     <ClCompile Include="src\mptimefix.cpp" />
     <ClCompile Include="src\blinkfix.cpp" />
+    <ClCompile Include="src\rowarrowfix.cpp" />
     <ClCompile Include="src\cursorscale.cpp" />
     <ClCompile Include="src\hudmovesfix.cpp" />
     <ClCompile Include="src\hudsync.cpp" />
     <ClCompile Include="src\viewdragfix.cpp" />
     <ClCompile Include="src\musicfix.cpp" />
+    <ClCompile Include="src\pracxfocus.cpp" />
     <ClCompile Include="src\riotfix.cpp" />
+    <ClCompile Include="src\leaderfree.cpp" />
     <ClCompile Include="src\rowindent.cpp" />
     <ClCompile Include="src\update.cpp" />
     <ClCompile Include="src\vidmode.cpp" />
@@ -134,8 +137,16 @@
     <ClInclude Include="src\codecs.h" />
     <ClInclude Include="src\mapscroll.h" />
     <ClInclude Include="src\movieaudio.h" />
+    <ClInclude Include="src\moviepace.h" />
     <ClInclude Include="src\update_core.h" />
+    <ClInclude Include="src\leaderfree_core.h" />
+    <ClInclude Include="src\pslabel_core.h" />
+    <ClInclude Include="src\pracxfocus_core.h" />
     <ClInclude Include="src\thinkerversion.h" />
+    <ClInclude Include="src\thinkercheck_core.h" />
+    <ClInclude Include="src\thinkerdialog.h" />
+    <ClInclude Include="src\thinkersites_core.h" />
+    <ClInclude Include="src\thinkerlive.h" />
     <ClInclude Include="src\version.h" />
     <ClInclude Include="src\vidsafety.h" />
     <ClInclude Include="src\vidwatch.h" />

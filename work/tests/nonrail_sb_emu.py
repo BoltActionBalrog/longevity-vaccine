@@ -350,7 +350,8 @@ def dll_slider(rig, value=50):
     """uimod.dll's Longevity slider, built the way prefs.cpp BuildWidgets builds it, on the exe's own code: the
     registry slot g_dll_pref_slider names it (thunk_pref_sbzoom arms its draw, thunk_pref_gwinit scales its arrows /
     thumb), the engine ScrollBar ctor 0x6051D0, a PRIVATE copy of the ScrollBar vtable (0x170 bytes of 0x669D58), the
-    engine ScrollBar_init 0x6058D0 at the PrefWin slider statics (x [0x8578CC], y [0x8578D0] + 44, w [0x8578B8],
+    engine ScrollBar_init 0x6058D0 at the PrefWin slider statics (x [0x8578CC], y [0x8578D0] + 15 (prefs.cpp kSliderY: one button row
+    + 6 above the audio frame's slot, for the More button), w [0x8578B8],
     parent PrefWin, id 0x60), range 0..100, the value.  The registry's lo / hi (g_dll_pref_lo / _hi: the DLL's widget
     block, which the exe's FlatButton zoom stubs admit) cover the slider object, so its arrows' hover / press repaints
     zoom as the DLL's do.  One slider per screen (the registry holds one)."""
@@ -364,7 +365,7 @@ def dll_slider(rig, value=50):
         e.w32(rig.sym["g_dll_pref_slider"], sb)
     e.call(0x6051D0, ecx=sb, count=50_000_000)
     e.w32(sb, vt)
-    e.call(0x6058D0, ecx=sb, args=(e.s32(0x8578CC), e.s32(0x8578D0) + 44, e.s32(0x8578B8), 0x8578D8, 0x60),
+    e.call(0x6058D0, ecx=sb, args=(e.s32(0x8578CC), e.s32(0x8578D0) + 15, e.s32(0x8578B8), 0x8578D8, 0x60),
            count=200_000_000)
     e.call(0x6059B0, ecx=sb, args=(0, 100), count=50_000_000)
     e.call(SET_POS, ecx=sb, args=(value,), count=100_000_000)

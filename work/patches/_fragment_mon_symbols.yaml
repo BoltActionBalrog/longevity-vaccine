@@ -32,7 +32,7 @@
   t_hof_font_449fee:             { cave: pcave2, offset: 0x2ce50 }   # hof_scale (32B)
   t_hof_font_44a169:             { cave: pcave2, offset: 0x2ce70 }   # hof_scale (34B)
   t_hof_bd_field:                { cave: pcave2, offset: 0x1af00 }   # hof_scale (56B)
-  t_hof_pairfld:                 { cave: pcave2, offset: 0x1af40 }   # hof_scale (97B)
+  t_hof_pairfld:                 { cave: pcave2, offset: 0x1af40 }   # hof_scale (102B)
   g_hof_field:                   { cave: pcave2, offset: 0x1aff0, size: 4 }
   g_mon_lut_lo:                  { cave: pcave2, offset: 0xdee0, size: 4 }   # mon_scale DATA (t_mon_lut range)
   g_mon_lut_hi:                  { cave: pcave2, offset: 0xdee4, size: 4 }   # mon_scale DATA (t_mon_lut range)

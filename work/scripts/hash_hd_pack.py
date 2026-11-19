@@ -30,6 +30,22 @@ _PIPELINE = _REPO / "work" / "video-upscale" / "pipeline.ini"
 
 SIDECAR_NAME = "pack-manifest.json"
 
+#: The game's 61 cinematics, by the exact name of their movies\<name>.wve. A shipped pack carries exactly one
+#: movies\hd\<name>.mp4 per name: the game looks clips up by these names, so a missing or misspelt one silently plays
+#: the original instead (release.py's pack check refuses both).
+MOVIE_CLIPS = (
+    'angels', 'asceticVirtues', 'believe', 'bulkMatter', 'caretake', 'citizensDefense', 'clinical_Immortality',
+    'cloningVats', 'close_ct', 'close_us', 'commandNexus', 'cyborg', 'cyborgFactory', 'dreamTwister', 'drone',
+    'empathGuild', 'fungboy', 'gaians', 'hive', 'humanGenome', 'hunterSeeker', 'livingRefinery', 'logo',
+    'longevityVaccine', 'losealien', 'loseman', 'losewoman', 'maritimeControl', 'merchantExchange', 'morgan',
+    'nanofactory', 'networkBackbone', 'neuralAmplifier', 'open', 'opening', 'openingx', 'peace',
+    'pholusMutagen', 'pirates', 'planetaryDatalinks', 'planetaryTransit', 'selfAwareColony',
+    'singularityInductor', 'smacxcloudbase', 'smacxgrid', 'smacxmanifold', 'smacxnethack', 'spaceElevator',
+    'spartans', 'supercollider', 'telepathicMatrix', 'theoryOfEverything', 'theyTranscend', 'transcend', 'univ',
+    'universalTranslator', 'usurper', 'virtualWorld', 'voiceOfPlanet', 'weatherParadigm', 'xenoempathyDome',
+)
+_SETTINGS = ("model", "scale", "crf")
+
 
 def sha256_file(p: Path, _buf: int = 1 << 20) -> str:
     h = hashlib.sha256()
@@ -79,15 +95,18 @@ def build(pack: Path, verify: bool = False) -> int:
         print(f"WARNING: {_PIPELINE} not readable -- model/CRF provenance will be null.")
 
     sidecar = pack / SIDECAR_NAME
-    previous = {}
+    previous, prev_defaults = {}, None
     if sidecar.is_file():
         try:
-            previous = {c["name"]: c for c in
-                        json.loads(sidecar.read_text(encoding="utf-8")).get("clips", [])}
-        except (ValueError, KeyError):
+            prev_doc = json.loads(sidecar.read_text(encoding="utf-8"))
+            previous = {c["name"]: c for c in prev_doc.get("clips", [])}
+            prev_defaults = prev_doc.get("defaults")
+        except (ValueError, KeyError, TypeError, AttributeError):
             print("  (existing sidecar unreadable -- rebuilding from scratch)")
+            previous, prev_defaults = {}, None
 
     entries, hashed, reused, failures = [], 0, 0, []
+    kept = 0       # clips whose recorded provenance was kept (same bytes as when it was recorded)
     for p in clips:
         st = p.stat()
         prev = previous.get(p.name)
@@ -101,12 +120,20 @@ def build(pack: Path, verify: bool = False) -> int:
             hashed += 1
             if verify and prev and prev.get("sha256") and prev["sha256"] != digest:
                 failures.append(p.name)
+        # Provenance belongs to the BYTES: a clip unchanged since it was recorded keeps what was recorded for it.
+        # pipeline.ini describes only clips our own Real-ESRGAN pipeline builds, so re-deriving every clip from it
+        # (as release_all re-runs this) rewrote a third-party pack's provenance as Real-ESRGAN.
+        if prev and prev.get("sha256") == digest and all(k in prev for k in _SETTINGS):
+            settings = {k: prev[k] for k in _SETTINGS}
+            kept += 1
+        else:
+            settings = settings_for(p.stem, defaults, overrides)
         entries.append({
             "name": p.name,
             "size": st.st_size,
             "mtime_ns": st.st_mtime_ns,
             "sha256": digest,
-            **settings_for(p.stem, defaults, overrides),
+            **settings,
         })
 
     if verify:
@@ -129,8 +156,10 @@ def build(pack: Path, verify: bool = False) -> int:
         "pack": "movies-hd",
         "clip_count": len(entries),
         "total_size": total,
-        "defaults": {"model": defaults.get("model"), "scale": defaults.get("scale"),
-                     "crf": defaults.get("crf")},
+        # Every clip kept its recorded provenance: so do the pack's defaults. Otherwise pipeline.ini's.
+        "defaults": (prev_defaults if kept == len(entries) and isinstance(prev_defaults, dict)
+                     else {"model": defaults.get("model"), "scale": defaults.get("scale"),
+                           "crf": defaults.get("crf")}),
         "clips": entries,
     }
     sidecar.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")

@@ -1,0 +1,53 @@
+  t_hb_gate:                     { cave: pcave2, offset: 0x44000 }   # holobook_scale (36B)
+  t_hb_restripe:                 { cave: pcave2, offset: 0x44030 }   # holobook_scale (44B)
+  t_hb_build:                    { cave: pcave2, offset: 0x44060 }   # holobook_scale (663B)
+  t_hb_btn:                      { cave: pcave2, offset: 0x44300 }   # holobook_scale (244B)
+  t_hb_fonts:                    { cave: pcave2, offset: 0x44400 }   # holobook_scale (209B)
+  t_hb_drawgate:                 { cave: pcave2, offset: 0x444e0 }   # holobook_scale (20B)
+  t_hb_bd_frame:                 { cave: pcave2, offset: 0x44500 }   # holobook_scale (162B)
+  t_hb_bd_art:                   { cave: pcave2, offset: 0x445b0 }   # holobook_scale (128B)
+  t_hb_artbox:                   { cave: pcave2, offset: 0x44630 }   # holobook_scale (139B)
+  t_hb_flb:                      { cave: pcave2, offset: 0x446c0 }   # holobook_scale (210B)
+  t_hb_caprect:                  { cave: pcave2, offset: 0x447a0 }   # holobook_scale (154B)
+  t_hb_cap:                      { cave: pcave2, offset: 0x44840 }   # holobook_scale (27B)
+  t_hb_cap8:                     { cave: pcave2, offset: 0x44860 }   # holobook_scale (32B)
+  t_hb_w_title:                  { cave: pcave2, offset: 0x44880 }   # holobook_scale (107B)
+  t_hb_w_intro:                  { cave: pcave2, offset: 0x448f0 }   # holobook_scale (107B)
+  t_hb_w_measure:                { cave: pcave2, offset: 0x44960 }   # holobook_scale (99B)
+  t_hb_w_entry:                  { cave: pcave2, offset: 0x449d0 }   # holobook_scale (106B)
+  t_hb_w_cap8:                   { cave: pcave2, offset: 0x44a40 }   # holobook_scale (106B)
+  t_hb_font_495754:              { cave: pcave2, offset: 0x44ab0 }   # holobook_scale (34B)
+  t_hb_font_49584d:              { cave: pcave2, offset: 0x44ae0 }   # holobook_scale (32B)
+  t_hb_font_495b01:              { cave: pcave2, offset: 0x44b00 }   # holobook_scale (34B)
+  t_hb_font_495c1b:              { cave: pcave2, offset: 0x44b30 }   # holobook_scale (34B)
+  t_hb_font_495d2e:              { cave: pcave2, offset: 0x44b60 }   # holobook_scale (32B)
+  t_hb_font_495df1:              { cave: pcave2, offset: 0x44b80 }   # holobook_scale (32B)
+  t_hb_font_496068:              { cave: pcave2, offset: 0x44ba0 }   # holobook_scale (32B)
+  t_hb_font_4962bd:              { cave: pcave2, offset: 0x44bc0 }   # holobook_scale (32B)
+  g_hb_rects:                    { cave: pcave2, offset: 0x44be0, size: 96 }   # holobook_scale DATA
+  g_hb_caps:                     { cave: pcave2, offset: 0x44c40, size: 48 }   # holobook_scale DATA
+  g_hb_immtab:                   { cave: pcave2, offset: 0x44c70, size: 52 }   # holobook_scale DATA
+  g_hb_num:                      { cave: pcave2, offset: 0x44cb0, size: 4 }
+  g_hb_armed:                    { cave: pcave2, offset: 0x44cb4, size: 4 }
+  g_hb_lx:                       { cave: pcave2, offset: 0x44cb8, size: 4 }
+  g_hb_ly:                       { cave: pcave2, offset: 0x44cbc, size: 4 }
+  g_hb_ox:                       { cave: pcave2, offset: 0x44cc0, size: 4 }
+  g_hb_oy:                       { cave: pcave2, offset: 0x44cc4, size: 4 }
+  g_hb_sw:                       { cave: pcave2, offset: 0x44cc8, size: 4 }
+  g_hb_sh:                       { cave: pcave2, offset: 0x44ccc, size: 4 }
+  g_hb_building:                 { cave: pcave2, offset: 0x44cd0, size: 4 }
+  g_hb_immg_save:                { cave: pcave2, offset: 0x44cd4, size: 4 }
+  g_hb_hofnum_save:              { cave: pcave2, offset: 0x44cd8, size: 4 }
+  g_hb_field_save:               { cave: pcave2, offset: 0x44cdc, size: 4 }
+  g_hb_wrap_on:                  { cave: pcave2, offset: 0x44ce0, size: 4 }
+  g_hb_wrap_font:                { cave: pcave2, offset: 0x44ce4, size: 4 }
+  g_hb_wrap_shadow:              { cave: pcave2, offset: 0x44ce8, size: 4 }
+  g_hb_wrap_dev:                 { cave: pcave2, offset: 0x44cec, size: 4 }
+  g_hb_wrap_nat:                 { cave: pcave2, offset: 0x44cf0, size: 4 }
+  g_hb_last_dev:                 { cave: pcave2, offset: 0x44cf4, size: 4 }
+  g_hb_last_nat:                 { cave: pcave2, offset: 0x44cf8, size: 4 }
+  g_hb_fonts:                    { cave: pcave2, offset: 0x44cfc, size: 16 }
+  g_hb_shadows:                  { cave: pcave2, offset: 0x44d0c, size: 16 }
+  g_hb_fslots:                   { cave: pcave2, offset: 0x44d1c, size: 192 }
+  g_hb_sslots:                   { cave: pcave2, offset: 0x44ddc, size: 192 }
+  g_hb_btnfont:                  { cave: pcave2, offset: 0x44e9c, size: 48 }

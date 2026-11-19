@@ -27,7 +27,7 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 #: The oldest installed version that may update itself automatically; anything older is told to
 #: reinstall by hand (manifest `min_upgradable_from`, decide() step "too_old"). release.py used to
@@ -43,14 +43,37 @@ MIN_UPGRADABLE_FROM = "0.1.0"
 THINKER_SUPPORTED_VERSION = "5.5"
 THINKER_SUPPORTED_STAMP = 0x6A821052
 THINKER_SUPPORTED_IMAGE_SIZE = 0x19F000
+#: Where a player gets that build: its tag on Thinker's GitHub releases. THINKER_DEV_PAGE is empty for a GitHub
+#: release; when the pin is one of the author's development builds it holds that ONE build's own page and is used
+#: instead (user 2026-11-14). Mirrored in version.h (UIMOD_THINKER_SUPPORTED_TAG / UIMOD_THINKER_DEV_PAGE).
+THINKER_SUPPORTED_TAG = "v5.5"
+THINKER_DEV_PAGE = ""
 
 #: The optional content packs, each versioned INDEPENDENTLY of the product. Bumping a pack here
 #: is what makes a pack-only release: release.py names the archive for it and the manifest
 #: carries it, and an installed copy compares ITS version against this one -- never `VERSION`.
 #: `base` is the product itself and is never listed here.
 MODULE_VERSIONS = {
-    "movies-hd": "1.0.0",       # user 2026-11-04: 0.1.0 -> 1.0.0, clips unchanged (installs on 0.1.0 re-download)
+    "movies-hd": "2.0.0",       # user 2026-11-12: Z2k Retro's 30 fps upscales replace the Real-ESRGAN pack
     "portraits-hd": "1.0.0",    # user 2026-11-06: first release, with the artist's licence confirmed
+}
+
+
+#: sha256 of each pack's pack-manifest.json at the version above (dist\<pack>\pack-manifest.json, which release.py puts
+#: in that version's archive). A setup run ADOPTS a pack left in the game folder without a receipt entry only when its
+#: pack-manifest.json is byte-identical to this one and every file it lists is there at its size (audit-n 2026-11-17).
+#: Update it with MODULE_VERSIONS: test_audit_n pins it to dist\<pack>\pack-manifest.json.
+PACK_MANIFEST_SHA256 = {
+    "movies-hd": "69658c800346d5394c8c3d4ce45f7c0ca3c1f45428e9b7779d1c798b248791dc",
+    "portraits-hd": "1b3c59713a88f1d8f3cc2fc60cd2fd018a9477ea0d46524673deb493c6e4c43d",
+}
+#: sha256 of each pack's PROVENANCE.txt (its credit and licence) at the version above (dist\<pack>\PROVENANCE.txt).
+#: Adoption needs it too, and a kept pack of that version is repaired when its copy differs (audit-o 2026-11-17): a
+#: PROVENANCE-only version bump keeps an identical pack-manifest.json. release.py refuses an archive whose two files
+#: are not these; test_audit_o pins them to dist. Update with MODULE_VERSIONS.
+PACK_PROVENANCE_SHA256 = {
+    "movies-hd": "dacc855891bbf7d4303cf8932b96a0be6dbbad8f42ebd1c61f11300eb898fb49",
+    "portraits-hd": "b667f13fd3b79355aa99f3becef4f7d24f7f02b9f6e5b4b006ee938d2bfaa28b",
 }
 
 

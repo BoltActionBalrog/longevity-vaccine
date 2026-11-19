@@ -30,17 +30,22 @@ constexpr size_t kIdCap    = 32;
 constexpr size_t kLabelCap = 48;
 constexpr unsigned long long kMaxSize = 1ull << 50;   // manifest.size_ok: 0 <= size < 2**50
 
-// The ONLY URL the player ever sees. == manifest.DOWNLOAD_URL (pinned by test_update_core.py).
-// Popups show it without the scheme (kDownloadUrlShown): shorter, and what a player types.
+// OUR download page: the only address of ours the player ever sees. == manifest.DOWNLOAD_URL (pinned by
+// test_update_core.py). Popups show it without the scheme (kDownloadUrlShown): shorter, and what a player types.
 constexpr char kDownloadUrl[]      = "https://longevitymods.com/vaccine/download";
 constexpr char kDownloadUrlShown[] = "longevitymods.com/vaccine/download";
+
+// Thinker Mod's own release pages (user 2026-11-14: "We prefer linking to Thinker's GitHub if it releases there").
+// The page of the build this release is pinned to is this prefix + version.h UIMOD_THINKER_SUPPORTED_TAG; we never
+// host Thinker ourselves. Shown by the Thinker startup check's fallback boxes (thinkerversion.cpp).
+constexpr char kThinkerReleasePagePrefix[] = "https://github.com/induktio/thinker/releases/tag/";
 
 // The packs this DLL knows, with THEIR player-facing names -- == install.MODULE_LABELS (pinned by
 // test_update_core.py). The pipe carries a label too, but the DLL shows only its own: an item
 // with an id it does not know is skipped (a newer installer than this DLL), never displayed.
 struct KnownModule { const char* id; const char* label; };
 constexpr KnownModule kKnownModules[] = {
-    { "movies-hd",    "HD Cinematics" },
+    { "movies-hd",    "Z2k Retro's HD Cinematics" },
     { "portraits-hd", "Turovetsky's HD Portrait Pack" },
 };
 inline const char* KnownLabel(const char* id, size_t n)
@@ -136,6 +141,13 @@ struct UpdateInfo {
     bool hasBase;
     char baseFrom[kVerCap];      // "0.0.0" = unknown
     char baseTo[kVerCap];
+    // `thinker=`: this update needs a Thinker Mod build the game folder does not have (only ever with `base=`).
+    bool hasThinker;
+    char thinkerHave[kVerCap];   // the folder's version, 3-part; "" when the pipe said "?" (not comparable)
+    char thinkerOffered[kVerCap];// the target pin's id: 3-part, or "dev-YYYYMMDD" for a development-build pin
+    unsigned long long thinkerBytes;
+    bool thinkerHasBytes;
+    bool thinkerLongevityOnly;   // the installer allows "Update Longevity Vaccine only" (the folder's Thinker starts with the new exe)
     Item stale[kMaxItems]; int nStale;
     int  nUnknownStale;          // stale= lines whose module id this DLL does not know (a newer installer's pack): never
                                  // named in a popup, so never handed off (--only-listed); Present() logs the count
@@ -239,6 +251,47 @@ inline ItemVerdict ParseItem(const char* s, size_t n, bool stale, Item* it)
     return kItemOk;
 }
 
+// A development-build pin's id: `dev-YYYYMMDD` (the build's date; month and day in range).
+inline bool IsDevPinId(const char* s, size_t n)
+{
+    if (n != 12 || memcmp(s, "dev-", 4) != 0) return false;
+    for (size_t i = 4; i < 12; ++i) if (s[i] < '0' || s[i] > '9') return false;
+    const int month = (s[8] - '0') * 10 + (s[9] - '0'), day = (s[10] - '0') * 10 + (s[11] - '0');
+    return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+// `thinker=<have>|<offered>|<bytes>|<lo>` (installer --check, asked with `--accept thinker1`).
+//   have     the folder's Thinker version, 3-part, when its label is a plain version; `?` when it is not comparable.
+//            The installer sends `?` too when have would equal offered (same number, other bytes) and whenever
+//            offered is a development-build id -- so a 3-part have EQUAL to offered, or beside a dev id, is an error.
+//   offered  the target pin's id: 3-part, or dev-YYYYMMDD
+//   bytes    as in stale= (may be empty)
+//   lo       1 when "Update Longevity Vaccine only" may be offered, else 0
+// Not ParseRange: that refuses have >= offered, and a downgrade is a legitimate answer here.
+inline bool ParseThinkerLine(const char* s, size_t n, UpdateInfo* o)
+{
+    const char* f[4]; size_t fl[4];
+    if (!SplitBar(s, n, 4, f, fl)) return false;
+    const bool dev = IsDevPinId(f[1], fl[1]);
+    Version offered = {};
+    if (!dev && !ParseVersion(f[1], fl[1], &offered)) return false;
+    const bool unknown = fl[0] == 1 && f[0][0] == '?';
+    if (!unknown) {
+        Version have;
+        if (dev || !ParseVersion(f[0], fl[0], &have) || CompareVersion(have, offered) == 0) return false;
+    }
+    Item size;
+    if (!ParseBytes(f[2], fl[2], &size)) return false;
+    if (fl[3] != 1 || (f[3][0] != '0' && f[3][0] != '1')) return false;
+    o->thinkerHave[0] = 0;
+    if (!unknown && !CopyField(f[0], fl[0], o->thinkerHave, kVerCap)) return false;
+    if (!CopyField(f[1], fl[1], o->thinkerOffered, kVerCap)) return false;
+    o->thinkerBytes = size.bytes;
+    o->thinkerHasBytes = size.hasBytes;
+    o->thinkerLongevityOnly = f[3][0] == '1';
+    return true;
+}
+
 inline bool SeenId(const UpdateInfo& o, const char* id, size_t n)
 {
     for (int i = 0; i < o.nStale; ++i) if (strlen(o.stale[i].id) == n && memcmp(o.stale[i].id, id, n) == 0) return true;
@@ -259,7 +312,8 @@ inline size_t IdLen(const char* val, size_t vl)
 // *badLine (1-based) names the line. Rules (test_check.py's truth table, read the other way):
 //   * exit in {0, 10, 11, 12}; 12 -> nothing is parsed (the installer printed nothing).
 //   * every line `key=value`, LF-terminated, printable ASCII, keys in the fixed order
-//     latest, base, stale*, new*; `manual` alone. Each of latest/base at most once.
+//     latest, base, thinker, stale*, new*; `manual` alone. Each of latest/base/thinker at most once; `thinker`
+//     only directly after `base`.
 //   * exit 0: only `latest` (or nothing: yanked). exit 10: latest + >= 1 item. exit 11: manual only.
 namespace detail {
 inline ParseStatus ParseCheckOutputInto(const char* buf, size_t len, int exitCode, UpdateInfo& o, int* badLine)
@@ -293,6 +347,13 @@ inline ParseStatus ParseCheckOutputInto(const char* buf, size_t len, int exitCod
             if (!detail::ParseRange(val, vl, o.baseFrom, o.baseTo)) return kBadVersion;
             if (strcmp(o.baseTo, o.latest) != 0) return kBadVersion;   // the core is offered AT latest
             o.hasBase = true; stage = 1; ++items;
+        } else if (kl == 7 && memcmp(line, "thinker", 7) == 0) {
+            // Only directly after base= (it describes that update's Thinker step), at most once. It is not an item:
+            // the base line it belongs to is.
+            if (o.hasThinker) return kDuplicate;
+            if (stage != 1) return kBadOrder;
+            if (!detail::ParseThinkerLine(val, vl, &o)) return kBadField;
+            o.hasThinker = true;
         } else if (kl == 5 && memcmp(line, "stale", 5) == 0) {
             if (stage < 0 || stage > 2) return kBadOrder;
             if (o.nStale >= kMaxItems) return kTooManyItems;
@@ -593,8 +654,12 @@ inline bool AppendArgQuoted(wchar_t* out, size_t& o, size_t cap, const wchar_t* 
 // `"<python>" "<script>" --check --game-dir "<game>" [--manifest "<manifest>"]`, each path quoted
 // by AppendArgQuoted, so the receiver reads it back exactly -- a drive root `D:\` included. Refuses
 // an empty argument, one with a quote, and one that is nothing but backslashes.
+// `acceptThinker` adds `--accept thinker1`: a VERSIONED token that asks the installer for the `thinker=` line in
+// that grammar. Without it the installer prints none, so a later release can change the line without hiding updates
+// from this DLL. update.cpp passes it only when the resident installer is not older than this DLL (an older one
+// would simply ignore it).
 inline bool BuildCheckCommandLine(const wchar_t* python, const wchar_t* script, const wchar_t* game,
-                                  const wchar_t* manifest, wchar_t* out, size_t cap)
+                                  const wchar_t* manifest, wchar_t* out, size_t cap, bool acceptThinker = false)
 {
     size_t o = 0;
     auto put = [&](const wchar_t* s, size_t n) {
@@ -605,8 +670,9 @@ inline bool BuildCheckCommandLine(const wchar_t* python, const wchar_t* script, 
         if (!s || !s[0] || wcschr(s, L'"') || wcsspn(s, L"\\") == wcslen(s)) return false;
         return AppendArgQuoted(out, o, cap, s);
     };
-    if (!quoted(python) || !put(L" ", 1) || !quoted(script) || !put(L" --check --game-dir ", 20) || !quoted(game))
-        return false;
+    if (!quoted(python) || !put(L" ", 1) || !quoted(script) || !put(L" --check", 8)) return false;
+    if (acceptThinker && !put(L" --accept thinker1", 18)) return false;
+    if (!put(L" --game-dir ", 12) || !quoted(game)) return false;
     if (manifest && manifest[0]) { if (!put(L" --manifest ", 12) || !quoted(manifest)) return false; }
     out[o] = 0;
     return true;
@@ -689,6 +755,38 @@ inline bool BuildUpdateCommandLine(const wchar_t* cmdExe, const wchar_t* bat, co
     return true;
 }
 
+// The Thinker startup check's "Update now" (thinkerversion.cpp):
+// `"<cmd.exe>" /D /S /C ""<bat>" --fix-thinker --game-dir "<game>" --wait-pid <pid> [--manifest "<manifest>"]"`.
+// Same refusals as BuildUpdateCommandLine, plus two substrings run-install.bat itself greps its whole argument
+// line for: `--update` (it would route the run to the bootstrap) and `--no-wait` (it would silence every pause).
+// Neither may appear anywhere in a path or the manifest value.
+inline bool BuildFixThinkerCommandLine(const wchar_t* cmdExe, const wchar_t* bat, const wchar_t* game, unsigned long pid,
+                                       const wchar_t* manifest, wchar_t* out, size_t cap)
+{
+    size_t o = 0;
+    auto put = [&](const wchar_t* s, size_t n) {
+        if (o + n >= cap) return false;
+        memcpy(out + o, s, n * sizeof(wchar_t)); o += n; return true;
+    };
+    auto clean = [](const wchar_t* s) {
+        return s && s[0] && !wcspbrk(s, L"\"%!&|<>^\r\n") && wcsspn(s, L"\\") != wcslen(s) &&
+               !wcsstr(s, L"--update") && !wcsstr(s, L"--no-wait");
+    };
+    auto quoted = [&](const wchar_t* s) { return clean(s) && AppendArgQuoted(out, o, cap, s); };
+    if (!clean(cmdExe) || !AppendArgQuoted(out, o, cap, cmdExe) || !put(L" /D /S /C \"", 11) || !quoted(bat) ||
+        !put(L" --fix-thinker --game-dir ", 26) || !quoted(game))
+        return false;
+    wchar_t num[24];
+    size_t nn = 0;
+    do { num[nn++] = static_cast<wchar_t>(L'0' + pid % 10); pid /= 10; } while (pid && nn < 20);
+    for (size_t a = 0, b = nn - 1; a < b; ++a, --b) { const wchar_t t = num[a]; num[a] = num[b]; num[b] = t; }
+    if (!put(L" --wait-pid ", 12) || !put(num, nn)) return false;
+    if (manifest && manifest[0]) { if (!put(L" --manifest ", 12) || !quoted(manifest)) return false; }
+    if (!put(L"\"", 1)) return false;
+    out[o] = 0;
+    return true;
+}
+
 // The resident updater's interpreter for this Windows, relative to the game directory. CPython 3.12
 // (tools\python) does not start below Windows 8.1 (kernel 6.3) -- the loader kills it before a line
 // of ours runs -- so the payload carries CPython 3.8 (tools\python38) for Windows 7 and 8.
@@ -712,7 +810,7 @@ inline const wchar_t* RuntimeExeRel(unsigned long major, unsigned long minor)
 constexpr size_t kMaxPhysLine = 96;      // vanilla's longest script.txt line is 106; conceptsx 174
 struct LabelSpec {
     const char* label;       // "UPDATE"
-    const char* caption;     // "Longevity Mod"
+    const char* caption;     // "Longevity Vaccine"
     int         xs;          // box width on the 800x600 baseline (REALLYQUIT: 320)
     const char* sprite;      // "longevity_sm.pcx" or nullptr (text-only popup)
     const char* body;        // '\n'-separated
@@ -802,28 +900,58 @@ inline bool BuildLabelFile(const LabelSpec& s, char* out, size_t cap)
 // ---- player-facing text (F2..F8 in the plan) -- ASCII, action always stated, WHAT is named ----
 enum Context { kCtxMainMenu = 0, kCtxInGame = 1 };
 enum PromptKind { kPromptUpdate = 0, kPromptPackStandalone = 1, kPromptPackQuitPending = 2 };
-enum Action { kActNone = 0, kActQuitUpdate, kActSaveQuitUpdate, kActInstallToo, kActNotNow, kActNever };
+enum Action { kActNone = 0, kActQuitUpdate, kActSaveQuitUpdate, kActInstallToo, kActNotNow, kActNever,
+              kActLongevityOnly };    // update Longevity Vaccine, leave Thinker Mod as it is (in a game: saves first)
 
 struct ReplySet { const char* text[5]; Action act[5]; int n; };
 
-inline void ReplySetFor(Context ctx, PromptKind kind, ReplySet* r)
+// The direction of an update's Thinker Mod step (the `thinker=` line; see ThinkerDirection below). Wording follows it:
+// a lower version is UPDATED, a higher one is DOWNGRADED (said plainly), anything not comparable is CHANGED.
+enum ThinkerDir { kThinkerNone = -1, kThinkerUp = 0, kThinkerDown = 1, kThinkerOther = 2 };
+
+// `thinker`: the update popup's Thinker step, kThinkerNone without one. With one, the update rows say they change
+// both and that this is strongly recommended (user 2026-11-15: "Quit and update both (strongly recommended)").
+// `longevityOnly`: the installer also allows updating without the Thinker step (the pipe's `lo` field): one more
+// row, "(not recommended)", before "Don't ask me again".
+inline void ReplySetFor(Context ctx, PromptKind kind, ReplySet* r, ThinkerDir thinker = kThinkerNone,
+                        bool longevityOnly = false)
 {
     r->n = 0;
     auto add = [&](const char* t, Action a) { r->text[r->n] = t; r->act[r->n] = a; ++r->n; };
     // Reply 0 is the SAFE one: the engine returns the highlighted reply (0 unless the player moved)
     // on Esc, and vanilla puts the "no" first for that reason (REALLYQUIT: "Oops, no, wait!").
     const bool pack = kind != kPromptUpdate;
+    const bool step = !pack && thinker != kThinkerNone;
+    // A downgrade is never called an update of Thinker Mod; a build that cannot be compared is "changed".
+    // Without the Longevity-only row (lo=0, the fatal case) there is no alternative to recommend against: no
+    // "(strongly recommended)" (user 2026-11-15: "Drop the "strongly recommended" from the fatal case").
+    const int d = (thinker == kThinkerDown ? 1 : thinker == kThinkerOther ? 2 : 0) + (longevityOnly ? 0 : 3);
+    static const char* const kSaveStep[6]   = { "Save, then update both (strongly recommended)",
+                                                "Save, update and downgrade (strongly recommended)",
+                                                "Save, update and change (strongly recommended)",
+                                                "Save, then update both", "Save, update and downgrade",
+                                                "Save, update and change" };
+    static const char* const kNoSaveStep[6] = { "Update both without saving", "Update and downgrade without saving",
+                                                "Update and change without saving",
+                                                "Update both without saving", "Update and downgrade without saving",
+                                                "Update and change without saving" };
+    static const char* const kQuitStep[6]   = { "Quit and update both (strongly recommended)",
+                                                "Quit, update and downgrade (strongly recommended)",
+                                                "Quit, update and change (strongly recommended)",
+                                                "Quit and update both", "Quit, update and downgrade",
+                                                "Quit, update and change" };
     if (kind == kPromptPackQuitPending) {              // the player already chose to update: add the pack to it?
         add("Not now (update without it)", kActNotNow);
         add("Yes, include it", kActInstallToo);
     } else if (ctx == kCtxInGame) {                    // the body says the game closes; the word pair is the save choice
         add("Not now", kActNotNow);
-        add(pack ? "Save, then install" : "Save, then update", kActSaveQuitUpdate);
-        add(pack ? "Install without saving" : "Update without saving", kActQuitUpdate);
+        add(step ? kSaveStep[d] : pack ? "Save, then install" : "Save, then update", kActSaveQuitUpdate);
+        add(step ? kNoSaveStep[d] : pack ? "Install without saving" : "Update without saving", kActQuitUpdate);
     } else {
         add("Not now", kActNotNow);
-        add(pack ? "Quit and install" : "Quit and update", kActQuitUpdate);
+        add(step ? kQuitStep[d] : pack ? "Quit and install" : "Quit and update", kActQuitUpdate);
     }
+    if (step && longevityOnly) add("Update Longevity Vaccine only (not recommended)", kActLongevityOnly);
     add("Don't ask me again", kActNever);
 }
 
@@ -840,8 +968,8 @@ inline int ReplyIndexOf(const ReplySet& r, Action act)
     return -1;
 }
 
-constexpr char kCaption[]    = "Longevity Mod";
-constexpr char kCoreLabel[]  = "Longevity Mod";
+constexpr char kCaption[]    = "Longevity Vaccine";
+constexpr char kCoreLabel[]  = "Longevity Vaccine";
 constexpr int  kPromptXs     = 460;      // REALLYQUIT is 320 with two short replies; the game's menus use 420. UNMEASURED in-game.
 
 // The last paragraph of every offer: what "Don't ask me again" does -- the reply's label, one
@@ -853,9 +981,10 @@ constexpr int  kPromptXs     = 460;      // REALLYQUIT is 320 with two short rep
 // "a decline of any pack is reset when any new update releases for a module that is already
 // installed." The DLL writes an UPDATE offer's decline at the offered version (`<item>:<ver>`)
 // and a NEW pack's at `*` (`new:<id>:*`); install.py check_report applies the rule.
-constexpr char kNeverUpdate[]  = "\"Don't ask me again\" Skips this update (undo in Preferences).";
-constexpr char kNeverUpdates[] = "\"Don't ask me again\" Skips these updates (undo in Preferences).";
-constexpr char kNeverPack[]    = "\"Don't ask me again\" Skips this pack (undo in Preferences).";
+// Button names in single quotes, as the startup dialog and the installer write them (user 2026-11-14).
+constexpr char kNeverUpdate[]  = "'Don't ask me again' Skips this update (undo in Preferences).";
+constexpr char kNeverUpdates[] = "'Don't ask me again' Skips these updates (undo in Preferences).";
+constexpr char kNeverPack[]    = "'Don't ask me again' Skips this pack (undo in Preferences).";
 
 // The DeclinedUpdates version an item is declined at: the offered version for an update of
 // something installed, kDeclineAny for a pack the player does not have. An update offer with
@@ -877,14 +1006,151 @@ inline bool Line(char* out, size_t cap, size_t& o, const char* a, const char* b 
 }
 } // namespace detail
 
-// F2: the core and/or an installed pack is stale.
-inline bool BuildUpdateBody(const UpdateInfo& u, Context ctx, char* out, size_t cap)
+// ---- the update's Thinker Mod step (the `thinker=` line; work\briefs\thinker-updater-design.md section 4, T1) ----
+// Wording follows the direction (ThinkerDir, above ReplySetFor): a lower version is UPDATED, a higher one is
+// DOWNGRADED (said plainly, with the user-approved sentence), anything not comparable -- a development build, an
+// unrecognised build, the same number in other bytes, a development-build pin -- is CHANGED.
+
+inline bool ThinkerIsDevPin(const UpdateInfo& u) { return detail::IsDevPinId(u.thinkerOffered, strlen(u.thinkerOffered)); }
+
+inline ThinkerDir ThinkerDirection(const UpdateInfo& u)
+{
+    if (!u.thinkerHave[0] || ThinkerIsDevPin(u)) return kThinkerOther;
+    return CompareVersionStr(u.thinkerHave, u.thinkerOffered) < 0 ? kThinkerUp : kThinkerDown;
+}
+
+// A pipe version as Thinker writes it: "5.6.0" -> "5.6"; "5.5.1" stays.
+inline bool ThinkerVersionShown(const char* v, char* out, size_t cap)
+{
+    size_t n = strlen(v);
+    if (n > 2 && v[n - 2] == '.' && v[n - 1] == '0') n -= 2;
+    return CopyField(v, n, out, cap);
+}
+
+// {TS}, the target as the player reads it: "5.6", or for a development-build pin its date, "rel. Nov 9 2025"
+// (user 2026-11-14: "Don't name it as a development build"), so "Thinker Mod {TS}" reads as a name either way.
+inline bool ThinkerTargetShown(const UpdateInfo& u, char* out, size_t cap)
+{
+    if (!ThinkerIsDevPin(u)) return ThinkerVersionShown(u.thinkerOffered, out, cap);
+    static const char* const months[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    const char* d = u.thinkerOffered + 4;                               // YYYYMMDD
+    const int month = (d[4] - '0') * 10 + (d[5] - '0'), day = (d[6] - '0') * 10 + (d[7] - '0');
+    char year[5] = { d[0], d[1], d[2], d[3], 0 };
+    size_t o = 0;
+    const bool ok = detail::PutRaw(out, cap, o, "rel. ") && detail::PutRaw(out, cap, o, months[month - 1]) &&
+                    detail::PutRaw(out, cap, o, " ") && detail::PutInt(out, cap, o, day) &&
+                    detail::PutRaw(out, cap, o, " ") && detail::PutRaw(out, cap, o, year);
+    if (ok) out[o] = 0;
+    return ok;
+}
+
+namespace detail {
+constexpr char kRunFallback[]   = "an unrecognised build of Thinker Mod";
+
+struct Out {                                    // a tiny appender over the body buffer
+    char* out; size_t cap; size_t& o; bool ok;
+    Out& operator<<(const char* s) { ok = ok && PutRaw(out, cap, o, s); return *this; }
+};
+
+// The Thinker list line: "Thinker Mod 5.5 -> 5.6", "Thinker Mod: your build -> 5.6", or for a downgrade
+// "Thinker Mod 5.7 -> 5.6 (a downgrade)" (user 2026-11-15 dropped the size and "needed by this update").
+inline bool ThinkerListLine(const UpdateInfo& u, const char* have, const char* ts, char* out, size_t cap, size_t& o)
+{
+    const ThinkerDir dir = ThinkerDirection(u);
+    Out w{ out, cap, o, true };
+    if (dir == kThinkerOther) w << "Thinker Mod: your build -> " << ts;
+    else                      w << "Thinker Mod " << have << " -> " << ts;
+    if (dir == kThinkerDown) w << " (a downgrade)";
+    w << "\n";
+    return w.ok;
+}
+
+// What happens to Thinker Mod, short (user 2026-11-15: "far too wordy ... this text is just going to be set again in
+// the installer"): the two builds; what the updater can do, and that the settings are kept; the recommendation, or
+// when the folder's Thinker cannot run with the new Longevity Vaccine (lo=0) why both must change. The installer's own
+// Thinker question says the rest (backup, project line). Nothing follows it in the offer.
+// Plain text: the popup cannot colour words (its script markup is blanked by PutSan), unlike the installer's console.
+inline bool ThinkerParagraph(const UpdateInfo& u, const char* have, const char* ts, const char* run,
+                             char* out, size_t cap, size_t& o)
+{
+    const ThinkerDir dir = ThinkerDirection(u);
+    const char* lv = u.baseTo;
+    Out w{ out, cap, o, true };
+    w << "This game folder has ";
+    if (dir == kThinkerOther) w << run; else w << "Thinker Mod " << have;
+    w << ". Longevity Vaccine " << lv << " needs Thinker Mod " << ts << ".\n\n";
+    switch (dir) {
+    case kThinkerUp:
+        w << "The updater can update Thinker Mod for you. ";
+        break;
+    case kThinkerDown:
+        w << "This is a downgrade! It replaces your newer Thinker Mod " << have << " with the older Thinker Mod " << ts
+          << ", the version Longevity Vaccine " << lv << " supports. The updater can do this downgrade for you. ";
+        break;
+    default:
+        w << "The updater can change Thinker Mod for you. ";
+        break;
+    }
+    w << "All of your Thinker Mod settings will be preserved.\n\n";
+    // a downgrade is never called an update of Thinker Mod; a build that cannot be compared is "changed"
+    if (!u.thinkerLongevityOnly) {      // the fatal case (user 2026-11-15: the "cannot run" line replaces the recommendation)
+        if (dir == kThinkerOther) w << "The Thinker Mod in this game folder";
+        else                      w << "Thinker Mod " << have;
+        w << " cannot run with Longevity Vaccine " << lv << ", so "
+          << (dir == kThinkerUp ? "both must be updated together." : dir == kThinkerDown
+              ? "Thinker Mod must be downgraded with this update." : "it must be changed with this update.");
+        return w.ok;
+    }
+    w << "We STRONGLY recommend updating Longevity Vaccine and "
+      << (dir == kThinkerUp ? "Thinker Mod" : dir == kThinkerDown ? "downgrading Thinker Mod" : "changing Thinker Mod")
+      << " together.";
+    return w.ok;
+}
+} // namespace detail
+
+// The consent the updater reads so it asks nothing again: [Longevity] ThinkerUpdate =
+//   <target pin id>|<unix seconds>|<writer pid>|game          the player accepted the update with its Thinker step
+//   keep:<Longevity version>|<unix seconds>|<writer pid>|game  "Update Longevity Vaccine only": leave Thinker as it is
+// Written (and the ini flushed) just before the updater is spawned; deleted on every path that does not spawn it.
+constexpr wchar_t kThinkerConsentKey[] = L"ThinkerUpdate";
+inline bool BuildThinkerConsent(const UpdateInfo& u, bool keep, unsigned long long unixSeconds, unsigned long pid,
+                                char* out, size_t cap)
+{
+    if (!u.hasBase || !u.hasThinker || !u.baseTo[0] || !u.thinkerOffered[0]) return false;
+    auto num = [&](unsigned long long v, size_t& o) {
+        char d[24]; int k = 0;
+        do { d[k++] = static_cast<char>('0' + v % 10); v /= 10; } while (v);
+        while (k) { if (o + 1 >= cap) return false; out[o++] = d[--k]; }
+        return true;
+    };
+    size_t o = 0;
+    bool ok = keep ? (detail::PutRaw(out, cap, o, "keep:") && detail::PutRaw(out, cap, o, u.baseTo))
+                   : detail::PutRaw(out, cap, o, u.thinkerOffered);
+    ok = ok && detail::PutRaw(out, cap, o, "|") && num(unixSeconds, o) && detail::PutRaw(out, cap, o, "|") && num(pid, o)
+            && detail::PutRaw(out, cap, o, "|game");
+    if (ok) out[o] = 0;
+    return ok;
+}
+
+// F2: the core and/or an installed pack is stale. With a `thinker=` line the update also changes Thinker Mod: the
+// list gains its line and the body its short Thinker paragraphs, which END the offer (user 2026-11-15). `run` names
+// the folder's build when the pipe could not ({RUN} from thinkercheck_core.h, e.g. "a development build of Thinker
+// Mod"); null reads as the unrecognised form.
+inline bool BuildUpdateBody(const UpdateInfo& u, Context ctx, char* out, size_t cap, const char* run = nullptr)
 {
     using namespace detail;
     size_t o = 0;
-    const int lines = (u.hasBase ? 1 : 0) + u.nStale;
+    const bool thinker = u.hasBase && u.hasThinker;
+    char have[kVerCap] = "", ts[24] = "";
+    if (thinker) {
+        if (!ThinkerTargetShown(u, ts, sizeof ts)) return false;
+        if (u.thinkerHave[0] && !ThinkerVersionShown(u.thinkerHave, have, sizeof have)) return false;
+        if (!run || !run[0]) run = kRunFallback;
+    }
+    const int lines = (u.hasBase ? 1 : 0) + (thinker ? 1 : 0) + u.nStale;
     bool ok = Line(out, cap, o, lines > 1 ? "Updates are available:" : "An update is available:");
     if (ok && u.hasBase) ok = Line(out, cap, o, kCoreLabel, " ", u.baseFrom, " -> ", u.baseTo);
+    if (ok && thinker) ok = ThinkerListLine(u, have, ts, out, cap, o);
     for (int i = 0; ok && i < u.nStale; ++i) {
         char sz[24]; FormatBytes(u.stale[i].bytes, u.stale[i].hasBytes, sz, sizeof sz);
         ok = PutRaw(out, cap, o, u.stale[i].label) && PutRaw(out, cap, o, " ") && PutRaw(out, cap, o, u.stale[i].from)
@@ -893,6 +1159,11 @@ inline bool BuildUpdateBody(const UpdateInfo& u, Context ctx, char* out, size_t 
         if (ok) ok = PutRaw(out, cap, o, "\n");
     }
     if (ok) ok = Line(out, cap, o, "");
+    if (thinker) {                                           // the offer ends with the recommendation (user 2026-11-15)
+        if (ok) ok = ThinkerParagraph(u, have, ts, run, out, cap, o);
+        if (ok) out[o] = 0;
+        return ok;
+    }
     if (ok) ok = PutRaw(out, cap, o, "Updating closes the game and opens the updater in its own window. "
                                      "Your saved games are not affected.");
     if (ok && ctx == kCtxInGame)
@@ -934,7 +1205,7 @@ inline bool BuildPackBody(const Item& it, const char* alsoCoreTo, Context ctx, P
 
 // F6: manual install required (the kill switch). One compiled reason line per manifest reason.
 // Paragraphs only (see kNeverUpdate). The address sits on a line of its own on purpose.
-#define LVUPD_MANUAL_HEAD "Longevity Mod can no longer update itself. "
+#define LVUPD_MANUAL_HEAD "Longevity Vaccine can no longer update itself. "
 #define LVUPD_MANUAL_TAIL " Your game and saved games are fine.\n\n" \
     "To keep getting updates, download and run the new installer. Type this address into your web browser:\n" \
     "longevitymods.com/vaccine/download"
@@ -945,7 +1216,7 @@ inline const char* ManualNoticeBody(int reason)
     case kReasonBaseUnsupported: return LVUPD_MANUAL_HEAD "This version is no longer supported." LVUPD_MANUAL_TAIL;
     case kReasonTooOld:          return LVUPD_MANUAL_HEAD "Your version is too old to update on its own." LVUPD_MANUAL_TAIL;
     case kReasonProtocol:        return LVUPD_MANUAL_HEAD "This release needs a newer installer." LVUPD_MANUAL_TAIL;
-    default:                     return "Longevity Mod can no longer update itself." LVUPD_MANUAL_TAIL;
+    default:                     return "Longevity Vaccine can no longer update itself." LVUPD_MANUAL_TAIL;
     }
 }
 #undef LVUPD_MANUAL_HEAD
@@ -968,11 +1239,69 @@ constexpr char kSaveCancelledBody[] =
     "The update was not started because the game was not saved. "
     "You will be asked again the next time you start the game.";
 
-// Preferences: "Reset Skipped Updates" confirmation.
+// Preferences: "Reset Skipped Updates" confirmation. Button names in single quotes (user 2026-11-14: "Yes, match it").
 constexpr char kSubscribeBody[] =
     "Show all update reminders again?\n\n"
-    "This undoes every \"Don't ask me again\" and \"Don't show this again\" you chose for Longevity Mod "
+    "This undoes every 'Don't ask me again' and 'Don't show this again' you chose for Longevity Vaccine "
     "and its optional packs, and turns on Check for Updates at Startup.\n\n"
     "The game checks for updates when it starts, so restart the game to check now.";
+
+// ---- which menu a popup object holds (update.cpp's main-menu gate) ---------------------------------------
+// The engine's main menu and Thinker's replacement of it both start their strip's popup with
+// Popup_start(popup, file, "TOPMENU", ...) -- "HOTSEAT" for the hotseat strip, other labels for the
+// sub-menus that reuse the same window class -- and the popup object keeps no copy of the label. update.cpp
+// records the label of every Popup_start here, keyed by the popup object, so the gate can ask "is the strip's
+// popup the TOPMENU?" without knowing who called it. A label is stored as the caller passed it, cut at
+// kLabelCap - 1 characters with `cut` set; a cut label never matches (so "TOPMENUX..." is not "TOPMENU").
+struct PopupLabels {
+    static constexpr int kSlots = 8;
+    static constexpr int kLabelCap = 32;
+    struct Slot { const void* key; char label[kLabelCap]; bool cut; };
+    Slot slot[kSlots] = {};
+    int next = 0;
+
+    // `label` may be null (an engine call that has none): recorded as unknown -- the key is forgotten.
+    void Record(const void* key, const char* label, bool cut)
+    {
+        if (!key) return;
+        int i = Index(key);
+        if (!label) {
+            if (i >= 0) slot[i].key = nullptr;
+            return;
+        }
+        if (i < 0) {
+            i = next;
+            next = (next + 1) % kSlots;
+        }
+        Slot& s = slot[i];
+        s.key = key;
+        int k = 0;
+        for (; k < kLabelCap - 1 && label[k]; ++k) s.label[k] = label[k];
+        s.label[k] = '\0';
+        s.cut = cut || label[k] != '\0';
+    }
+    // 1 = the popup's latest label is `want` (ASCII case-insensitive, uncut), 0 = it is another label,
+    // -1 = never recorded (or forgotten).
+    int Is(const void* key, const char* want) const
+    {
+        const int i = key ? Index(key) : -1;
+        if (i < 0) return -1;
+        const Slot& s = slot[i];
+        if (s.cut) return 0;
+        for (int k = 0;; ++k) {
+            char a = s.label[k], b = want[k];
+            if (a >= 'a' && a <= 'z') a = static_cast<char>(a - 32);
+            if (b >= 'a' && b <= 'z') b = static_cast<char>(b - 32);
+            if (a != b) return 0;
+            if (!a) return 1;
+        }
+    }
+    int Index(const void* key) const
+    {
+        for (int i = 0; i < kSlots; ++i)
+            if (slot[i].key == key) return i;
+        return -1;
+    }
+};
 
 } // namespace lvupd

@@ -185,6 +185,17 @@ def test_deploy_creates_the_one_shipped_layout(game, payload):
     assert bs.is_usable(d)
 
 
+def test_the_resident_updater_gets_every_art_file_the_release_ships():
+    """The in-place --update / --modules / --repair runs execute the RESIDENT install.py, whose payload is
+    bs.PAYLOAD, not the release archive. An art file the installer reads (the update picture, patch_icons'
+    overlay) that is in the archive but not in PAYLOAD is missing on every later in-place run (audit 2026-11-14)."""
+    import release as rel
+    shipped = {dst for _src, dst in rel.MODULE_SPEC["base"]["files"] if dst.startswith("art/")}
+    assert shipped, "the base module ships no art/ files any more: update this test"
+    resident = {dst for dst, _src in bs.PAYLOAD}
+    assert shipped <= resident, f"in the release but not in the resident updater: {sorted(shipped - resident)}"
+
+
 def test_the_changelog_ships_as_txt_and_an_older_payload_list_still_deploys(game, payload, monkeypatch):
     """CHANGELOG.txt opens in Notepad; the .md it was up to 0.2.1 opened in nothing on a stock
     Windows. A 0.2.0 / 0.2.1 bootstrap still lists CHANGELOG.md: staging a payload without it
@@ -806,10 +817,10 @@ def test_generation_two_never_calls_a_pack_current_under_only_listed(game, monke
     monkeypatch.setattr(bs, "_wait_for_pid", lambda *a, **k: True)
     assert bs.run(["--game-dir", str(game), "--generation", "2", "--no-wait",
                    "--only-listed"]) == ix.EXIT_OK
-    assert "up to date" not in bs._VERDICT[1] and "installed packs: HD Cinematics v1.0.0" \
+    assert "up to date" not in bs._VERDICT[1] and "installed packs: Z2k Retro's HD Cinematics v1.0.0" \
         in bs._VERDICT[1], bs._VERDICT
     assert bs.run(["--game-dir", str(game), "--generation", "2", "--no-wait"]) == ix.EXIT_OK
-    assert "(HD Cinematics v1.0.0 up to date)" in bs._VERDICT[1]
+    assert "(Z2k Retro's HD Cinematics v1.0.0 up to date)" in bs._VERDICT[1]
 
 
 def test_an_unknown_flag_from_a_newer_game_is_ignored_not_fatal(game, payload, tmp_path, trust,
@@ -881,7 +892,7 @@ def test_only_listed_with_nothing_listed_and_a_current_base_changes_nothing(game
                    "--only-listed"]) == ix.EXIT_OK
     out = capsys.readouterr().out
     assert called == [], "an empty list was handed to the installer"
-    assert "HD Cinematics v1.1.0: not part of this update (stays at v1.0.0)" in out, out
+    assert "Z2k Retro's HD Cinematics v1.1.0: not part of this update (stays at v1.0.0)" in out, out
     title, body = bs._VERDICT
     assert title == "ALREADY UP TO DATE" and "Everything you have installed is current" not in body
     # Without the flag the same run updates the pack (the console's own semantics).
@@ -902,7 +913,7 @@ def test_an_unknown_extra_is_refused_before_anything_is_fetched(game, payload, t
     with pytest.raises(ix.InstallerError, match='"bogus" is not an extra') as e:
         bs.run(["--update", "--game-dir", str(game), "--no-wait", "--modules", "bogus"])
     assert e.value.changed is False
-    assert "HD Cinematics" in (e.value.detail or "")
+    assert "Z2k Retro's HD Cinematics" in (e.value.detail or "")
 
 
 def test_a_manifest_whose_modules_field_is_not_a_dict_is_refused_cleanly(game, payload,
@@ -989,7 +1000,7 @@ def test_a_pack_only_update_names_the_pack_in_its_verdict(game, payload, tmp_pat
     })
     assert bs.run(["--game-dir", str(game), "--manifest", str(m), "--no-wait"]) == ix.EXIT_OK
     assert bs._VERDICT == ("UPDATE COMPLETE",
-                           "HD Cinematics v1.1.0 installed. Nothing else needed changing.")
+                           "Z2k Retro's HD Cinematics v1.1.0 installed. Nothing else needed changing.")
     assert bs._NOTE_ARGS and bs._NOTE_ARGS[0] == game, "the closing note (exe + shortcut) follows every completed update"
 
 
@@ -1002,6 +1013,7 @@ def test_a_completed_update_offers_to_start_the_game(game, monkeypatch):
     exe.write_bytes(b"MZ")
     monkeypatch.setattr(inst, "mod_exe", lambda gd, tid: exe if (gd, tid) == (game, "pracx") else None)
     monkeypatch.setattr(bs, "_NOTE_ARGS", None)
+    monkeypatch.setattr(bs, "_OFFER", None)
     assert bs._relaunch_exe() is None
     monkeypatch.setattr(bs, "_NOTE_ARGS", (game, "pracx"))
     assert bs._relaunch_exe() == exe
@@ -1265,7 +1277,7 @@ def test_a_completed_update_names_the_base_in_its_verdict(game, payload, tmp_pat
         "movies-hd": {"version": "1.1.0", "url": "file:///y", "sha256": "0" * 64}})
     assert _run_gen1(game, m) == ix.EXIT_OK
     assert rc.module_version(rc.read(game), "base") == "2.0.0"
-    assert bs._VERDICT[1].startswith("Longevity Vaccine v2.0.0, HD Cinematics v1.1.0 installed"), \
+    assert bs._VERDICT[1].startswith("Longevity Vaccine v2.0.0, Z2k Retro's HD Cinematics v1.1.0 installed"), \
         bs._VERDICT
 
 
@@ -1342,6 +1354,25 @@ def test_a_current_pack_does_not_make_an_already_current_run_do_anything(game, p
     assert bs.run(["--game-dir", str(game), "--manifest", str(m), "--no-wait"]) == ix.EXIT_OK
 
 
+def test_an_already_current_run_sets_ddrawcompat_aside_under_wine(game, payload, tmp_path, trust,
+                                                                  monkeypatch, capsys):
+    """A player's `--update` with nothing new stops in the bootstrap (install.py never runs). Under Wine, a GOG /
+    Heroic file check may have put DDrawCompat back since the install: this branch must set it aside again, and the
+    verdict must not then claim nothing changed."""
+    from test_wine_ddraw import DDC
+    monkeypatch.setenv("LONGEVITY_TEST_ASSUME_PLATFORM", "wine")
+    bs.deploy(game, payload, "2.0.0", say=lambda *a: None)
+    _receipt(game, base="2.0.0")
+    (game / "ddraw.dll").write_bytes(DDC)
+    monkeypatch.setattr(bs, "_run_installer", lambda *a, **k: pytest.fail("ran for nothing"))
+    m = _signed_doc(tmp_path, latest="2.0.0", modules={
+        "base": {"version": "2.0.0", "url": "file:///x", "sha256": "0" * 64}})
+    assert bs.run(["--game-dir", str(game), "--manifest", str(m), "--no-wait"]) == ix.EXIT_OK
+    assert "moved GOG's DDrawCompat" in capsys.readouterr().out
+    assert not (game / "ddraw.dll").exists() and (game / "ddraw.dll.longevity.bak").read_bytes() == DDC
+    assert bs._VERDICT[0] == "ALREADY UP TO DATE" and "Nothing else was changed (ddraw.dll" in bs._VERDICT[1]
+
+
 def test_an_already_current_run_announces_a_pack_the_player_does_not_have(game, payload,
                                                                           tmp_path, trust,
                                                                           monkeypatch, capsys):
@@ -1357,10 +1388,11 @@ def test_an_already_current_run_announces_a_pack_the_player_does_not_have(game, 
     })
     assert bs.run(["--game-dir", str(game), "--manifest", str(m), "--no-wait"]) == ix.EXIT_OK
     out = capsys.readouterr().out
-    assert "HD Cinematics: available, not installed (1.4 GB download)" in out, out
+    # 1300 MiB in the game's units (binary, FormatBytes; user ruling 2026-11-17)
+    assert "Z2k Retro's HD Cinematics: available, not installed (1.3 GB download)" in out, out
     assert f'run-install.bat" --update --modules movies-hd --manifest "{m}"' in out, \
         "the notice must give a command that can be pasted as-is, with the launcher's full path"
-    assert "HD Cinematics: up to date" not in out
+    assert "Z2k Retro's HD Cinematics: up to date" not in out
     assert "see \"optional extras\" above" in bs._VERDICT[1]
     # The notice informs, it does not ask -- so --no-prompt (the bootstrap's own worker mode)
     # does not silence it. Gating it did: a player only ever heard about a pack on an idle run.

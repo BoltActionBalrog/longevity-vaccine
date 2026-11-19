@@ -1,7 +1,7 @@
 """The PREFERENCES window's left CATEGORY column on ONE pitch (2026-10-27 wave-8 W8P; user-reported from in-game shots).
 
 DEFECT (measured, deployed bake d34e2291 = the user's shots): the seven category buttons (the six stock tabs + uimod.dll's
-"Longevity Mod Preferences") are PrefWin child windows at native (33, 10 + 22 i, 214, 20) and thunk_pref_gwinit floored
+"Longevity Preferences") are PrefWin child windows at native (33, 10 + 22 i, 214, 20) and thunk_pref_gwinit floored
 each arg on its own, so their tops fl((10 + 22 i) g/16) stepped unevenly and vanilla's equal gaps (all 2) alternated:
 4,3,3,3,4,3 at 1920x1080 (g 22), 3,2,3,2,3,2 at 1280x1024 (g 20), 4,3,3,4,3,3 at 1600x1200 (g 25); even only at g 24 / 40.
 

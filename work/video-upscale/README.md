@@ -4,6 +4,10 @@ Turns the game's original 1997 EA FMV cinematics (`movies\*.wve`) into a
 high-resolution H.264 pack (`dist\movies-hd\<name>.mp4`) that the in-process movie
 player (uimod.dll) plays when `[UIMod] UpscaledVideos=1`.
 
+**This built the 1.0.0 HD Cinematics pack.** Since 1.0.1 the shipped pack is Z2k Retro's
+(see `THIRD_PARTY.md`); this pipeline stays to reproduce the earlier pack, and it writes to
+the same `dist\movies-hd` folder.
+
 **This is build-time, developer-only tooling.** End users never run it and never
 install an upscaler — they receive only the finished `.mp4` files (the installer
 copies them into `<game>\movies\hd\`).

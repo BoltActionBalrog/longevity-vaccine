@@ -55,8 +55,17 @@ def test_supported_thinker_build_agrees_between_python_and_cpp():
     assert d["UIMOD_THINKER_SUPPORTED_VERSION"].strip('"') == V.THINKER_SUPPORTED_VERSION
     assert int(d["UIMOD_THINKER_SUPPORTED_STAMP"], 0) == V.THINKER_SUPPORTED_STAMP
     assert int(d["UIMOD_THINKER_SUPPORTED_IMAGE_SIZE"], 0) == V.THINKER_SUPPORTED_IMAGE_SIZE
+    # where a player gets that build: the release tag names the same major.minor, or (a development-build pin) the
+    # one build's own page stands in for it
+    assert d["UIMOD_THINKER_SUPPORTED_TAG"].strip('"') == V.THINKER_SUPPORTED_TAG
+    assert d["UIMOD_THINKER_DEV_PAGE"].strip('"') == V.THINKER_DEV_PAGE
+    if not V.THINKER_DEV_PAGE:
+        assert V.THINKER_SUPPORTED_TAG == "v" + V.THINKER_SUPPORTED_VERSION, \
+            "the release tag must name the pinned version (bump it with the pin)"
+    else:
+        assert V.THINKER_DEV_PAGE.startswith("https://www.dropbox.com/"), "a development-build pin points at that build's own page"
     src = _REPO / "src" / "uimod" / "src"
-    for name in ("thinkeraivis.cpp", "thinkertext.cpp", "thinkerversion.cpp"):
+    for name in ("thinkeraivis.cpp", "thinkertext.cpp", "thinkerversion.cpp", "leaderfree.cpp"):
         text = (src / name).read_text(encoding="utf-8")
         assert "UIMOD_THINKER_SUPPORTED_STAMP" in text, f"{name} must take the pin from version.h"
         code = re.sub(r"//.*", "", text)      # a comment may quote the measured build; code may not

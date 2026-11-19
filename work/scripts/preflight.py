@@ -54,7 +54,7 @@ class Check:
 class Preflight:
     def __init__(self):
         self.checks: list[Check] = []
-        self.staged: dict[str, Path] = {}      # module -> verified archive in staging
+        self.staged: dict = {}      # module -> verified archive in staging (a tuple of parts for a split pack)
         self.doc: dict = None                  # the verified manifest
         self.decision = None
         self.wanted: list[str] = []            # modules to fetch: explicit, else the stale ones
@@ -100,7 +100,7 @@ def check_game_dir(pf: Preflight, game_dir: Path) -> bool:
             f.write(b"x")
     except OSError as e:
         pf.add("game directory is writable", False,
-               f"{e} -- run the installer as administrator, or move the game out of "
+               f"{e}. Run the installer as administrator, or move the game out of "
                f"Program Files")
         return False
     pf.add("game directory is writable", True)
@@ -178,13 +178,13 @@ def check_target_and_backup(pf: Preflight, target: Path, table: dict,
         pf.add("live executable is ours or the clean base", False,
                f"{target.name} is {live_md5}, which is neither the clean base ({spec.base_md5}) "
                f"nor a build this installer produced ({spec.patched_md5}). Refusing to replace a "
-               f"binary we did not make -- back it up and restore the original first.")
+               f"binary we did not make: back it up and restore the original first.")
 
     # Crossing targets silently is how you patch a base you never verified: someone who installs
     # Thinker after our mod has a different base underneath the same file name.
     if receipt_target_id and receipt_target_id != spec.id:
         pf.add("target has not changed since install", False,
-               f"installed as {receipt_target_id!r}, now looks like {spec.id!r} -- run the installer "
+               f"installed as {receipt_target_id!r}, now looks like {spec.id!r}. Run the installer "
                f"again (a normal install, not --update): it re-patches from the backup for the "
                f"configuration this folder now holds")
     elif receipt_target_id:
@@ -198,7 +198,7 @@ def check_not_locked(pf: Preflight, game_dir: Path, game_pid: int = None,
     if game_pid:
         alive = _pid_alive(game_pid)
         pf.add("spawning game has exited", not alive,
-               f"pid {game_pid} is still running -- close Alpha Centauri" if alive else "")
+               f"pid {game_pid} is still running: close Alpha Centauri" if alive else "")
 
     # THE TARGET FIRST: it is the file the commit replaces, and it was not checked at all -- so a
     # locked exe surfaced only at commit, after the whole download and staging phase.
@@ -223,7 +223,422 @@ def check_not_locked(pf: Preflight, game_dir: Path, game_pid: int = None,
             pf.add(f"{name} is not in use", True)
         except OSError as e:
             pf.add(f"{name} is not in use", False,
-                   f"{e} -- close the game (or whatever is holding it) and re-run")
+                   f"{e}. Close the game (or whatever is holding it) and re-run")
+
+
+#: How a step will use a file, for probe(). Each mode checks what that step's OWN call needs, as measured against
+#: every kind of holder (test_uninstall_plan's matrix test holds each mode to its call, holder by holder):
+#:   read      -- open(path, "rb") (an md5, read_bytes): Python's open shares read and write, NEVER delete, so a
+#:                program holding the file with delete access makes it fail though a share-all open passes
+#:   source    -- copied FROM by shutil.copy2 (CopyFile2 on Python 3.12, which shares everything; Python's open on
+#:                the 3.8 runtime); not read-only, hidden or system: copy2 passes those bits on to the copy (a
+#:                read-only exe a later step must move or delete; a hidden terranx.exe)
+#:   overwrite -- written in place (copy2 / write_bytes ONTO it): a write open sharing read and write; not hidden or
+#:                system (a file opened to be replaced whole refuses both); not mapped by another program (truncating
+#:                a mapped file fails)
+#:   rename    -- moved to a FREE name: delete access, sharing everything (a read-only file, a running exe allow it)
+#:   delete    -- deleted (os.remove): as rename, and not read-only, and not a running program or a loaded DLL
+#:   replace   -- another file moved ONTO its name (os.replace): NOTHING may have it open or mapped -- not even a
+#:                program that shares everything, or one that only reads its attributes -- and not read-only
+#:   profile   -- a key removed by the Win32 profile API (Alpha Centauri.ini): its own open (read and write, sharing
+#:                everything); not read-only; not mapped by another program
+#: Audits 2026-11-16: one share-all open per file passed a file Python then could not read (D1) and a name another
+#: file could not be moved onto (D2), and refused a file that is only deleted while another program read it sharing
+#: delete (D5). A hidden file could not be written (D4).
+PROBE_MODES = ("read", "source", "overwrite", "rename", "delete", "replace", "profile")
+#: A flag beside the modes, not a call of its own: the run deletes this file with safe_fs.unlink_entitled, which
+#: clears the read-only bit first (a file the run has already decided is ours to delete: user ruling 2026-11-17,
+#: D3(b); audit-j MEDIUM-3). Read-only then refuses no "delete"; everything else still refuses.
+ENTITLED = "entitled"
+
+_SHARE_R, _SHARE_W, _SHARE_D = 0x1, 0x2, 0x4
+_SHARE_ALL = _SHARE_R | _SHARE_W | _SHARE_D
+_GENERIC_READ, _GENERIC_WRITE, _DELETE, _READ_ATTRIBUTES = 0x80000000, 0x40000000, 0x00010000, 0x80
+_IN_USE = "The process cannot access the file because it is being used by another process."
+
+
+def probe(path: Path, modes) -> str:
+    """'' when `path` can be used right now as every mode in `modes` needs; else the reason it cannot. Only opens
+    and queries it, and closes it at once -- nothing is read, written or moved. A file that is not there blocks
+    nothing: whatever was going to use it has nothing to do."""
+    unknown = set(modes) - set(PROBE_MODES) - {ENTITLED}
+    if unknown:                                 # never skipped quietly: an unknown mode would pass unchecked
+        raise ValueError(f"unknown probe mode(s): {', '.join(sorted(unknown))}")
+    if not os.path.lexists(path):
+        return ""
+    entitled = ENTITLED in modes
+    for mode in PROBE_MODES:                    # a fixed order: the same file always gives the same reason
+        if mode in modes:
+            reason = _probe_mode(Path(path), mode, entitled)
+            if reason:
+                return reason
+    return ""
+
+
+def change_blocker(path: Path, rename_only: bool = False) -> str:
+    """probe() for a file the caller will delete, or only move to a free name (`rename_only`)."""
+    return probe(path, {"rename"} if rename_only else {"delete"})
+
+
+def _attributes(path: Path) -> int:
+    try:
+        return getattr(os.stat(path), "st_file_attributes", 0)
+    except (OSError, TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _probe_mode(path: Path, mode: str, entitled: bool = False) -> str:
+    try:
+        import ctypes  # noqa: F401
+        k32 = _kernel32()
+    except (ImportError, OSError, AttributeError):
+        k32 = None
+    if k32 is None:                             # off Windows (never the installer's case): plain opens
+        try:
+            with open(path, "rb" if mode in ("read", "source") else "r+b"):
+                return ""
+        except FileNotFoundError:
+            return ""
+        except OSError as e:
+            return e.strerror or str(e)
+    if mode in ("source", "overwrite", "delete", "replace", "profile") and read_only_reason(path) \
+            and not (entitled and mode == "delete"):
+        return read_only_reason(path)
+    # Reads and writes also meet byte-range locks, which no open sees (audit 2026-11-16, F1: a locked set-up record
+    # passed, then read as "absent"): a read needs no other program's exclusive lock on any byte, a write no lock.
+    if mode == "read":
+        return _open_reason(k32, path, _GENERIC_READ, _SHARE_R | _SHARE_W, lock="shared")
+    import _winapi
+    copyfile2 = hasattr(_winapi, "CopyFile2")   # mirrors shutil.copy2's own branch (3.12: CopyFile2; 3.8: open())
+    # hidden / system: a write onto the file refuses them; and CopyFile2 carries them onto the copy (3.8's copy2
+    # copies the read-only bit alone, so a hidden source is fine there)
+    if (mode == "overwrite" or (mode == "source" and copyfile2)) and _attributes(path) & 0x6:
+        return "the file is hidden or a system file"
+    if mode == "source":
+        share = _SHARE_ALL if copyfile2 else _SHARE_R | _SHARE_W
+        return _open_reason(k32, path, _GENERIC_READ, share, lock="shared")
+    if mode == "rename":
+        return _open_reason(k32, path, _DELETE, _SHARE_ALL)
+    if mode == "overwrite":
+        return (_open_reason(k32, path, _GENERIC_WRITE, _SHARE_R | _SHARE_W, lock="exclusive")
+                or _mapped_reason(k32, path))
+    if mode == "profile":
+        return (_open_reason(k32, path, _GENERIC_READ | _GENERIC_WRITE, _SHARE_ALL, lock="exclusive")
+                or _mapped_reason(k32, path))
+    if mode == "delete":
+        return _open_reason(k32, path, _DELETE, _SHARE_ALL) or _image_reason(k32, path, entitled)
+    if mode == "replace":
+        return _held_reason(k32, path)
+    raise ValueError(f"unknown probe mode {mode!r}")
+
+
+def _kernel32():
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    k32.ReadFile.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+                             wintypes.LPVOID]
+    return k32
+
+
+def _open(k32, path: Path, access: int, share: int):
+    """(handle or None, Win32 error)."""
+    import ctypes
+    from ctypes import wintypes
+    h = k32.CreateFileW(str(path), access, share, None, 3, 0, None)        # OPEN_EXISTING
+    if h is None or h == wintypes.HANDLE(-1).value:
+        return None, ctypes.get_last_error()
+    return h, 0
+
+
+def _open_reason(k32, path: Path, access: int, share: int, lock: str = None) -> str:
+    """'' when `path` opens with this access and sharing -- and, with `lock` ("shared" / "exclusive"), when that lock
+    on every byte is free (taken and let go at once). A brief open or lock by another program (a virus scanner,
+    Explorer reading an icon) is looked at twice more before the file is called in use (ERROR_SHARING_VIOLATION /
+    ERROR_LOCK_VIOLATION pass in a moment; audit 2026-11-15); a running game or a lasting handle stays refused."""
+    import ctypes
+    for attempt in range(3):
+        h, err = _open(k32, path, access, share)
+        if h is not None:
+            try:
+                err = _lock_error(k32, h, lock) if lock else 0
+            finally:
+                k32.CloseHandle(h)
+            if not err:
+                return ""
+        if err in (2, 3):                       # ERROR_FILE_NOT_FOUND / PATH_NOT_FOUND: gone since the listing
+            return ""
+        if err not in (32, 33) or attempt == 2:
+            return ctypes.FormatError(err).strip() or f"error {err}"
+        import time
+        time.sleep(0.25)
+    return ""
+
+
+def _lock_error(k32, h, kind: str) -> int:
+    """0 when a `kind` lock on the whole file (every offset) can be taken through `h` right now; it is let go at
+    once. Else the Win32 error (ERROR_LOCK_VIOLATION: another handle holds a conflicting lock on some byte)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class OVERLAPPED(ctypes.Structure):
+        _fields_ = [("internal", ctypes.c_void_p), ("internal_high", ctypes.c_void_p), ("offset", wintypes.DWORD),
+                    ("offset_high", wintypes.DWORD), ("event", wintypes.HANDLE)]
+    k32.LockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                               ctypes.POINTER(OVERLAPPED)]
+    k32.UnlockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                 ctypes.POINTER(OVERLAPPED)]
+    ov = OVERLAPPED()
+    flags = 0x1 | (0x2 if kind == "exclusive" else 0)       # LOCKFILE_FAIL_IMMEDIATELY [| EXCLUSIVE_LOCK]
+    if not k32.LockFileEx(h, flags, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(ov)):
+        return ctypes.get_last_error() or 33
+    k32.UnlockFileEx(h, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(ov))
+    return 0
+
+
+def _users(k32, path: Path):
+    """The ids of the processes that have `path` open or mapped (a handle of any access, a loaded DLL, a running exe,
+    a mapped view), not counting the query's own handle; None when Windows cannot say (then the caller falls back)."""
+    import ctypes
+    from ctypes import wintypes
+    h, err = _open(k32, path, _READ_ATTRIBUTES, _SHARE_ALL)
+    if h is None:
+        return [] if err in (2, 3) else None
+
+    class IOSB(ctypes.Structure):
+        _fields_ = [("status", ctypes.c_void_p), ("information", ctypes.c_void_p)]
+    try:
+        ntdll = ctypes.WinDLL("ntdll")
+        size = 4096
+        while size <= 1 << 20:
+            buf = ctypes.create_string_buffer(size)
+            st = ntdll.NtQueryInformationFile(wintypes.HANDLE(h), ctypes.byref(IOSB()), buf, size, 47) & 0xFFFFFFFF
+            if st == 0x80000005 or st == 0xC0000004:            # BUFFER_OVERFLOW / INFO_LENGTH_MISMATCH
+                size *= 4
+                continue
+            if st != 0:                         # FileProcessIdsUsingFileInformation not supported here
+                return None
+            word = ctypes.sizeof(ctypes.c_size_t)
+            n = ctypes.c_ulong.from_buffer(buf, 0).value
+            return [ctypes.c_size_t.from_buffer(buf, word * (1 + i)).value for i in range(n)]
+        return None
+    except (OSError, AttributeError, ValueError):
+        return None
+    finally:
+        k32.CloseHandle(h)
+
+
+def _held_reason(k32, path: Path) -> str:
+    """For a name another file is moved onto: '' only when nothing at all has `path` open or mapped (looked at
+    twice more, as _open_reason does). Where Windows cannot list them, an open allowing no sharing stands in for it
+    (it misses a holder of the attributes alone)."""
+    for attempt in range(3):
+        users = _users(k32, path)
+        if users is None:
+            return _open_reason(k32, path, _GENERIC_READ | _GENERIC_WRITE | _DELETE, 0)
+        if not users:
+            return ""
+        if attempt < 2:
+            import time
+            time.sleep(0.25)
+    return _IN_USE
+
+
+def _mapped_reason(k32, path: Path) -> str:
+    """For a file truncated in place, once a write open passed: a program with a view of it mapped makes the
+    truncation fail, whether or not it also holds a handle (audit 2026-11-16, F2: a handle beside the view hid it).
+    Each process that uses the file is looked through for such a view (_maps_it); one that cannot be looked at may
+    have one: refused (the safe side), and said so. Where Windows cannot list the file's users at all, every process
+    this one can look through is (audit 2026-11-16: that case passed unchecked). Looked at twice more, as
+    _open_reason does."""
+    found = ""
+    for attempt in range(3):
+        users = _users(k32, path)
+        if users is None:
+            found = _maps_it(k32, path, _all_processes(k32), every=True)
+        else:
+            found = _maps_it(k32, path, users) if users else ""
+        if not found:
+            return ""
+        if attempt < 2:
+            import time
+            time.sleep(0.25)
+    if found == "unknown":
+        # audit 2026-11-16, F2b: a plain holder the installer cannot look into (another user's or a protected
+        # process; a 64-bit one from the 32-bit runtime) is not said to map the file
+        return ("another program has the file open, and the installer cannot check whether it has the file mapped "
+                "into its memory (which would make the change fail)")
+    return "another program has the file mapped into its memory"
+
+
+def _all_processes(k32) -> list:
+    """Every process id on the machine (for when Windows cannot say which use a file)."""
+    import ctypes
+    from ctypes import wintypes
+    enum = getattr(k32, "K32EnumProcesses", None) or ctypes.WinDLL("psapi").EnumProcesses
+    enum.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    n = 1024
+    while n <= 1 << 20:
+        ids, got = (wintypes.DWORD * n)(), wintypes.DWORD(0)
+        if not enum(ids, ctypes.sizeof(ids), ctypes.byref(got)):
+            return []
+        if got.value < ctypes.sizeof(ids):
+            return list(ids[:got.value // ctypes.sizeof(wintypes.DWORD)])
+        n *= 4
+    return []
+
+
+def _identity(k32, path: str):
+    """(NT device, file identity) of `path`: the device is the leading "\\Device\\<name>" of its NT path, and the
+    identity is the same for every hard link of one file -- FileIdInfo's 128-bit id where the volume has one (ReFS
+    ids do not fit the older 64-bit index), else the volume serial and 64-bit index. None when it cannot be opened."""
+    import ctypes
+    from ctypes import wintypes
+
+    class INFO(ctypes.Structure):
+        _fields_ = [("attributes", wintypes.DWORD)] + [(f"t{i}", wintypes.DWORD) for i in range(6)] + [
+            ("volume", wintypes.DWORD), ("size_high", wintypes.DWORD), ("size_low", wintypes.DWORD),
+            ("links", wintypes.DWORD), ("index_high", wintypes.DWORD), ("index_low", wintypes.DWORD)]
+
+    class FILE_ID_INFO(ctypes.Structure):
+        _fields_ = [("volume", ctypes.c_ulonglong), ("id", ctypes.c_ubyte * 16)]
+    h, err = _open(k32, path, _READ_ATTRIBUTES, _SHARE_ALL)
+    if h is None:
+        return None
+    try:
+        buf = ctypes.create_unicode_buffer(32768)
+        k32.GetFinalPathNameByHandleW.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+        n = k32.GetFinalPathNameByHandleW(h, buf, len(buf), 0x2)           # VOLUME_NAME_NT
+        if not n or n >= len(buf):
+            return None
+        parts = buf.value.split("\\")
+        device = "\\".join(parts[:3]).lower()                               # "\device\harddiskvolume3"
+        fid = FILE_ID_INFO()
+        query = getattr(k32, "GetFileInformationByHandleEx", None)
+        if query is not None:
+            query.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+            if query(h, 18, ctypes.byref(fid), ctypes.sizeof(fid)):          # FileIdInfo (Windows 8 and later)
+                return device, ("id", fid.volume, bytes(fid.id))
+        k32.GetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.POINTER(INFO)]
+        info = INFO()
+        if not k32.GetFileInformationByHandle(h, ctypes.byref(info)):
+            return None
+        return device, ("index", info.volume, info.index_high, info.index_low)
+    finally:
+        k32.CloseHandle(h)
+
+
+def _maps_it(k32, path: Path, users: list, every: bool = False) -> str:
+    """"mapped" when one of the processes `users` has a view of `path` mapped (MEM_MAPPED: a running exe or a loaded
+    DLL is MEM_IMAGE, which the write open already refused); "unknown" when one cannot be looked through (another
+    user's or a protected process; a 64-bit one seen from this 32-bit runtime), or has a view on the file's volume
+    whose name no longer opens (the link it was mapped through was deleted since); else ''.
+
+    A view is matched by the file's identity, not its name: Windows names a view by the hard link it was mapped
+    through (audit 2026-11-16, F2a). Only views on the file's own device are looked at (hard links never cross
+    volumes): a snapshot copy with the same ids, or a network name that could stall, is never opened. With `every`
+    (users are every process on the machine, not known users of the file), a process or name that cannot be looked
+    at is passed over rather than counted -- almost every machine has some."""
+    import ctypes
+    from ctypes import wintypes
+    me = _identity(k32, str(path))
+    if me is None:
+        return "unknown"
+    device, target = me
+    buf = ctypes.create_unicode_buffer(32768)
+    ids = {}
+
+    def view_of(nt_name: str):
+        """True: our file; False: another file; None: on our volume, but the name does not open."""
+        if not nt_name.lower().startswith(device + "\\"):
+            return False
+        if nt_name not in ids:
+            got = _identity(k32, "\\\\?\\GLOBALROOT" + nt_name)
+            ids[nt_name] = None if got is None else got[1] == target
+        return ids[nt_name]
+
+    class MBI(ctypes.Structure):
+        _fields_ = [("base", ctypes.c_void_p), ("allocation_base", ctypes.c_void_p), ("allocation_protect",
+                    wintypes.DWORD), ("size", ctypes.c_size_t), ("state", wintypes.DWORD),
+                    ("protect", wintypes.DWORD), ("type", wintypes.DWORD)]
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.VirtualQueryEx.restype = ctypes.c_size_t
+    k32.VirtualQueryEx.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.POINTER(MBI), ctypes.c_size_t]
+    k32.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+    mapped_name = getattr(k32, "K32GetMappedFileNameW", None) or ctypes.WinDLL("psapi").GetMappedFileNameW
+    mapped_name.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.LPWSTR, wintypes.DWORD]
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    me_wow = wintypes.BOOL(0)
+    k32.IsWow64Process(k32.GetCurrentProcess(), ctypes.byref(me_wow))
+    limit = 1 << (8 * ctypes.sizeof(ctypes.c_void_p))
+    unknown = False
+    for pid in users:
+        ph = k32.OpenProcess(0x0400 | 0x0010, False, pid)     # PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
+        if not ph:
+            unknown = unknown or not every
+            continue
+        try:
+            if me_wow.value:
+                it_wow = wintypes.BOOL(0)
+                if not k32.IsWow64Process(ph, ctypes.byref(it_wow)) or not it_wow.value:
+                    unknown = unknown or not every
+                    continue
+            addr, mbi = 0, MBI()
+            while addr < limit and k32.VirtualQueryEx(ph, addr, ctypes.byref(mbi), ctypes.sizeof(mbi)):
+                base = mbi.base or 0
+                if mbi.type == 0x40000 and base == (mbi.allocation_base or 0):     # MEM_MAPPED, a view's start
+                    n = mapped_name(ph, base, buf, len(buf))
+                    if n:
+                        ours = view_of(buf.value)
+                        if ours:
+                            return "mapped"
+                        if ours is None and not every:
+                            unknown = True
+                if not mbi.size:
+                    break
+                addr = base + mbi.size
+        finally:
+            k32.CloseHandle(ph)
+    return "unknown" if unknown else ""
+
+
+def _image_reason(k32, path: Path, entitled: bool = False) -> str:
+    """For a file deleted, once delete access passed: a running exe or a loaded DLL cannot be deleted. Their image
+    refuses a write open -- as does a program reading the file without sharing write, which does not stop the
+    delete. Only a program file can be running, so a file that does not start "MZ" is not refused for it; a program
+    file whose write open fails is (the safe side). A read-only file the run deletes anyway (`entitled`) refuses the
+    write open for its bit alone: then only a program file some process uses is refused (Windows' list of the file's
+    users counts a loaded DLL and a running exe; where it cannot say, the safe side)."""
+    import ctypes
+    from ctypes import wintypes
+    if not _open_reason(k32, path, _GENERIC_WRITE, _SHARE_ALL):
+        return ""
+    if entitled and read_only_reason(path) and _users(k32, path) == []:
+        return ""
+    h, err = _open(k32, path, _GENERIC_READ, _SHARE_ALL)
+    if h is None:
+        return _IN_USE                          # cannot tell what it is: refused
+    try:
+        buf, got = ctypes.create_string_buffer(2), wintypes.DWORD(0)
+        ok = k32.ReadFile(h, buf, 2, ctypes.byref(got), None)
+        return _IN_USE if not ok or buf.raw[:got.value] == b"MZ" else ""
+    finally:
+        k32.CloseHandle(h)
+
+
+def read_only_reason(path: Path) -> str:
+    """'' unless `path` carries the read-only attribute. Never raises."""
+    try:
+        st = os.stat(path)
+    except (OSError, TypeError, ValueError, OverflowError):
+        return ""
+    ro = getattr(st, "st_file_attributes", 0) & 0x1 if os.name == "nt" else not (st.st_mode & 0o200)
+    return "the file is read-only" if ro else ""
 
 
 def _pid_alive(pid: int) -> bool:
@@ -287,7 +702,7 @@ def check_manifest(pf: Preflight, raw: bytes, sig: str, installed_version: str,
         # ONLY the compiled-in message and URL. `d.detail` is manifest-derived and is a developer
         # diagnostic -- interpolating it here put attacker-choosable prose inside our own "see the
         # official link" sentence.
-        pf.add("update is available automatically", False, f"{d.message} -- see {d.url}")
+        pf.add("update is available automatically", False, f"{d.message} (see {d.url})")
     elif d.action == mf.NOTHING:
         # Not a [warn]: being current is the healthy state, and a warning on every idle run
         # read as something the player might have to act on.
@@ -324,7 +739,7 @@ def check_manifest(pf: Preflight, raw: bytes, sig: str, installed_version: str,
                 # no trace. Say so instead: it is a repair, not a verified upgrade path.
                 pf.add("upgrade path supported", False,
                        f"the installed version is unknown, so the {min_from} minimum cannot be "
-                       f"checked -- treating this as a repair", advisory=True)
+                       f"checked, so this is treated as a repair", advisory=True)
 
 
 #: Modules that are required whatever the manifest says about them. The core patch and the
@@ -382,37 +797,93 @@ def check_archives(pf: Preflight, doc: dict, staging: Path, wanted: list,
             else:
                 pf.add(f"module {name} declared", False, "not in the manifest", advisory=opt)
             continue
-        url, digest, size = info.get("url"), info.get("sha256"), info.get("size")
-        if not isinstance(url, str) or not isinstance(digest, str) or not url or not digest:
-            pf.add(f"module {name} declared", False, "manifest entry lacks a url or sha256",
-                   advisory=opt)
-            continue
         offered = info.get("version")
         shown = f"{label} v{ver.normalise(offered)}" \
             if isinstance(offered, str) and ver.is_valid(offered) else label
-        dest = Path(staging) / staging_name(url, name)
+        st = Path(staging)
+        game_root = st.parent.parent if st.parent.name.lower() == "longevitymods" else None
         try:
-            fetch.download(url, dest, sha256=digest, size=size,
-                           mirror=info.get("mirror"), allow_file=allow_file, label=label)
-        except fetch.FetchError as e:
-            pf.add(f"{shown} download", False, str(e), advisory=opt)
+            parts = mf.module_parts(info)
+        except mf.PartsError as e:
+            pf.add(f"module {name} declared", False, f"manifest entry is malformed ({fetch.clean(e)})",
+                   advisory=opt)
             continue
-        pf.add(f"{shown} downloaded and verified", True, fetch.human_size(dest.stat().st_size))
-        if not zipfile.is_zipfile(dest):
-            pf.add(f"{shown} is a readable archive", False, "not a zip", advisory=opt)
-            continue
+        if parts is not None:
+            # A SPLIT pack (manifest.module_parts): byte slices of one archive, each verified against its own signed
+            # sha256, then read in place as that archive (fetch.ConcatReader) -- never joined on disk.
+            # Named by the part's own signed digest and its index, never by a name taken from the URL: Windows reads
+            # `a.001` and `a.001.` as one file, and one part's `<name>.part` could be another's final name. The digest
+            # is what makes a leftover safe: a download stopped part-way under one release is never resumed against
+            # ANOTHER release's part (that spliced a new tail onto an old prefix, then threw up to a whole part away
+            # when the hash failed). module_parts has already checked each sha256 is 64 hex digits.
+            dests = [Path(staging) / name / f"{name}.{p['sha256'][:16]}.{i:03d}" for i, p in enumerate(parts, 1)]
+            _sweep_stale_parts(Path(staging) / name, name, dests, game_root or Path(staging))
+            try:
+                fetch.download_parts(parts, dests, label=label, allow_file=allow_file, root=game_root)
+            except fetch.FetchError as e:
+                pf.add(f"{shown} download", False, str(e), advisory=opt)
+                continue
+            pf.add(f"{shown} downloaded and verified", True, fetch.human_size(info["size"]))
+            staged = tuple(dests)
+        else:
+            url, digest, size = info.get("url"), info.get("sha256"), info.get("size")
+            if not isinstance(url, str) or not isinstance(digest, str) or not url or not digest:
+                pf.add(f"module {name} declared", False, "manifest entry lacks a url or sha256",
+                       advisory=opt)
+                continue
+            dest = Path(staging) / staging_name(url, name)
+            try:
+                fetch.download(url, dest, sha256=digest, size=size,
+                               mirror=info.get("mirror"), allow_file=allow_file, label=label, root=game_root)
+            except fetch.FetchError as e:
+                pf.add(f"{shown} download", False, str(e), advisory=opt)
+                continue
+            pf.add(f"{shown} downloaded and verified", True, fetch.human_size(dest.stat().st_size))
+            staged = dest
         try:
-            with zipfile.ZipFile(dest) as z:
-                bad = z.testzip()
+            with open_staged(staged) as src:
+                if not zipfile.is_zipfile(src):
+                    pf.add(f"{shown} is a readable archive", False, "not a zip", advisory=opt)
+                    continue
+                with zipfile.ZipFile(src) as z:
+                    bad = z.testzip()
             if bad:
                 pf.add(f"{shown} is a readable archive", False,
                        f"corrupt entry {fetch.clean(bad, 60)}", advisory=opt)
                 continue
-        except (zipfile.BadZipFile, OSError) as e:
+        except (zipfile.BadZipFile, OSError, EOFError) as e:
             pf.add(f"{shown} is a readable archive", False, fetch.clean(e), advisory=opt)
             continue
         pf.add(f"{shown} is a readable archive", True)
-        pf.staged[name] = dest
+        pf.staged[name] = staged
+
+
+def _sweep_stale_parts(folder: Path, name: str, keep: list, root: Path) -> None:
+    """Delete the split-pack parts in `folder` that this release does not name: another release's (another digest),
+    an earlier client's index-only names (`<module>.NNN`), and their `.part` downloads. They are never resumed into
+    this release's parts, and at up to a part's size each they would otherwise hold the disk the free-space check
+    counted on until a later success cleared staging. Only names of exactly these shapes are touched, never through
+    a link (safe_fs), and a file that cannot be removed is left: it is never read."""
+    import re
+    import safe_fs
+    if not folder.is_dir() or safe_fs.link_on_path(Path(root), folder):
+        return
+    shape = re.compile(rf"{re.escape(name)}(\.[0-9a-f]{{16}})?\.\d{{3}}(\.part)?", re.IGNORECASE)
+    wanted = {d.name.lower() for d in keep} | {d.name.lower() + ".part" for d in keep}
+    for f in folder.iterdir():
+        try:
+            if shape.fullmatch(f.name) and f.name.lower() not in wanted and f.is_file() and not f.is_symlink():
+                f.unlink()
+        except OSError:
+            pass
+
+
+def open_staged(staged):
+    """A staged module archive opened for reading: one file, or a split pack's parts read as the one archive they
+    were cut from (a tuple of paths in order; check_archives). The caller closes it (`with`)."""
+    if isinstance(staged, (tuple, list)):
+        return fetch.ConcatReader(list(staged))
+    return open(staged, "rb")
 
 
 def check_patch_plan(pf: Preflight, target: Path, patches: Path, spec) -> None:

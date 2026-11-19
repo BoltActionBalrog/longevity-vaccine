@@ -34,6 +34,7 @@ import receipt as rc          # noqa: E402
 import sign_manifest as sm    # noqa: E402
 import version as ver         # noqa: E402
 import installer_exit as ix   # noqa: E402
+from conftest import _missing  # noqa: E402  (a skip, or a FAILURE under LONGEVITY_REQUIRE_E2E: audit-k LOW-4)
 
 _PY = _REPO / "tools" / "python" / "python.exe"
 _INSTALL = _SCRIPTS / "install.py"
@@ -41,7 +42,7 @@ PATCHES = _REPO / "work" / "patches" / "patches.yaml"
 SEED = bytes(range(32))
 PK_HEX = sm.public_key(SEED).hex()
 
-pytestmark = pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+pytestmark = pytest.mark.needs_local(_PY, "the bundled interpreter")
 
 
 @pytest.fixture
@@ -69,11 +70,13 @@ def _payload_root(tmp_path_factory) -> Path:
     """
     runtime = _REPO / "work" / "build" / "runtime"
     if not (runtime / "python.exe").is_file():
-        pytest.skip("no staged runtime; run build_runtime.py first")
+        _missing(runtime / "python.exe", "the staged runtime (run build_runtime.py first)")
     if not (_REPO / "src" / "uimod" / "build" / "Release" / "uimod.dll").is_file():
-        pytest.skip("no built uimod.dll; run src\\uimod\\build.bat Release first")
+        _missing(_REPO / "src" / "uimod" / "build" / "Release" / "uimod.dll",
+                 "the built uimod.dll (run src\\uimod\\build.bat Release first)")
     if not any((_REPO / "src" / "uimod" / "third_party" / "ffmpeg" / "bin").glob("*.dll")):
-        pytest.skip("no ffmpeg DLLs under src\\uimod\\third_party\\ffmpeg\\bin (README: building the DLL)")
+        _missing(_REPO / "src" / "uimod" / "third_party" / "ffmpeg" / "bin" / "*.dll",
+                 "the ffmpeg DLLs (README: building the DLL)")
     root = tmp_path_factory.mktemp("payload")
     (root / "scripts").mkdir()
     for f in (_SCRIPTS).glob("*.py"):
@@ -89,6 +92,7 @@ def _payload_root(tmp_path_factory) -> Path:
                     root / "src" / "uimod" / "third_party" / "ffmpeg" / "bin")
     (root / "art").mkdir()
     shutil.copy2(_REPO / "work" / "art" / "longevity_sm.pcx", root / "art" / "longevity_sm.pcx")
+    shutil.copy2(_REPO / "work" / "art" / "pracx_icons_overlay.pcx", root / "art" / "pracx_icons_overlay.pcx")
     return root
 
 
@@ -148,6 +152,15 @@ def _use_trimmed_payload(_payload_root):
     _PAYLOAD = None
 
 
+def _offline_unless_given(args: tuple) -> tuple:
+    """--offline for every installer run that does not bring its own --manifest (user 2026-11-15: no test fetches
+    the live longevitymods.com manifest; conftest's _NetSink fails one that tries). A Thinker folder's stand-in
+    thinker.dll is off the pin, and that alone fetches the manifest for its fatal list."""
+    if any(a in ("--manifest", "--offline") for a in args):
+        return args
+    return (*args, "--offline")
+
+
 def _run(*args, game=None, env_extra=None, expect_ok=True, timeout=900):
     env = dict(os.environ)
     env["LONGEVITY_NO_WAIT"] = "1"
@@ -157,6 +170,9 @@ def _run(*args, game=None, env_extra=None, expect_ok=True, timeout=900):
     # stdin=DEVNULL, always. `--ai ask` reaches input(); with fd 0 inherited from an interactive
     # terminal the child blocks on the console until the 900 s timeout, so the suite's behaviour
     # depended on how it was launched.
+    if not any(a in ("--with-thinker", "--keep-thinker", "--fix-thinker") for a in args):
+        args = (*args, "--keep-thinker")       # its thinker.dll is a stand-in: leave it, never download Thinker
+    args = _offline_unless_given(args)
     p = subprocess.run([str(_PY), str(_INSTALL), "--no-wait", "--game-dir", str(game), *args],
                        capture_output=True, text=True, env=env, timeout=timeout,
                        stdin=subprocess.DEVNULL)
@@ -171,6 +187,8 @@ def _run(*args, game=None, env_extra=None, expect_ok=True, timeout=900):
 def test_a_fresh_install_patches_and_records(game):
     rcode, out = _run("--ai", "off", game=game)
     assert "INSTALLATION SUCCESSFUL" in out, out
+    assert f"Longevity Vaccine {ver.VERSION} is installed." in out and "The Longevity" not in out, out   # user 2026-11-14
+    assert "See what's new" not in out, out          # a fresh install: nothing was there before
 
     exe = game / "terranx_PRACX.exe"
     table = ap.load_targets(PATCHES)
@@ -216,7 +234,7 @@ def test_a_fresh_install_patches_the_datalinks_text_and_uninstall_restores_it(ga
             continue
         spec = ph.FILES[p.name]
         assert p.read_bytes() == ph.patch_bytes(data, spec), f"{p} not patched"
-        assert ph.backup_of(p).read_bytes() == data, f"{p}: backup is not the original"
+        assert not ph.backup_of(p).exists(), f"{p}: no backup is written (undo is the exact inverse)"
     assert "left alone" in out, "the foreign file must be reported"
     summary = out.split("--- summary ---", 1)[1]
     assert "left alone: not the stock text" in summary, "a file left alone is named under the summary row"
@@ -232,6 +250,277 @@ def test_a_fresh_install_patches_the_datalinks_text_and_uninstall_restores_it(ga
         expected = foreign if p == game / "smac_mod" / "helpx.txt" else data
         assert p.read_bytes() == expected, f"{p} not restored"
     assert not list(game.rglob("*.longevity.bak"))
+
+
+@pytest.mark.parametrize("concepts_ours", [False, True], ids=["only-the-edited-file", "beside-a-restored-file"])
+def test_an_edited_datalinks_file_makes_the_uninstall_incomplete(game, concepts_ours):
+    """A 1.0.0 folder whose exe and DLL were already cleaned by hand, with helpx.txt edited after the mod patched it
+    (and the .longevity.bak 1.0.0 kept). The edited file is left byte-for-byte with its backup, and the verdict says
+    INCOMPLETE and how to get the text back -- never "Nothing to uninstall ... reinstall the game" (the folder still
+    holds the mod's text) and never COMPLETE (audit 2026-11-10: both happened)."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import patch_helptext as ph
+    from test_patch_helptext import _synthetic
+    hx, cx = ph.FILES["helpx.txt"], ph.FILES["conceptsx.txt"]
+    edited = ph.patch_bytes(_synthetic(hx, b"\r\n"), hx).replace(b"Cloaking Device", b"Cloaking Devise")
+    (game / "helpx.txt").write_bytes(edited)
+    ph.backup_of(game / "helpx.txt").write_bytes(_synthetic(hx, b"\r\n"))
+    stock = _synthetic(cx, b"\r\n")
+    (game / "conceptsx.txt").write_bytes(ph.patch_bytes(stock, cx) if concepts_ours else stock)
+    rcode, out = _run("--uninstall", game=game)
+    assert "UNINSTALL INCOMPLETE" in out and "Nothing to uninstall" not in out, out
+    verdict = out.split("UNINSTALL INCOMPLETE", 1)[1]
+    assert "helpx.txt" in verdict and "verify files" in verdict, out
+    assert (game / "helpx.txt").read_bytes() == edited
+    assert ph.backup_of(game / "helpx.txt").read_bytes() == _synthetic(hx, b"\r\n")
+    assert (game / "conceptsx.txt").read_bytes() == stock
+
+
+@pytest.mark.parametrize("helpx_edited", [True, False], ids=["with-a-held-help-file", "with-the-text-restored"])
+def test_a_foreign_exe_backup_beside_the_datalinks_text(game, helpx_edited):
+    """A .bak beside the exe that this installer did not make. With a help file still to report, the verdict says
+    the .bak was left alone (the "Nothing to uninstall" refusal that says it is skipped then); with the text simply
+    restored, the verdict is COMPLETE and stays as before this work: the console line says it (audit rounds 3-5)."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import patch_helptext as ph
+    from test_patch_helptext import _synthetic
+    hx, cx = ph.FILES["helpx.txt"], ph.FILES["conceptsx.txt"]
+    (game / "terranx_PRACX.exe.bak").write_bytes(b"another mod's backup")
+    if helpx_edited:
+        helpx = ph.patch_bytes(_synthetic(hx, b"\r\n"), hx).replace(b"Cloaking Device", b"Cloaking Devise")
+        (game / "conceptsx.txt").write_bytes(_synthetic(cx, b"\r\n"))
+    else:
+        helpx = _synthetic(hx, b"\r\n")
+        (game / "conceptsx.txt").write_bytes(ph.patch_bytes(_synthetic(cx, b"\r\n"), cx))
+    (game / "helpx.txt").write_bytes(helpx)
+    rcode, out = _run("--uninstall", game=game)
+    assert "not a backup this installer made" in out, out
+    if helpx_edited:
+        verdict = out.split("UNINSTALL INCOMPLETE", 1)[1]
+        assert "not made by this installer" in verdict and "helpx.txt" in verdict, out
+    else:
+        verdict = out.split("UNINSTALL COMPLETE", 1)[1]
+        assert "not made by this installer" not in verdict, out
+        assert (game / "conceptsx.txt").read_bytes() == _synthetic(cx, b"\r\n")
+    assert (game / "terranx_PRACX.exe.bak").read_bytes() == b"another mod's backup"
+
+
+def test_a_file_quoting_the_mods_wording_gets_advice_for_both_readings(game):
+    """A help file with one of the mod's sentences but no marker: ours with the marker removed, or another mod's /
+    a translation's file quoting it -- they cannot be told apart. The verdict must not tell the player to restore a
+    file that may be someone else's work without saying when nothing needs doing (audit round 6)."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import patch_helptext as ph
+    from test_patch_helptext import _synthetic
+    hx = ph.FILES["helpx.txt"]
+    quoted = _synthetic(hx, b"\r\n").replace(b"#FILLER1\r\n", b"#FILLER1\r\n" + sorted(ph._our_lines(hx))[0] + b"\r\n")
+    (game / "helpx.txt").write_bytes(quoted)
+    rcode, out = _run("--uninstall", game=game)
+    assert "UNINSTALL INCOMPLETE" in out and "Nothing to uninstall" not in out, out
+    verdict = out.split("UNINSTALL INCOMPLETE", 1)[1]
+    assert "without its marker line" in verdict and "nothing needs doing" in verdict, out
+    assert "could not be taken out" not in verdict, out
+    assert (game / "helpx.txt").read_bytes() == quoted
+
+
+def test_a_datalinks_file_that_cannot_be_written_stops_the_uninstall_up_front(game):
+    """A read-only helpx.txt that still carries Longevity Vaccine's text, with nothing else of the mod left: the
+    up-front check refuses before anything changes (the exact undo would write it, backup or none), the folder
+    stays remembered, and the run after the file is made writable finishes the job."""
+    import stat
+    sys.path.insert(0, str(_SCRIPTS))
+    import config
+    import patch_helptext as ph
+    from test_patch_helptext import _synthetic
+    hx = ph.FILES["helpx.txt"]
+    p = game / "helpx.txt"
+    patched = ph.patch_bytes(_synthetic(hx, b"\r\n"), hx)
+    p.write_bytes(patched)
+    installs = game.parent / "installs.txt"
+    installs.write_text(str(game) + "\n", encoding="utf-8")
+    p.chmod(stat.S_IREAD)
+    try:
+        rcode, out = _run("--uninstall", game=game, env_extra={config.INSTALLS_ENV: str(installs)},
+                          expect_ok=False)
+    finally:
+        p.chmod(stat.S_IREAD | stat.S_IWRITE)
+    assert rcode == ix.EXIT_ABORTED and "UNINSTALL NOT STARTED" in out and "helpx.txt" in out, out
+    assert "Nothing to uninstall" not in out, out
+    assert p.read_bytes() == patched
+    assert str(game) in installs.read_text(encoding="utf-8"), "kept for the re-run the refusal asks for"
+    rcode, out = _run("--uninstall", game=game, env_extra={config.INSTALLS_ENV: str(installs)})
+    assert "UNINSTALL COMPLETE" in out and p.read_bytes() == _synthetic(hx, b"\r\n"), out
+
+
+def _stock_icons_sheet():
+    """The game folder's Icons.pcx when it is a stock sheet patch_icons may change (its art is not in the repo)."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import config
+    import patch_icons as pi
+    g = config.game_dir(required=False)
+    p = Path(g) / pi.SHEET if g else None
+    if not (p and p.is_file()):
+        return None
+    try:
+        return p.read_bytes() if pi.pixel_hash(pi.decode(p.read_bytes())[1]) in pi.KNOWN_STOCK else None
+    except pi.SheetError:
+        return None
+
+
+@pytest.mark.skipif(_stock_icons_sheet() is None, reason="no stock GOG Icons.pcx to copy")
+def test_a_fresh_install_adds_pracx_icon_art_and_uninstall_restores_it(game):
+    """Issue #7: GOG ships PRACX without PRACX's Icons.pcx. The install adds the art to the stock sheet (a copy of the
+    live one), the summary says so, and --uninstall puts the stock sheet back byte for byte."""
+    import patch_icons as pi
+    stock = _stock_icons_sheet()
+    (game / pi.SHEET).write_bytes(stock)
+    rcode, out = _run("--ai", "off", game=game)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert "--- PRACX icons ---" in out and "PRACX icons" in out.split("--- summary ---", 1)[1], out
+    assert (game / pi.SHEET).read_bytes() != stock
+    assert pi.backup_of(game / pi.SHEET).read_bytes() == stock
+    # A restore that cannot be done (read-only file) stops the uninstall before it changes anything ...
+    os.chmod(game / pi.SHEET, 0o444)
+    try:
+        before = _tree(game)
+        rcode, out = _run("--uninstall", game=game, expect_ok=False)
+        assert rcode == ix.EXIT_ABORTED and "UNINSTALL NOT STARTED" in out and pi.SHEET in out, out
+        assert _tree(game) == before, "a refused uninstall changed the folder"
+    finally:
+        os.chmod(game / pi.SHEET, 0o666)
+    # ... and the re-run it asks for finishes it instead of refusing as "nothing to uninstall".
+    rcode, out = _run("--uninstall", game=game)
+    assert "UNINSTALL COMPLETE" in out and "Nothing to uninstall" not in out, out
+    assert (game / pi.SHEET).read_bytes() == stock and not pi.backup_of(game / pi.SHEET).exists()
+
+
+@pytest.mark.skipif(not (_REPO / "refs" / "pracx" / "resources" / "Icons.pcx").is_file(), reason="no PRACX checkout")
+def test_a_fresh_install_leaves_pracxs_own_icons_sheet_alone(game):
+    """A folder PRACX's own installer set up already has the art: the install must not write or back up its sheet."""
+    import patch_icons as pi
+    theirs = (_REPO / "refs" / "pracx" / "resources" / "Icons.pcx").read_bytes()
+    (game / pi.SHEET).write_bytes(theirs)
+    rcode, out = _run("--ai", "off", game=game)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert (game / pi.SHEET).read_bytes() == theirs and not pi.backup_of(game / pi.SHEET).exists()
+    rcode, out = _run("--uninstall", game=game)
+    assert (game / pi.SHEET).read_bytes() == theirs
+    assert "nothing to restore" not in out, "an uninstall the sheet took no part in must not mention it"
+
+
+def test_windows_install_leaves_gogs_ddrawcompat_alone(game):
+    """wine_ddraw only acts under Wine: on Windows a DDrawCompat ddraw.dll stays byte-identical, no backup appears,
+    and the install says nothing about it."""
+    sys.path.insert(0, str(_SCRIPTS))
+    from test_wine_ddraw import DDC
+    (game / "ddraw.dll").write_bytes(DDC)
+    rcode, out = _run("--ai", "off", game=game)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert (game / "ddraw.dll").read_bytes() == DDC
+    assert not (game / "ddraw.dll.longevity.bak").exists()
+    assert "--- ddraw.dll ---" not in out and "DDrawCompat" not in out, out
+
+
+def test_uninstall_puts_back_ddrawcompat_when_it_is_the_only_change_left(game_installed):
+    """A folder installed under Wine carries ddraw.dll.longevity.bak. With the exe already restored and the mod's
+    files already gone by hand, that backup is the ONLY change left: --uninstall (from Windows here) must put it back
+    and call it an uninstall, not refuse with "nothing to uninstall"."""
+    sys.path.insert(0, str(_SCRIPTS))
+    from test_wine_ddraw import DDC
+    game = game_installed
+    shutil.copy2(game / "terranx_PRACX.exe.bak", game / "terranx_PRACX.exe")
+    # install._uninstall_files(), by hand: importing install.py in-process would share its module globals with the
+    # other tests on this worker.
+    for f in ["uimod.dll", "longevity_sm.pcx"] + [p.name for p in game.glob("*.dll") if p.name.lower() != "uimod.dll"]:
+        (game / f).unlink(missing_ok=True)
+    (game / "ddraw.dll.longevity.bak").write_bytes(DDC)
+    rcode, out = _run("--uninstall", game=game, env_extra={"LONGEVITY_TEST_ASSUME_PLATFORM": "windows"})
+    assert "UNINSTALL COMPLETE" in out, out
+    assert "1 file(s) put back" in out, out
+    assert "put GOG's DDrawCompat back" in out, out
+    assert (game / "ddraw.dll").read_bytes() == DDC
+    assert not (game / "ddraw.dll.longevity.bak").exists()
+
+
+def test_wine_install_update_and_uninstall_handle_ddrawcompat(game, tmp_path):
+    """The Wine path through the REAL installer (the platform forced by the test-only switch): the install sets
+    DDrawCompat aside and says so in the summary; a file check that puts it back is undone by the next update, even
+    the "already up to date" one, whose verdict must not then claim nothing changed; --uninstall puts it back and
+    warns that an override would crash the game again."""
+    sys.path.insert(0, str(_SCRIPTS))
+    from test_wine_ddraw import DDC
+    wine = {"LONGEVITY_TEST_ASSUME_PLATFORM": "wine"}
+    (game / "ddraw.dll").write_bytes(DDC)
+    _, out = _run("--ai", "off", game=game, env_extra=wine)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert "moved GOG's DDrawCompat (ddraw.dll v0.5.4)" in out, out
+    assert "Wine: DDrawCompat set aside" in out.split("--- summary ---", 1)[1], out
+    assert not (game / "ddraw.dll").exists()
+    assert (game / "ddraw.dll.longevity.bak").read_bytes() == DDC
+
+    (game / "ddraw.dll").write_bytes(DDC)            # GOG / Heroic "verify files" puts it back
+    m = _publish(tmp_path / "pub", game, latest=ver.VERSION, modules={})
+    _, out = _run("--update", "--manifest", str(m), "--no-prompt", game=game, env_extra={**_ENV, **wine})
+    assert "ALREADY UP TO DATE" in out, out
+    assert "moved GOG's DDrawCompat" in out, out
+    assert "Nothing else was changed (ddraw.dll: see above)" in out, out
+    assert not (game / "ddraw.dll").exists()
+
+    _, out = _run("--uninstall", game=game, env_extra=wine)
+    assert "UNINSTALL COMPLETE" in out, out
+    assert "put GOG's DDrawCompat back" in out and "crash the game at start" in out, out
+    assert (game / "ddraw.dll").read_bytes() == DDC
+    assert not (game / "ddraw.dll.longevity.bak").exists()
+
+
+def test_a_read_only_datalinks_file_stops_the_uninstall_before_any_change(game_installed):
+    """A help file carrying the mod's text that cannot be written (read-only) stops the uninstall up front: the
+    exe, the DLLs and everything else stay exactly as they were, and the refusal names the file (user, 2026-11-15).
+    It used to restore the exe, delete the DLLs, then fail on the text file: a half-done uninstall."""
+    import stat
+    import patch_helptext as ph
+    from test_patch_helptext import _synthetic
+    game = game_installed
+    hx = ph.FILES["helpx.txt"]
+    p = game / "helpx.txt"
+    p.write_bytes(ph.patch_bytes(_synthetic(hx, b"\r\n"), hx))
+    ph.backup_of(p).write_bytes(_synthetic(hx, b"\r\n"))
+    p.chmod(stat.S_IREAD)
+    try:
+        before = _tree(game)
+        rcode, out = _run("--uninstall", game=game, expect_ok=False)
+        assert rcode == ix.EXIT_ABORTED and "UNINSTALL NOT STARTED" in out and "helpx.txt" in out, out
+        assert "The uninstall itself changed nothing" in out, out
+        assert _tree(game) == before, "a refused uninstall changed the folder"
+    finally:
+        p.chmod(stat.S_IREAD | stat.S_IWRITE)
+    rcode, out = _run("--uninstall", game=game)
+    assert "UNINSTALL COMPLETE" in out, out
+    assert p.read_bytes() == _synthetic(hx, b"\r\n") and not (game / "uimod.dll").exists()
+
+
+def test_a_removal_that_fails_after_the_check_is_incomplete_never_nothing_to_uninstall(game_installed, monkeypatch):
+    """The backstop for the race the up-front check cannot close (a file taken between the check and the change):
+    in-process, with the check told everything is free while uimod.dll is held without delete sharing. The run is
+    INCOMPLETE and keeps the folder remembered -- and so is a SECOND run with the DLL still held, which used to do no
+    work, refuse as "already unmodified" and forget the folder with the DLL still in it."""
+    import types
+    import config
+    import install as inst
+    import preflight as pfm
+    inst._load_modules()                        # what main() does first
+    game = game_installed
+    monkeypatch.setattr(pfm, "change_blocker", lambda p, rename_only=False: "", raising=False)
+    monkeypatch.setattr(pfm, "probe", lambda p, modes: "", raising=False)
+    config.remember_game_dir(game)
+    with open(game / "uimod.dll", "rb"):
+        for run in (1, 2):
+            inst._VERDICT = None
+            assert inst.do_uninstall(game, types.SimpleNamespace()) == ix.EXIT_OK
+            assert inst._VERDICT[0] == "UNINSTALL INCOMPLETE", (run, inst._VERDICT)
+            assert (game / "uimod.dll").exists()
+            assert any(Path(d).resolve() == game.resolve() for d in config.remembered_game_dirs()), run
+    config.forget_game_dir(game)
 
 
 def test_a_fresh_install_leaves_a_resident_updater(game):
@@ -321,8 +610,8 @@ def test_an_unattended_first_install_leaves_update_checks_at_the_default_and_say
     rcode, out = _run("--ai", "off", game=game)
     assert "INSTALLATION SUCCESSFUL" in out, out
     assert ("--- automatic updates ---\n  The game checks for updates when it starts (the default); change it in "
-            "Longevity Mod Preferences (\"Check for Updates at Startup\").") in out, out
-    assert "Check for updates when the game starts?" not in out
+            "Longevity Preferences.\n") in out, out
+    assert " AUTOMATIC UPDATES\n" not in out                    # no question: the e2e has no keyboard
     cp = configparser.ConfigParser(strict=False)
     cp.read(game / "Alpha Centauri.ini", encoding="mbcs")
     assert not cp.has_option("UIMod", "CheckForUpdates")
@@ -394,6 +683,7 @@ def test_an_update_preflights_then_commits(game_installed, tmp_path):
                       "--no-prompt", game=game, env_extra={"LONGEVITY_TRUST_KEY": PK_HEX})
     assert "preflight" in out and "commit" in out, out
     assert "UPDATE COMPLETE" in out, out          # an update's verdict, not a first install's
+    assert "See what's new" not in out, out          # the base did not move (this installer is the installed one)
 
     table = ap.load_targets(PATCHES)
     assert hashlib.md5((game / "terranx_PRACX.exe").read_bytes()).hexdigest() \
@@ -557,6 +847,7 @@ def _run_found(*args, candidates, installs, expect_ok=True, timeout=900):
     env = dict(os.environ, LONGEVITY_NO_WAIT="1", LONGEVITY_PAYLOAD_ROOT=str(_PAYLOAD),
                LONGEVITY_GAME_CANDIDATES="|".join(str(c) for c in candidates),
                LONGEVITY_INSTALLS_FILE=str(installs))
+    args = _offline_unless_given((*args, "--keep-thinker"))
     p = subprocess.run([str(_PY), str(_INSTALL), "--no-wait", *args], capture_output=True,
                        text=True, env=env, timeout=timeout, stdin=subprocess.DEVNULL)
     out = p.stdout + p.stderr
@@ -575,11 +866,14 @@ def test_an_install_without_game_dir_finds_the_folder_and_uninstall_remembers_it
     assert "INSTALLATION SUCCESSFUL" in out and f"Game dir: {game}" in out, out
     assert (game / "terranx_PRACX.exe.bak").is_file()
     assert installs.read_text(encoding="utf-8").splitlines() == [str(game.resolve())]
-    # an uninstall that cannot finish (the DLL in use) keeps the folder remembered, so the
-    # "run --uninstall again" it asks for finds it
+    # an uninstall that cannot finish (the DLL in use) does not start: nothing changes, the folder
+    # stays remembered, and the "run the uninstall again" it asks for finds it (user, 2026-11-15:
+    # it used to restore the exe and leave the DLL, a half-done uninstall)
     with open(game / "uimod.dll", "rb"):
+        before = _tree(game)
         rcode, out = _run_found("--uninstall", candidates=[], installs=installs, expect_ok=False)
-    assert "UNINSTALL INCOMPLETE" in out, out
+        assert rcode == ix.EXIT_ABORTED and "UNINSTALL NOT STARTED" in out and "uimod.dll" in out, out
+        assert _tree(game) == before, "a refused uninstall changed the folder"
     assert installs.read_text(encoding="utf-8").splitlines() == [str(game.resolve())]
     rcode, out = _run_found("--uninstall", candidates=[], installs=installs)
     assert "UNINSTALL COMPLETE" in out and f"Game dir: {game.resolve()}" in out, out
@@ -622,11 +916,43 @@ def test_uninstall_says_what_it_leaves_behind_and_refuses_a_second_run(game_inst
     assert "UNINSTALL COMPLETE" in out, out
     assert "INSTALLATION SUCCESSFUL" not in out
     assert "LongevityMods" in out, "the folder left behind is never mentioned"
-    assert "movies" in out
+    # The optional packs are removed now, not left (user design 2026-11-15): no movies\hd / portraits\ lines.
+    assert "Z2k Retro's HD Cinematics (a large download" not in out and "unused once Longevity Vaccine" not in out
 
     rcode, out = _run("--uninstall", game=game, expect_ok=False)
     assert rcode != 0, "a second uninstall reported success with nothing to do"
     assert "Nothing to uninstall" in out
+
+
+def test_a_refusal_that_removed_a_stale_help_text_backup_says_so(game):
+    """A folder with nothing of the mod left but an earlier version's helpx.txt.longevity.bak beside a stock
+    helpx.txt: the uninstall deletes that stale copy (it is never read), so its refusal must not print "Nothing on
+    disk was changed" -- it names the file it removed (audit 2026-11-16)."""
+    sys.path.insert(0, str(_SCRIPTS))
+    import patch_helptext as ph
+    from test_patch_helptext import _synthetic
+    hx = ph.FILES["helpx.txt"]
+    (game / "helpx.txt").write_bytes(_synthetic(hx, b"\r\n"))
+    ph.backup_of(game / "helpx.txt").write_bytes(b"an old copy")
+    rcode, out = _run("--uninstall", game=game, expect_ok=False)
+    assert rcode == ix.EXIT_ABORTED and "Nothing to uninstall" in out, out
+    assert "Nothing on disk was changed" not in out and "helpx.txt.longevity.bak" in out, out
+    assert "NOTHING TO UNINSTALL" in out, out
+    assert not ph.backup_of(game / "helpx.txt").exists()
+
+
+def test_a_refusal_that_removed_a_stray_install_record_says_so(game):
+    """A folder whose only leftover is the install record (a stray one, or what a run that could not delete it
+    left): still the "Nothing to uninstall" refusal, with its usual reason and advice -- they can be right, e.g. a
+    patched exe whose .bak was deleted -- but the banner and the disk statement no longer say nothing was changed:
+    the record and its ini keys were removed (audits 2026-11-15)."""
+    (game / rc.JSON_NAME).write_text('{"target_id": "pracx"}', encoding="utf-8")
+    rcode, out = _run("--uninstall", game=game, expect_ok=False)
+    assert rcode == ix.EXIT_ABORTED and "Nothing to uninstall" in out, out
+    assert "NOTHING TO UNINSTALL" in out and "NOTHING WAS CHANGED" not in out, out
+    assert "Only Longevity Vaccine's leftover bookkeeping was removed" in out, out
+    assert "Nothing on disk was changed" not in out and "reinstall the game" in out, out
+    assert not (game / rc.JSON_NAME).exists()
 
 
 def test_uninstall_restores_the_companion_too(game, prax_bak_path):
@@ -674,6 +1000,8 @@ def test_repair_does_not_claim_an_installation(game_installed):
     game = game_installed
     rcode, out = _run("--repair", game=game)
     assert "REPAIR COMPLETE" in out, out
+    assert (f"Longevity Vaccine's updater was reinstalled (version {ver.VERSION}). Your game files were not "
+            "touched.") in out, out                                                       # user 2026-11-15
     assert "INSTALLATION SUCCESSFUL" not in out
 
 
@@ -711,7 +1039,7 @@ def test_a_foreign_companion_is_left_alone_and_does_not_fail_the_install(game):
     (game / "prax.dll").write_bytes(junk)
     rcode, out = _run("--ai", "off", game=game)
     assert rcode == 0, out
-    assert "leaving it alone" in out, out
+    assert "so it is left alone" in out, out
     assert (game / "prax.dll").read_bytes() == junk
     assert not (game / "prax.dll.bak").exists(), "a foreign file must not be backed up as clean"
 
@@ -849,12 +1177,12 @@ def test_a_pack_release_updates_the_pack_with_no_flags(game_installed, tmp_path)
                   versions={"movies-hd": "1.1.0"})
     _, out = _run("--update", "--manifest", str(m2), "--no-prompt", game=game, env_extra=_ENV)
     assert "Already up to date" not in out, out
-    assert "HD Cinematics v1.1.0 downloaded" in out, out    # the player-facing label, not the module id
+    assert "Z2k Retro's HD Cinematics v1.1.0 downloaded" in out, out    # the player-facing label, not the module id
     assert (game / "movies" / "hd" / "a.mp4").read_bytes() == b"v2"
     assert (game / "movies" / "hd" / "b.mp4").read_bytes() == b"new"
     assert rc.module_version(rc.read(game), "movies-hd") == "1.1.0"
-    assert "update offered: HD Cinematics v1.0.0 -> v1.1.0" in out, out
-    assert "HD Cinematics v1.1.0 installed. Nothing else needed changing." in out, out
+    assert "update offered: Z2k Retro's HD Cinematics v1.0.0 -> v1.1.0" in out, out
+    assert "Z2k Retro's HD Cinematics v1.1.0 installed. Nothing else needed changing." in out, out
 
 
 def test_a_base_release_does_not_redownload_a_current_pack(game_installed, tmp_path):
@@ -866,7 +1194,7 @@ def test_a_base_release_does_not_redownload_a_current_pack(game_installed, tmp_p
                   versions={"movies-hd": "1.0.0"})
     _, out = _run("--update", "--manifest", str(m2), "--no-prompt", game=game, env_extra=_ENV)
     assert "commit" in out, out                      # the base update itself still happens
-    assert "HD Cinematics: up to date (v1.0.0), no download needed" in out, out
+    assert "Z2k Retro's HD Cinematics: up to date (v1.0.0), no download needed" in out, out
     assert "module movies-hd downloaded" not in out, out
     assert rc.module_version(rc.read(game), "movies-hd") == "1.0.0", \
         "an untouched pack keeps its recorded version"
@@ -948,10 +1276,10 @@ def test_only_listed_installs_the_listed_new_pack_and_leaves_a_declined_one(game
     _, out = _run("--update", "--only-listed", "--modules", "portraits-hd", "--manifest", str(m),
                   "--no-prompt", game=game, env_extra=_ENV)
     assert "UPDATE COMPLETE" in out, out
-    assert "HD Cinematics v1.1.0: not part of this update" in out, out
-    assert "HD Cinematics v1.1.0 downloaded" not in out, out
+    assert "Z2k Retro's HD Cinematics v1.1.0: not part of this update" in out, out
+    assert "Z2k Retro's HD Cinematics v1.1.0 downloaded" not in out, out
     # The verdict names the pack left behind -- never "Nothing else needed changing".
-    assert "HD Cinematics stays at v1.0.0 (v1.1.0 was not part of this update)" in out, out
+    assert "Z2k Retro's HD Cinematics stays at v1.0.0 (v1.1.0 was not part of this update)" in out, out
     assert "Nothing else needed changing" not in out, out
     state = rc.read(game)
     assert rc.module_version(state, "portraits-hd") == "1.0.0"
@@ -984,8 +1312,8 @@ def test_only_listed_without_modules_brings_only_the_core_current(game_installed
     _, out = _run("--update", "--only-listed", "--manifest", str(m), "--no-prompt", game=game,
                   env_extra=_ENV)
     assert "game patch: applied" in out, out
-    assert "HD Cinematics v1.1.0: not part of this update" in out, out
-    assert "HD Cinematics: up to date" not in out, out
+    assert "Z2k Retro's HD Cinematics v1.1.0: not part of this update" in out, out
+    assert "Z2k Retro's HD Cinematics: up to date" not in out, out
     assert (game / "movies" / "hd" / "a.mp4").read_bytes() == b"v1"
     assert rc.module_version(rc.read(game), "movies-hd") == "1.0.0"
 
@@ -1030,7 +1358,7 @@ def test_an_already_current_run_says_which_pack_could_be_added(game_installed, t
                  versions={"movies-hd": "1.0.0"})
     _, out = _run("--update", "--manifest", str(m), game=game, env_extra=_ENV)
     assert "Already up to date" in out, out
-    assert "HD Cinematics: available, not installed" in out, out
+    assert "Z2k Retro's HD Cinematics: available, not installed" in out, out
     launcher = game / "LongevityMods" / "updater" / "scripts" / "run-install.bat"
     assert launcher.is_file()
     assert f'"{launcher}" --update --modules movies-hd --manifest "{m}"' in out, \
@@ -1047,7 +1375,7 @@ def test_a_pack_can_be_named_by_its_label(game_installed, tmp_path):
     _, out = _run("--update", "--manifest", str(m), "--modules", "hd CINEMATICS",
                   "--no-prompt", game=game, env_extra=_ENV)
     assert (game / "movies" / "hd" / "a.mp4").read_bytes() == b"v1"
-    assert "HD Cinematics v1.0.0 installed. Nothing else needed changing." in out, out
+    assert "Z2k Retro's HD Cinematics v1.0.0 installed. Nothing else needed changing." in out, out
     assert "available, not installed" not in out, "the pack just installed must not be offered"
 
 
@@ -1082,7 +1410,7 @@ def test_a_pack_only_update_whose_download_fails_changes_nothing(game_installed,
     code, out = _run("--update", "--manifest", str(m2), "--no-prompt", game=game,
                      env_extra=_ENV, expect_ok=False)
     assert code == 3, out
-    assert "The update to HD Cinematics v1.1.0 could not be downloaded. HD Cinematics v1.0.0 " \
+    assert "The update to Z2k Retro's HD Cinematics v1.1.0 could not be downloaded. Z2k Retro's HD Cinematics v1.0.0 " \
            "are still installed and work as before. Nothing was changed." in out, out
     assert "NOTHING WAS CHANGED" in out, out
     assert "UPDATE COMPLETE" not in out and "INSTALLATION SUCCESSFUL" not in out
@@ -1104,11 +1432,11 @@ def test_a_base_update_with_a_failed_pack_is_not_reported_as_complete(game_insta
                      env_extra=_ENV, expect_ok=False)
     assert code == 1, out
     assert "UPDATE PARTLY COMPLETE" in out, out
-    assert f"Longevity Vaccine v{ver.VERSION} is installed and the game is ready to play. " \
-           "The update to HD Cinematics v1.1.0 could not be downloaded. HD Cinematics v1.0.0 " \
+    assert f"Longevity Vaccine {ver.VERSION} is installed. " \
+           "The update to Z2k Retro's HD Cinematics v1.1.0 could not be downloaded. Z2k Retro's HD Cinematics v1.0.0 " \
            "are still installed and work as before." in out, out
     assert "only the pack update is missing" in out and "partway through" not in out, out
-    assert "run the update again to get HD Cinematics v1.1.0" in out, out
+    assert "run the update again to get Z2k Retro's HD Cinematics v1.1.0" in out, out
     assert "UPDATE COMPLETE" not in out and "INSTALLATION SUCCESSFUL" not in out
     assert "INSTALLATION FAILED" not in out
     state = rc.read(game)
@@ -1155,7 +1483,7 @@ def test_check_reports_a_new_pack_then_honours_a_decline(game_installed, tmp_pat
     code, lines, err = _check(game, "--manifest", str(m))
     assert code == 10, err
     assert lines[0] == f"latest={ver.VERSION}"
-    assert lines[1].startswith("new=movies-hd|HD Cinematics|1.0.0|"), lines
+    assert lines[1].startswith("new=movies-hd|Z2k Retro's HD Cinematics|1.0.0|"), lines
     assert not (game / "movies").exists(), "--check installs nothing"
     assert rc.decline(game, "new:movies-hd", "1.0.0")
     code, lines, err = _check(game, "--manifest", str(m))
@@ -1204,7 +1532,7 @@ def test_the_dll_parser_reads_every_real_check_answer(game_installed, tmp_path, 
     code, raw = _check_raw(game, "--manifest", str(m))
     out = _dll_parse(dll_parser, code, raw, tmp_path)
     assert out[0] == "status=ok code=10 badline=0" and out[1] == f"latest={ver.VERSION}"
-    assert re.fullmatch(r"new=movies-hd\|HD Cinematics\|1\.0\.0\|\d+", out[2]), out
+    assert re.fullmatch(r"new=movies-hd\|Z2k Retro's HD Cinematics\|1\.0\.0\|\d+", out[2]), out
     # base update + stale pack
     _with_pack(tmp_path, game, "1.0.0", {"movies/hd/a.mp4": b"v1"})
     m = _publish(tmp_path / "p2", game, latest="9.9.9",
@@ -1212,7 +1540,7 @@ def test_the_dll_parser_reads_every_real_check_answer(game_installed, tmp_path, 
     code, raw = _check_raw(game, "--manifest", str(m))
     out = _dll_parse(dll_parser, code, raw, tmp_path)
     assert out[:3] == ["status=ok code=10 badline=0", "latest=9.9.9", f"base={ver.VERSION}>9.9.9"]
-    assert re.fullmatch(r"stale=movies-hd\|HD Cinematics\|1\.0\.0>1\.1\.0\|\d+", out[3]), out
+    assert re.fullmatch(r"stale=movies-hd\|Z2k Retro's HD Cinematics\|1\.0\.0>1\.1\.0\|\d+", out[3]), out
     # manual (kill switch)
     pub = tmp_path / "p3"
     pub.mkdir()
@@ -1416,7 +1744,7 @@ def test_check_honours_an_any_version_decline_across_releases(game_installed, tm
     assert code == 0 and lines == [f"latest={ver.VERSION}"], (lines, err)
     assert rc.clear_declines(game)
     code, lines, err = _check(game, "--manifest", str(m2))
-    assert code == 10 and lines[1].startswith("new=movies-hd|HD Cinematics|2.0.0|"), (lines, err)
+    assert code == 10 and lines[1].startswith("new=movies-hd|Z2k Retro's HD Cinematics|2.0.0|"), (lines, err)
 
 
 def test_check_reports_a_stale_pack_and_a_base_update(game_installed, tmp_path):
@@ -1429,7 +1757,7 @@ def test_check_reports_a_stale_pack_and_a_base_update(game_installed, tmp_path):
     assert code == 10, err
     assert lines[0] == "latest=9.9.9"
     assert lines[1] == f"base={ver.VERSION}>9.9.9"
-    assert lines[2].startswith("stale=movies-hd|HD Cinematics|1.0.0>1.1.0|"), lines
+    assert lines[2].startswith("stale=movies-hd|Z2k Retro's HD Cinematics|1.0.0>1.1.0|"), lines
     assert (game / "movies" / "hd" / "a.mp4").read_bytes() == b"v1", "--check installs nothing"
 
 
@@ -1484,7 +1812,7 @@ def test_check_keeps_working_when_the_game_folder_is_not_writable(game_installed
                         "--manifest", str(m)], capture_output=True, env=env, timeout=300,
                        stdin=subprocess.DEVNULL)
     assert p.returncode == 10, p.stderr.decode("utf-8", "replace")
-    assert b"new=movies-hd|HD Cinematics|1.0.0|" in p.stdout
+    assert b"new=movies-hd|Z2k Retro's HD Cinematics|1.0.0|" in p.stdout
     assert b"is not writable; caching the manifest under" in p.stderr
     cached = list((tmp_path / "appdata" / "LongevityVaccine").rglob("manifest.json"))
     assert len(cached) == 1, "the manifest is cached per user, per install"
@@ -1555,7 +1883,7 @@ def test_a_fresh_install_can_take_a_pack_from_the_manifest(game, tmp_path):
     assert rc.module_version(state, "movies-hd") == ver.VERSION
     assert rc.module_version(state, "base") == ver.VERSION
     assert _uimod_flag(game) == "1"
-    rows = [l for l in out.split("\n") if l.startswith("  HD Cinematics")]
+    rows = [l for l in out.split("\n") if l.startswith("  Z2k Retro's HD Cinematics")]
     assert rows and rows[-1].split()[-1] == "Success", rows
     lines = out.split("\n")
     assert not any(l.startswith("  recorded") for l in lines), "no bookkeeping row"
@@ -1573,6 +1901,7 @@ def test_a_pack_that_cannot_be_downloaded_leaves_a_partly_complete_install(game,
                       env_extra={"LONGEVITY_TRUST_KEY": PK_HEX}, expect_ok=False)
     assert rcode == ix.EXIT_ERROR, out
     assert "INSTALLATION PARTLY COMPLETE" in out and "INSTALLATION SUCCESSFUL" not in out, out
+    assert f"Longevity Vaccine {ver.VERSION} is installed. Z2k Retro's HD Cinematics was not installed." in out, out   # user 2026-11-15
     assert "ready to play" in out
     table = ap.load_targets(PATCHES)
     assert hashlib.md5((game / "terranx_PRACX.exe").read_bytes()).hexdigest() \
@@ -1580,20 +1909,21 @@ def test_a_pack_that_cannot_be_downloaded_leaves_a_partly_complete_install(game,
     state = rc.read(game)
     assert rc.module_version(state, "base") == ver.VERSION
     assert "movies-hd" not in (state.get("modules") or {})
-    rows = [l for l in out.split("\n") if l.startswith("  HD Cinematics")]
+    rows = [l for l in out.split("\n") if l.startswith("  Z2k Retro's HD Cinematics")]
     assert rows and rows[-1].split()[-1] == "Error", rows
 
 
 def test_content_left_on_disk_is_not_recorded_as_an_installed_pack(game):
     """An uninstall leaves movies\\hd behind. A re-install must not record that folder as the
-    current pack (it would hide the pack from the update prompt for good); it only turns the
-    cinematics flag on so the clips that are there play."""
+    current pack (it would hide the pack from the update prompt for good). The flag follows the
+    explicit choice, never the files (audit-t ROOT 1): --ai off means "don't play HD movies"."""
     (game / "movies" / "hd").mkdir(parents=True)
     (game / "movies" / "hd" / "stray.mp4").write_bytes(b"x")
     rcode, out = _run("--ai", "off", game=game)
     assert "INSTALLATION SUCCESSFUL" in out, out
     assert "movies-hd" not in (rc.read(game).get("modules") or {})
-    assert _uimod_flag(game) == "1"
+    assert _uimod_flag(game) == "0"
+    assert (game / "movies" / "hd" / "stray.mp4").read_bytes() == b"x"         # the player's file, untouched
 
 
 # ---------------------------------------------------------------- PRACX + Thinker (2026-10-28)
@@ -1821,7 +2151,7 @@ def test_a_plain_pracx_exe_named_terranx_is_not_called_unmodified(tmp_path, bak_
     shutil.copy2(bak_path, g / "terranx.exe")
     (g / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
     rcode, out = _run("--ai", "off", game=g)
-    assert "To play with the mod, start terranx.exe." in out, out
+    assert "To play with Longevity Vaccine, start terranx.exe." in out, out
     assert "terranx.exe and terran.exe all start" not in out, out
     assert "terran.exe" in out and "unmodified game" in out, out
 
@@ -1875,6 +2205,316 @@ def test_a_stock_thinker_folder_is_set_up_and_uninstall_puts_the_original_back(t
     assert not (g / "terranx_original.exe").exists() and not (g / "terranx.exe.bak").exists()
     assert _md5(g / "terranx_PRACX.exe") == base
     assert not (g / "longevity-thinker-setup.json").exists()
+
+
+def test_a_read_only_kept_original_does_not_block_the_uninstall(tmp_path, bak_path, pristine_bytes):
+    """The set-up keeps the original terranx.exe by renaming it, so a read-only original stays read-only. The
+    uninstall only renames it back, which Windows allows, so the up-front check must not refuse it (audit
+    2026-11-15: it did, though master uninstalled that folder)."""
+    import stat
+    g = _thinker_folder(tmp_path, bak_path, pristine_bytes)
+    vanilla = _md5(g / "terranx.exe")
+    rcode, out = _run("--ai", "off", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    (g / "terranx_original.exe").chmod(stat.S_IREAD)
+    try:
+        rcode, out = _run("--uninstall", game=g)
+        assert "UNINSTALL COMPLETE" in out and "UNINSTALL NOT STARTED" not in out, out
+        assert _md5(g / "terranx.exe") == vanilla and not (g / "terranx_original.exe").exists()
+    finally:
+        for p in (g / "terranx.exe", g / "terranx_original.exe"):
+            if p.exists():
+                p.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def _shared_once(prefix: str, build, serial_dir) -> Path:
+    """`build(dir)`'s result, built ONCE per pytest run and shared by every xdist worker -- baked_exe.build's scheme
+    (a file lock in a run-keyed temp folder; a marker written after success; stale run folders swept). A serial run
+    builds in `serial_dir()` (pytest's own temp, cleaned by pytest)."""
+    import tempfile
+    import time
+    import baked_exe as B
+    from cpp_harness import file_lock
+    run = os.environ.get("PYTEST_XDIST_TESTRUNUID")
+    tmp = Path(tempfile.gettempdir())
+    if not run:
+        return build(Path(serial_dir()))
+    root = tmp / f"{prefix}{run}"
+    root.mkdir(exist_ok=True)
+    now = time.time()
+    # Swept after 2 h, not baked_exe's 24 h: a run never lasts that long, and at ~13 MB a run, a day's worth piled
+    # up to ~400 MB in %TEMP% (audit 2026-11-16).
+    for d in tmp.glob(f"{prefix}*"):
+        try:
+            if d != root and now - d.stat().st_mtime > 2 * 3600:
+                B._rmtree(d)
+        except OSError:
+            pass
+    with file_lock(root / "lock", B.LOCK_TIMEOUT_S):
+        if not (root / "ok").exists():
+            B._rmtree(root / "base")
+            (root / "base").mkdir()
+            (root / "result").write_text(str(build(root / "base")), encoding="utf-8")
+            (root / "ok").touch()
+    return Path((root / "result").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def _thinker_installed(tmp_path_factory, bak_path, pristine_bytes, _payload_root):
+    """ONE real Thinker set-up install per pytest run (shared across xdist workers), the template for the
+    uninstall-check property test: cases hardlink or copy from it and must never change it (checked at teardown).
+    The resident updater and the ffmpeg DLLs are dropped from it: the property is about the set-up's files, and
+    the copies stay small."""
+    def build(base: Path) -> Path:
+        g = _thinker_folder(base, bak_path, pristine_bytes)
+        rcode, out = _run("--ai", "off", game=g, env_extra={"LONGEVITY_PAYLOAD_ROOT": str(_payload_root)})
+        assert "INSTALLATION SUCCESSFUL" in out, out
+        shutil.rmtree(g / "LongevityMods", ignore_errors=True)
+        for p in g.glob("*.dll"):
+            if p.name.lower().startswith(("av", "sw")):
+                p.unlink()
+        return g
+    shared = _shared_once("smacx-thinker-tpl-", build, lambda: tmp_path_factory.mktemp("thinker_tpl"))
+    # This worker's own copy: the cases hardlink from it, and a hardlink is the SAME file -- linked from the shared
+    # template, another worker reading it (no delete sharing) made this worker's check refuse an unlocked folder
+    # (2026-11-15). Within one worker the cases run one at a time.
+    g = tmp_path_factory.mktemp("thinker_local") / "game"
+    shutil.copytree(shared, g)
+    before = _tree(g)
+    yield g
+    # the cases hardlink the template's .bak / .dll files: nothing may have written through them
+    assert _tree(g) == before, "a property case changed the shared template"
+    _discard(g.parent)
+
+
+#: Set-up states the undo meets (undo_thinker_setup's case numbers): as installed (revert, then 6); the player put
+#: the original back by hand (1); an uninstall interrupted after the revert (6 without it); GOG's file check put
+#: the stock exe back after the player deleted the kept original (3); someone else's exe in place (4, held); and
+#: the revert's copy source being terranx_PRACX.exe.bak, with terranx_PRACX.exe a build the generic restore then
+#: puts back (audit 2026-11-15: counting that source as taken dropped terranx_PRACX.exe from the check).
+_SETUP_STATES = ["as-installed", "original-back", "half-done", "gog-verified-original-deleted", "held",
+                 "pracx-bak-source"]
+_SETUP_FILES = ["terranx.exe", "terranx.exe.bak", "terranx_original.exe", "terranx_PRACX.exe",
+                "terranx_PRACX.exe.bak", "uimod.dll", "longevity-thinker-setup.json", rc.JSON_NAME, None]
+_PE_FILES = {"terranx.exe", "terranx.exe.bak", "terranx_original.exe", "terranx_PRACX.exe", "terranx_PRACX.exe.bak",
+             "uimod.dll"}
+
+
+import contextlib  # noqa: E402
+import stat  # noqa: E402 - the read-only bit, for the property test below
+
+
+def _setup_state(g: Path, state: str, pristine_bytes: bytes) -> None:
+    if state == "original-back":
+        shutil.copy2(g / "terranx_original.exe", g / "terranx.exe")
+    elif state == "half-done":
+        shutil.copy2(g / "terranx.exe.bak", g / "terranx.exe")
+    elif state == "gog-verified-original-deleted":
+        (g / "terranx_original.exe").unlink()
+        (g / "terranx.exe").write_bytes(pristine_bytes)
+    elif state == "held":
+        shutil.copy2(sys.executable, g / "terranx.exe")                         # someone else's (real) exe
+    elif state == "pracx-bak-source":
+        shutil.copy2(g / "terranx_PRACX.exe", g / "terranx_PRACX.exe.bak")     # the clean base, as the .bak
+        shutil.copy2(g / "terranx.exe", g / "terranx_PRACX.exe")               # a build of ours in its place
+        (g / "terranx.exe.bak").unlink()                                       # so the revert copies from it
+
+
+@contextlib.contextmanager
+def _locked(p: Path, kind: str):
+    """`p` read-only, or hidden; mapped as an image the way a running exe / loaded DLL is
+    (LOAD_LIBRARY_AS_IMAGE_RESOURCE: nothing runs; writes and deletes are refused, a rename is allowed -- as for a
+    running exe); or held open by another program: "shared" the usual way (read access, sharing read + write but not
+    delete -- what Python's or the C runtime's open does), "exclusive" (no sharing at all), "shareall" (sharing
+    everything, as a virus scanner does: no file can be moved ONTO its name then -- audit 2026-11-16, D2), "deleter"
+    (read + delete access, sharing read + write: Python's own open fails then -- D1), "readdelete" (sharing read +
+    delete, not write: a delete still works -- D5). The earlier audit's (2026-11-16): "shared" refused a file that is
+    only overwritten; "exclusive" read as "absent" to the plan. A hidden exe failed its copy2 (D4)."""
+    handles = {"shared": (0x80000000, 3), "exclusive": (0x80000000, 0), "shareall": (0x80000000, 7),
+               "deleter": (0x80010000, 3), "readdelete": (0x80000000, 5)}
+    if kind in handles:
+        import _winapi
+        h = _winapi.CreateFile(str(p), handles[kind][0], handles[kind][1], 0, 3, 0, 0)
+        try:
+            yield
+        finally:
+            _winapi.CloseHandle(h)
+        return
+    if kind in ("readonly", "hidden"):
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.SetFileAttributesW(str(p), 0x1 if kind == "readonly" else 0x2)
+        try:
+            yield
+        finally:
+            # the run may have moved or copied it on (the caller resets the whole folder): every copy back to plain
+            for q in p.parent.iterdir():
+                try:
+                    if q.is_file() and getattr(q.stat(), "st_file_attributes", 0) & 0x3:
+                        k32.SetFileAttributesW(str(q), 0x80)
+                except OSError:
+                    pass
+        return
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.LoadLibraryExW.restype = wintypes.HMODULE
+    k32.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
+    k32.FreeLibrary.argtypes = [wintypes.HMODULE]
+    h = k32.LoadLibraryExW(str(p), None, 0x20)
+    if not h:
+        pytest.skip(f"{p.name} cannot be mapped as an image here ({ctypes.get_last_error()})")
+    try:
+        yield
+    finally:
+        k32.FreeLibrary(h)
+
+
+def _uninstall_in_process(g: Path, bypass_check: bool = False) -> str:
+    """'UNINSTALL COMPLETE' / 'UNINSTALL INCOMPLETE' / 'NOT STARTED' / 'FAILED' (raised part-way)."""
+    import types
+    import install as inst
+    import preflight as pfm
+    inst._load_modules()
+    real = pfm.change_blocker, getattr(pfm, "read_only_reason", None), getattr(pfm, "probe", None)
+    if bypass_check:
+        pfm.change_blocker = lambda p, rename_only=False: ""
+        pfm.read_only_reason = lambda p: ""
+        pfm.probe = lambda p, modes: ""
+    inst._VERDICT = None
+    try:
+        inst.do_uninstall(g, types.SimpleNamespace())
+        return inst._VERDICT[0]
+    except ix.InstallerError as e:
+        return "NOT STARTED" if e.title == "UNINSTALL NOT STARTED" else "FAILED"
+    except OSError:
+        return "FAILED"
+    finally:
+        pfm.change_blocker, pfm.read_only_reason, pfm.probe = real
+        inst._VERDICT = None
+
+
+def _writable(g: Path) -> None:
+    for p in g.rglob("*"):
+        if p.is_file():
+            p.chmod(0o666)
+
+
+def _discard(g: Path) -> None:
+    """Delete a case's copy as soon as it is done with: each holds fresh copies of the real exes, ~200 cases a run,
+    and pytest keeps three runs' temp folders -- gigabytes on C: while an audit reruns the suite (2026-11-16).
+    Hardlinked .bak / .dll files go by name only; the template keeps its own."""
+    _writable(g)
+    shutil.rmtree(g, ignore_errors=True)
+
+
+#: {state: (verdict, the folder afterwards, the files present before)} -- the run with nothing locked, per worker.
+_BASELINE: dict = {}
+
+
+def _property_cases():
+    for state in _SETUP_STATES:
+        for f in _SETUP_FILES:
+            yield state, f, "readonly"
+            if f is None:
+                continue
+            if f in _PE_FILES:
+                yield state, f, "running"
+            yield state, f, "shared"
+            yield state, f, "exclusive"
+            yield state, f, "shareall"
+            yield state, f, "deleter"
+            if f not in _PE_FILES:
+                yield state, f, "readdelete"            # deleted only: a reader sharing delete must not refuse it
+            if f in ("terranx.exe", "terranx_PRACX.exe"):
+                yield state, f, "hidden"                # overwritten by copy2, which refuses a hidden file
+
+
+@pytest.mark.parametrize("state,locked,kind", list(_property_cases()),
+                         ids=lambda v: v if isinstance(v, str) else "none")
+def test_the_uninstall_check_refuses_exactly_when_the_run_would_fail(_thinker_installed, tmp_path, pristine_bytes,
+                                                                     state, locked, kind):
+    """The property the up-front check exists for, over Thinker set-up states x one locked file (read-only, or
+    mapped like a running exe): with the check, the uninstall never fails part-way -- it ends exactly as it would
+    with nothing locked (same verdict, same folder), or refuses with the folder byte-identical; and it refuses ONLY
+    when the same run without the check would fail part-way or end differently from the unlocked run -- never a run
+    the lock would not have hurt (audits 2026-11-15: a read-only terranx.exe.bak got through to a half-done
+    uninstall; a read-only kept original was refused though master uninstalled it; a running terranx_PRACX.exe was
+    refused for being the revert's copy source, which is only read).
+
+    Cost, said as the suite's rule asks (measured 2026-11-16): 306 cases with the second audit's holders (sharing
+    everything, holding delete access, sharing read + delete, hidden), ~62 s wall run on their own across the
+    workers; the template install (~9 s) runs ONCE per pytest run, shared by every worker. Most of a case is
+    the on-access scan of each freshly copied exe on its first open (~50 ms each), so only what the run may write
+    INTO is copied -- the .exe files (copy2's targets) and the locked file (its read-only bit is per file, shared by
+    hardlinks); the .bak and .dll files, which the run only renames or deletes (name-level), are hardlinks to this
+    worker's own copy of the template (never the shared one: another worker reading a linked file would hold it
+    without delete sharing and make the check refuse), which teardown checks is unchanged."""
+    def fresh(name: str) -> Path:
+        g = tmp_path / name
+
+        def place(src, dst):
+            if Path(src).suffix.lower() in (".bak", ".dll") and Path(src).name != locked:
+                os.link(src, dst)
+            else:
+                shutil.copy2(src, dst)
+        shutil.copytree(_thinker_installed, g, copy_function=place)
+        _setup_state(g, state, pristine_bytes)
+        return g
+
+    if state not in _BASELINE:
+        g0 = fresh("baseline")
+        present = {p.name for p in g0.iterdir() if p.is_file()}
+        verdict = _uninstall_in_process(g0)
+        _BASELINE[state] = (verdict, _tree(g0), present)
+        _discard(g0)
+    baseline, baseline_tree, present = _BASELINE[state]
+    assert baseline in ("UNINSTALL COMPLETE", "UNINSTALL INCOMPLETE"), (state, baseline)
+    if locked is not None and locked not in present:
+        pytest.skip(f"no {locked} in this state")
+    g = fresh("checked")
+    locked_id = os.stat(g / locked).st_ino if locked else None
+
+    def read_only_files() -> set:
+        """Files carrying the read-only or hidden bit, by name, except the locked file itself wherever the run moved
+        it (identified by its file ID): a copy2 FROM it would spread the bit to a new file, which _tree's bytes miss
+        (audit 2026-11-15; hidden 2026-11-16)."""
+        out = set()
+        for p in g.iterdir():
+            st = p.stat()
+            if p.is_file() and getattr(st, "st_file_attributes", 0) & 0x3 and st.st_ino != locked_id:
+                out.add(p.name)
+        return out
+
+    try:
+        before = _tree(g)                       # hashed outside the lock: an exclusive hold refuses the test's
+        with (_locked(g / locked, kind) if locked else contextlib.nullcontext()):    # reads too
+            outcome = _uninstall_in_process(g)
+            spread = read_only_files()
+        after = _tree(g)
+        assert outcome != "FAILED", (state, locked, kind, "the check let a part-way failure through")
+        assert not spread, (state, locked, kind, "the run passed the read-only or hidden bit on", spread)
+        if outcome == "NOT STARTED":
+            assert after == before, (state, locked, kind, "a refused uninstall changed the folder")
+            g2 = fresh("unchecked")
+            try:
+                with _locked(g2 / locked, kind):
+                    unchecked = _uninstall_in_process(g2, bypass_check=True)
+                unchecked_tree = _tree(g2)
+            finally:
+                _discard(g2)
+            # An exclusive hold on a file the run DECIDES from (the set-up's undo hashes these) is refused even where
+            # the uninformed run happens to land on the same folder: a decision from an unreadable input is luck,
+            # and elsewhere it overwrote the only original (audit 2026-11-16).
+            decided_from = {"terranx.exe", "terranx.exe.bak", "terranx_original.exe", "terranx_PRACX.exe",
+                            "terranx_PRACX.exe.bak", "longevity-thinker-setup.json"}
+            assert (unchecked == "FAILED" or (unchecked, unchecked_tree) != (baseline, baseline_tree)
+                    or (kind in ("exclusive", "deleter") and locked in decided_from)), \
+                (state, locked, kind, "refused, but the lock would not have hurt the run", unchecked)
+        else:
+            assert (outcome, after) == (baseline, baseline_tree), (state, locked, kind, outcome, baseline)
+    finally:
+        _discard(g)
 
 
 def test_a_foreign_terranx_backup_fails_the_install_before_anything_is_patched(tmp_path, bak_path, pristine_bytes):
@@ -2212,3 +2852,245 @@ def test_a_locked_terranx_fails_the_set_up_with_nothing_changed(tmp_path, bak_pa
     assert rcode == ix.EXIT_ABORTED, out
     assert "could not be set up for Thinker" in out and "Nothing on disk was changed" in out, out
     assert _tree(g) == before
+
+
+# ---------------------------------------------------------------- Thinker Mod, as a real script (code review 2026-11-15)
+#
+# Every other run in this file adds --keep-thinker (its thinker.dll is a stand-in), so no real installer process
+# ever changed Thinker: the verdict that crashed walkthrough Part 3 was never built. These three run the script
+# for each path that does -- B (a first Thinker install), Q1 accepted (an install over Thinker 5.4), and an update
+# that changes Thinker -- with nothing stubbed: the pinned zip is seeded in the folder's staging, so the real
+# download finds it "already present and verified" (the network is the only thing skipped). ~8-15 s each; they
+# are separate tests so xdist spreads them.
+
+def _thinker_zip() -> Path:
+    """The pinned Thinker Mod 5.5 zip under LONGEVITY_REFS. Not set (refs\\ is gitignored; a plain run without it): a
+    skip. Set -- the release gate sets it to the checkout's refs (audit-m #5) -- and the zip missing: _missing, a FAILURE
+    under LONGEVITY_REQUIRE_E2E (audit-l L4)."""
+    refs = os.environ.get("LONGEVITY_REFS", "")
+    if not refs:
+        pytest.skip("LONGEVITY_REFS is not set (the pinned Thinker Mod 5.5 zip is under it)")
+    z = Path(refs) / "thinker-release" / "thinker-5.5.0.zip"
+    if not z.is_file():
+        _missing(z, "the pinned Thinker Mod 5.5 zip")
+    return z
+
+
+def _seed_thinker_zip(game: Path) -> None:
+    d = game / "LongevityMods" / "staging" / "thinker"
+    d.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(_thinker_zip(), d / "thinker-5.5.0.zip")
+
+
+def _thinker_54_game(tmp_path: Path, bak_path: Path) -> Path:
+    from test_thinker_flow import _dll
+    g = tmp_path / "game"
+    g.mkdir()
+    shutil.copy2(bak_path, g / "terranx.exe")
+    (g / "thinker.dll").write_bytes(_dll(b"Thinker Mod v5.4"))
+    (g / "thinker.exe").write_bytes(b"MZ old launcher")
+    (g / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
+    return g
+
+
+def _pin_dll() -> str:
+    import thinker_data as td
+    return td.PIN_DLL_SHA256
+
+
+def test_a_first_install_that_also_installs_thinker_runs_as_a_script(tmp_path, bak_path):
+    g = tmp_path / "game"
+    g.mkdir()
+    shutil.copy2(bak_path, g / "terranx_PRACX.exe")
+    (g / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
+    _seed_thinker_zip(g)
+    rcode, out = _run("--ai", "off", "--with-thinker", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out and "Thinker Mod 5.5 was installed." in out, out
+    assert "  Installing Thinker Mod 5.5" in out and "  Thinker Mod 5.5: installed (" in out, out
+    assert hashlib.sha256((g / "thinker.dll").read_bytes()).hexdigest() == _pin_dll()
+    table = ap.load_targets(PATCHES)
+    assert hashlib.md5((g / "terranx.exe").read_bytes()).hexdigest() == table["pracx_thinker"].patched_md5
+    assert hashlib.md5((g / "terranx_PRACX.exe").read_bytes()).hexdigest() == table["pracx_thinker"].base_md5
+    assert rc.ini_get(g, rc.KEY_TARGET) == "pracx_thinker"
+    assert "start thinker.exe." in out and "as before" not in out, out
+    assert not (g / "LongevityMods" / "thinker-journal.json").exists()
+    assert not list((g / "LongevityMods" / "backups").glob("thinker-*")), "a first install leaves no backup set"
+
+
+def test_an_install_that_updates_thinker_runs_as_a_script(tmp_path, bak_path):
+    """Walkthrough Part 3's path: a first install over Thinker Mod 5.4, Thinker updated. It crashed at the verdict."""
+    g = _thinker_54_game(tmp_path, bak_path)
+    _seed_thinker_zip(g)
+    rcode, out = _run("--ai", "off", "--with-thinker", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert "Thinker Mod was updated to 5.5." in out and "  Thinker Mod: updated to 5.5 (" in out, out
+    assert hashlib.sha256((g / "thinker.dll").read_bytes()).hexdigest() == _pin_dll()
+    sets = list((g / "LongevityMods" / "backups").glob("thinker-5.4-*"))
+    assert len(sets) == 1 and (sets[0] / "thinker.dll").read_bytes()[:2] == (b"MZ")
+    table = ap.load_targets(PATCHES)
+    assert hashlib.md5((g / "terranx.exe").read_bytes()).hexdigest() == table["pracx_thinker"].patched_md5
+    assert not (g / "LongevityMods" / "thinker-journal.json").exists()
+
+
+def test_an_update_that_changes_thinker_runs_as_a_script(tmp_path, bak_path):
+    """do_update's Thinker branch with a real step: Longevity Vaccine installed beside Thinker Mod 5.4 (kept), then
+    an update that takes Thinker to 5.5 in the same commit."""
+    g = _thinker_54_game(tmp_path, bak_path)
+    rcode, out = _run("--ai", "off", "--keep-thinker", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    _seed_thinker_zip(g)
+    m = _publish(tmp_path, g, latest="9.9.9", modules={"movies-hd": {"movies/hd/opening.mp4": b"fake clip"}})
+    rcode, out = _run("--update", "--manifest", str(m), "--modules", "movies-hd", "--no-prompt", "--with-thinker",
+                      game=g, env_extra={"LONGEVITY_TRUST_KEY": PK_HEX})
+    assert "UPDATE COMPLETE" in out, out
+    assert "  Thinker Mod: updated to 5.5 (" in out, out
+    assert hashlib.sha256((g / "thinker.dll").read_bytes()).hexdigest() == _pin_dll()
+    assert not (g / "LongevityMods" / "thinker-journal.json").exists()
+    table = ap.load_targets(PATCHES)
+    assert hashlib.md5((g / "terranx.exe").read_bytes()).hexdigest() == table["pracx_thinker"].patched_md5
+
+
+_CTRL_C_IN_COMMIT = r'''
+import runpy, sys
+sys.path.insert(0, sys.argv[1])
+import thinker_update as tu
+def interrupted(*a, **k):
+    raise KeyboardInterrupt          # Ctrl-C inside Thinker's own commit, after its renames
+tu.older_backups = interrupted
+sys.argv = [sys.argv[2]] + sys.argv[3:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+'''
+
+
+def test_an_update_stopped_inside_the_thinker_commit_says_thinker_was_put_back(tmp_path, bak_path):
+    """Verification of f076f34, MEDIUM-2: on --update the Thinker commit runs inside run_patch_logged, which captures
+    the console into the patch log, so "Thinker Mod was put back as it was." reached only the log. A real __main__
+    run of install.py --update, Ctrl-C injected inside the commit."""
+    g = _thinker_54_game(tmp_path, bak_path)
+    rcode, out = _run("--ai", "off", "--keep-thinker", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    dll_before = (g / "thinker.dll").read_bytes()
+    _seed_thinker_zip(g)
+    m = _publish(tmp_path, g, latest="9.9.9", modules={"movies-hd": {"movies/hd/opening.mp4": b"fake clip"}})
+    wrapper = tmp_path / "ctrl_c_in_commit.py"
+    wrapper.write_text(_CTRL_C_IN_COMMIT, encoding="utf-8")
+    env = dict(os.environ, LONGEVITY_NO_WAIT="1", LONGEVITY_TRUST_KEY=PK_HEX)
+    if _PAYLOAD is not None:
+        env["LONGEVITY_PAYLOAD_ROOT"] = str(_PAYLOAD)
+    p = subprocess.run([str(_PY), str(wrapper), str(_SCRIPTS), str(_INSTALL), "--no-wait", "--game-dir", str(g),
+                        "--update", "--manifest", str(m), "--modules", "movies-hd", "--no-prompt", "--with-thinker"],
+                       capture_output=True, text=True, env=env, timeout=900, stdin=subprocess.DEVNULL)
+    out = p.stdout + p.stderr
+    assert "INSTALLATION CANCELLED" in out, out
+    assert "  Thinker Mod was put back as it was." in out, out
+    assert (g / "thinker.dll").read_bytes() == dll_before
+    assert not (g / "LongevityMods" / "thinker-journal.json").exists()
+
+
+# ---- "See what's new" (user-approved 2026-11-15): the last line of a verdict whose run brought Longevity Vaccine up
+# from an older installed version; never on a fresh install or a same-version re-run.
+
+_WHATS_NEW = f"See what's new in Longevity Vaccine {ver.VERSION}: https://longevitymods.com/vaccine/changelog"
+
+
+def _as_older(game: Path, older: str = "0.9.0") -> None:
+    state = rc.read(game)
+    mods = dict(state.get("modules") or {})
+    mods["base"] = {"version": older}
+    rc.write(game, target_id=state.get("target_id"), modules=mods)
+
+
+def _verdict_lines(out: str, title: str) -> list:
+    """The non-empty lines from the verdict's title on."""
+    tail = title + out.rsplit(title, 1)[-1]
+    return [ln.rstrip() for ln in tail.splitlines() if ln.strip()]
+
+
+def test_an_update_from_an_older_version_ends_with_whats_new(game_installed, tmp_path):
+    game = game_installed
+    _as_older(game)
+    m = _publish(tmp_path, game, latest=ver.VERSION, modules={})
+    _, out = _run("--update", "--manifest", str(m), "--no-prompt", game=game,
+                  env_extra={**_ENV, "WT_SESSION": "0b0b0b0b-0000-4000-8000-000000000000"})
+    assert "UPDATE COMPLETE" in out, out
+    assert rc.module_version(rc.read(game), "base") == ver.VERSION
+    lines = _verdict_lines(out, "UPDATE COMPLETE")
+    i = lines.index("Open the game and enjoy playing Alpha Centauri!")
+    assert lines[i + 1] == _WHATS_NEW + " (Ctrl-click to open)", lines
+
+
+def test_an_install_over_an_older_version_ends_with_whats_new(game_installed):
+    game = game_installed
+    _as_older(game)
+    _, out = _run("--ai", "off", game=game, env_extra={"WT_SESSION": ""})
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    lines = _verdict_lines(out, "INSTALLATION SUCCESSFUL")
+    i = lines.index("Open the game and enjoy playing Alpha Centauri!")
+    assert lines[i + 1] == _WHATS_NEW, lines           # not Windows Terminal: no "(Ctrl-click to open)"
+
+
+def test_a_same_version_reinstall_says_nothing_new(game_installed):
+    _, out = _run("--ai", "off", game=game_installed)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    assert "See what's new" not in out, out
+
+
+# ---------------------------------------------------------------- audit-l H1 / M1, as real scripts
+
+def _stock_help() -> bytes:
+    import patch_helptext as ph
+    return b"; Thinker Mod 5.4 helpx\r\n" + b"".join(tag + b"\r\n" + b"\r\n".join(lines) + b"\r\n"
+                                                  for tag, lines in ph.HELPX_STOCK.items())
+
+
+def test_a_help_text_the_player_changed_survives_a_thinker_update_as_a_script(tmp_path, bak_path):
+    """Audit-l H1 (L1): Thinker 5.4, setup keeps it (Longevity Vaccine patches smac_mod/helpx.txt); the player adds to
+    the help text; setup then updates Thinker. On master's exact-undo model (user ruling 2026-11-17) no backup is
+    written, and the set holds the player's text with ours taken out -- their addition kept, byte for byte."""
+    g = _thinker_54_game(tmp_path, bak_path)
+    (g / "smac_mod").mkdir()
+    (g / "smac_mod" / "helpx.txt").write_bytes(_stock_help())
+    rcode, out = _run("--ai", "off", "--keep-thinker", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    help_ = g / "smac_mod" / "helpx.txt"
+    assert not (g / "smac_mod" / "helpx.txt.longevity.bak").exists()
+    added = b"\r\n; PLAYER HELP EDIT\r\n"
+    mine = help_.read_bytes() + added
+    help_.write_bytes(mine)
+    _seed_thinker_zip(g)
+    rcode, out = _run("--ai", "off", "--with-thinker", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    sets = list((g / "LongevityMods" / "backups").glob("thinker-5.4-*"))
+    assert len(sets) == 1 and (sets[0] / "smac_mod" / "helpx.txt").read_bytes() == _stock_help() + added
+    assert not list((g / "LongevityMods" / "backups").glob("rollback-*"))
+
+
+def test_a_read_only_help_text_never_breaks_an_also_uninstall_as_a_script(tmp_path, bak_path):
+    """Audit-l M1 (U3): Thinker 5.5 installed with Longevity Vaccine, smac_mod/helpx.txt read-only, an unfinished
+    "Also uninstall" (the marked record) finished by a plain --uninstall. On master's model for the help text (user
+    ruling 2026-11-17) the read-only file stops the uninstall up front, nothing changed; once it is writable again
+    the same run restores it, Thinker goes whole, and no false "you changed" row."""
+    import stat
+    import thinker_flow as tf
+    g = tmp_path / "game"
+    g.mkdir()
+    shutil.copy2(bak_path, g / "terranx_PRACX.exe")
+    (g / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
+    _seed_thinker_zip(g)
+    rcode, out = _run("--ai", "off", "--with-thinker", game=g)
+    assert "INSTALLATION SUCCESSFUL" in out, out
+    help_ = g / "smac_mod" / "helpx.txt"
+    assert not (g / "smac_mod" / "helpx.txt.longevity.bak").exists()     # master's model: no backup
+    os.chmod(help_, stat.S_IREAD)
+    rec = json.loads((g / tf.INSTALL_RECORD).read_text(encoding="utf-8"))
+    rec["remove"] = True
+    (g / tf.INSTALL_RECORD).write_text(json.dumps(rec), encoding="utf-8")
+    before = _tree(g)
+    rcode, out = _run("--uninstall", "--no-prompt", game=g, expect_ok=False)
+    assert "UNINSTALL NOT STARTED" in out and "smac_mod\\helpx.txt: the file is read-only" in out, out
+    assert _tree(g) == before
+    os.chmod(help_, stat.S_IREAD | stat.S_IWRITE)
+    rcode, out = _run("--uninstall", "--no-prompt", game=g)
+    assert "could not restore" not in out and "you changed, so it was kept" not in out, out
+    assert "removed Thinker Mod 5.5" in out and "UNINSTALL COMPLETE" in out, out
+    assert not help_.exists() and not (g / "thinker.dll").exists() and not (g / tf.INSTALL_RECORD).exists()

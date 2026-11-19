@@ -62,6 +62,10 @@ DOWNLOAD_URL = "https://longevitymods.com/vaccine/download"
 #: Where the manifest and its detached signature live. Short TTL at the CDN; the versioned
 #: package paths it points at are immutable, so no invalidation is ever needed.
 MANIFEST_URL = "https://longevitymods.com/vaccine/manifest.json"
+
+#: Longevity Vaccine's changelog page: the manifest's notes_url (release.py) and the "See what's new" line that
+#: closes an update's verdict (install.whats_new_line). One literal for both.
+CHANGELOG_URL = "https://longevitymods.com/vaccine/changelog"
 SIGNATURE_URL = MANIFEST_URL + ".sig"
 
 MANUAL = "manual-install"
@@ -70,8 +74,8 @@ NOTHING = "nothing"
 
 #: Reason enum -> the message WE show. The manifest may only pick a key.
 REASONS = {
-    "protocol": "This version of the mod is too old to understand the update service.",
-    "bootstrap_defect": "This version of the mod cannot update itself.",
+    "protocol": "This version of Longevity Vaccine is too old to understand the update service.",
+    "bootstrap_defect": "This version of Longevity Vaccine cannot update itself.",
     "base_unsupported": "Your version is unsupported.",
     "too_old": "This version is too old to update automatically.",
     None: "Your version is unsupported.",
@@ -149,7 +153,7 @@ def load_verified(raw: bytes, signature_hex: str, public_key_hex: str = None,
     if not isinstance(raw, (bytes, bytearray)):
         raise ManifestError("manifest must be verified as raw bytes, not text")
     if not ed.verify_detached(pk, signature_hex or "", bytes(raw)):
-        raise ManifestError("manifest signature does not verify -- refusing to use it")
+        raise ManifestError("manifest signature does not verify: refusing to use it")
     try:
         doc = json.loads(bytes(raw).decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
@@ -225,6 +229,57 @@ def size_ok(s) -> bool:
     return type(s) is int and 0 <= s <= MAX_SIZE
 
 
+#: The most parts a split module may have. The Cinematics needs 3; the cap bounds what a signed but malformed
+#: manifest can make a client open, stage and hold at once.
+MAX_PARTS = 16
+
+
+class PartsError(ValueError):
+    """A module's `parts` list is present but not one a client may act on."""
+
+
+def module_parts(info) -> list:
+    """The parts of a SPLIT module, validated: a list of {"url", "sha256", "size", "mirror"} in order, or None when
+    the entry is not split (no `parts` key: the single `url` form).
+
+    A pack too large for one GitHub release asset (2 GiB) is published as byte slices of its one archive, and its
+    manifest entry lists them under `parts` -- with NO top-level `url`. That absence is load-bearing: the 1.0.0
+    installer's fresh-install list offers only a pack with a `url`, and its downloader cannot read `parts`; with a
+    `url` it would fetch the first slice three times and fail. The top-level `size` stays the TOTAL, which is what
+    every client's `--check` line, offer and free-space check read. Raises PartsError for a `parts` that is present
+    but malformed: a split entry must fail closed, never fall back to something else."""
+    if not isinstance(info, dict) or "parts" not in info:
+        return None
+    parts = info.get("parts")
+    if not isinstance(parts, list) or not 1 <= len(parts) <= MAX_PARTS:
+        raise PartsError(f"`parts` must be a list of 1 to {MAX_PARTS} entries")
+    if info.get("url") is not None or info.get("mirror") is not None:
+        raise PartsError("a split entry carries a top-level `url` or `mirror`")
+    total = info.get("size")
+    if not size_ok(total) or total <= 0:
+        raise PartsError("a split entry needs its total `size`")
+    out, seen = [], set()
+    for i, p in enumerate(parts, 1):
+        if not isinstance(p, dict):
+            raise PartsError(f"part {i} is not an object")
+        url, sha, size, mirror = p.get("url"), p.get("sha256"), p.get("size"), p.get("mirror")
+        if not isinstance(url, str) or not url:
+            raise PartsError(f"part {i} has no `url`")
+        if not isinstance(sha, str) or len(sha) != 64 or any(c not in "0123456789abcdefABCDEF" for c in sha):
+            raise PartsError(f"part {i} has no usable `sha256`")
+        if not size_ok(size) or size <= 0:
+            raise PartsError(f"part {i} has no usable `size`")
+        if mirror is not None and (not isinstance(mirror, str) or not mirror):
+            raise PartsError(f"part {i} has an unusable `mirror`")
+        if url in seen:
+            raise PartsError(f"part {i} repeats an earlier part's `url`")
+        seen.add(url)
+        out.append({"url": url, "sha256": sha.lower(), "size": size, "mirror": mirror})
+    if sum(p["size"] for p in out) != total:
+        raise PartsError("the parts' sizes do not add up to the entry's `size`")
+    return out
+
+
 def stale_modules(doc: dict, installed_modules: dict) -> list:
     """The installed content modules whose manifest version is newer than the receipt's.
 
@@ -274,7 +329,7 @@ def decide(doc: dict, installed_version: str, target_id: str = None,
     # 2. global kill switch
     flag = _flag(doc, "manual_install_required")
     if flag is None:
-        return Decision(MANUAL, None, detail="manual_install_required is unreadable -- "
+        return Decision(MANUAL, None, detail="manual_install_required is unreadable: "
                                              "treating it as set")
     if flag:
         reason = doc.get("manual_install_reason")
@@ -287,7 +342,7 @@ def decide(doc: dict, installed_version: str, target_id: str = None,
     bad_targets, ok_t = _str_list(doc, "unsupported_targets")
     if not ok_v or not ok_t:
         return Decision(MANUAL, None,
-                        detail="an unsupported_* kill-switch field is unreadable -- "
+                        detail="an unsupported_* kill-switch field is unreadable: "
                                "treating it as set")
     # Compare NORMALISED: the receipt value is canonical, a hand-edited manifest entry like
     # "0.1.0 " is not, and a kill switch that fails to match fails OPEN.

@@ -11,8 +11,10 @@
 //      wrappers. While an AI faction plans, a non-base tile whose WHOLE foreign stack is hidden by
 //      ability/flag AND unseen by that faction reads as empty. One seen unit exposes the tile's stack.
 //      Census (2026-09-18): enemy_move has no inline unit-presence reads and its 14 inline unit loops
-//      scan the planner's OWN faction, so the call sites are the complete surface. zoc_* is left alone on
-//      purpose: move legality must agree with what order_veh will actually allow.
+//      scan the planner's OWN faction, so the call sites are the complete surface. zoc_* calls are not
+//      re-pointed here on purpose: move legality must agree with what order_veh will actually allow. Zone of
+//      control has its own rule instead (2026-10-30, "zone of control: the hidden-unit exemption" below): the
+//      three zoc_* primitives are entry-detoured, so planner, order_veh and every other caller get the same answer.
 //   2. BUMP. order_veh (0x5947C0) reveals-and-cancels a step into an unseen hidden stack for the LOCAL
 //      HUMAN only; an AI mover falls through to a blind attack. Our entry hook gives AI movers the same
 //      discovery: spot_stack, clear the order, no attack. action() ignores order_veh's result, so
@@ -48,6 +50,8 @@
 #include "thinkercompat.h"   // ThinkerLoaded() / ThinkerRange(): the core group installs differently under Thinker
 
 void UimodLog(const char* msg);   // init.cpp
+
+int g_aivisInDuel = 0;            // set while a repaired bombard duel runs (aivis.h; the naked nerve gates read it)
 
 namespace {
 
@@ -109,7 +113,13 @@ constexpr uint32_t kNetBitHumanLeaks = 1u << 1;         // always-on: human rout
 constexpr uint32_t kNetBitPodRadius = 1u << 3;         // parent-gated: a Survey Pod base's whole radius counts as sensor tiles
 constexpr uint32_t kNetBitCargoOne = 1u << 2;          // checkbox: a hidden transport + its cargo spot as ONE unit
 constexpr uint32_t kNetBitAirdrop  = 1u << 4;          // checkbox: air drops divert around unseen defenders
-                                                       // bits 5..31: future net-critical settings
+// 1.0.1 (cloak-filter-1.0.1-spec.md): every one of these is advertised only when its group is INSTALLED, and the
+// host itself uses the mask it last BROADCAST (NewRuleActive), so host and clients switch at the same NEXT-UPKEEP.
+constexpr uint32_t kNetBitReveal   = 1u << 5;          // parent-gated: a real combat reveals a hidden attacker's stack
+constexpr uint32_t kNetBitBombAi   = 1u << 6;          // parent-gated: the AI's bombard scan skips undetected stacks
+constexpr uint32_t kNetBitBombHuman = 1u << 7;         // always on: a human's bombard scan skips undetected stacks
+constexpr uint32_t kNetBitDuel     = 1u << 8;          // always on: the bombard's counter-battery duel is repaired
+                                                       // bits 9..31: future net-critical settings
 
 // ---- call sites inside enemy_move (py _callers.py <fn> --range 0x56B5B0 0x579208, pristine) ------
 const uint32_t kSitesVehAt[] = {
@@ -163,9 +173,14 @@ bool g_cargoOk = false;           // spot_all's stack-count site installed
 int  g_airdropOn = kAirdropDivertDefault;   // "Air Drops Divert Around Unseen Defenders" ini / checkbox value
 bool g_airdropOk = false;         // the action_airdrop detour (the engine's entry, or Thinker's function) is installed
 bool g_coreOk = false;            // filter + bump installed
+bool g_thinkerHalf = false;       // thinkeraivis.cpp ported the filter into Thinker's own planner (pinned build only)
 bool g_netOk = false;             // send + receive carrier installed
 bool g_netValid = false;          // a host bitmask arrived this network session
 uint32_t g_netMask = 0;
+uint32_t g_hostSent = 0;          // 1.0.1: the mask this machine last broadcast as host (NewRuleActive)
+bool     g_hostSentValid = false;
+// Out of a network game (and at every game start / load, AiVisOnGameStart): forget the last session's masks.
+void NetMasksReset() { g_netValid = false; g_netMask = 0; g_hostSentValid = false; g_hostSent = 0; }
 int  g_viewer = -1;               // AI faction whose enemy_move is running; -1 = no filtering
 FOrder g_orderVehTramp = nullptr;
 void*  g_procMsgTramp = nullptr;
@@ -173,13 +188,24 @@ void*  g_procMsgTramp = nullptr;
 // The setting in force right now. Single-player / hotseat / PBEM: the local value. Network game: the
 // host uses its local value and broadcasts it; a client uses what the host sent (nothing received, or
 // no carrier installed => off, i.e. exactly what a vanilla host's peers run).
+// Under Thinker the engine half alone filters only what the ENGINE's planner still does; Thinker's own planner would
+// keep seeing everything. Half a filter is worse than none (the two planners would disagree about the same tile), so
+// with thinker.dll loaded the filter is in force only when its Thinker half is installed -- which happens on the
+// pinned build only. On any other Thinker it is OFF, and a host on such a build broadcasts it as off (LocalNetMask).
+bool ThinkerAllows()
+{
+    return !ThinkerLoaded() || g_thinkerHalf;
+}
+
 bool Enabled()
 {
-    if (!g_coreOk) return false;
-    if (Rd<int>(kVA_MultiplayerActive) == 0) {
-        g_netValid = false;
-        return g_local != 0;
-    }
+    // First, whatever else is decided: outside a network game the last host's mask is forgotten. (This reset used to
+    // sit behind the checks below; with the filter forced off it would never have run, and the other settings would
+    // have kept following a host from an earlier session.)
+    const bool single = Rd<int>(kVA_MultiplayerActive) == 0;
+    if (single) NetMasksReset();
+    if (!g_coreOk || !ThinkerAllows()) return false;
+    if (single) return g_local != 0;
     if (!g_netOk) return false;
     if (Rd<int>(kVA_NetIsServer) != 0) return g_local != 0;
     return g_netValid && (g_netMask & kNetBitAiVis) != 0;
@@ -201,7 +227,7 @@ bool HumanLeakFixActive()
 // a network game it follows the host like the other game-logic settings.
 bool CargoOneActive()
 {
-    if (!g_cargoOk) return false;
+    if (!g_cargoOk || !ThinkerAllows()) return false;        // nested under the AI filter: off when that cannot be in force
     if (Rd<int>(kVA_MultiplayerActive) == 0) return g_cargoOne != 0;
     if (!g_netOk) return false;
     if (Rd<int>(kVA_NetIsServer) != 0) return g_cargoOne != 0;
@@ -213,7 +239,7 @@ bool CargoOneActive()
 bool g_podOk = false;
 bool PodRadiusActive()
 {
-    if (!g_podOk) return false;
+    if (!g_podOk || !ThinkerAllows()) return false;          // rides the parent: off when that cannot be in force
     if (Rd<int>(kVA_MultiplayerActive) == 0) return g_local != 0;
     if (!g_netOk) return false;
     if (Rd<int>(kVA_NetIsServer) != 0) return g_local != 0;
@@ -231,10 +257,43 @@ bool AirdropActive()
     return g_netValid && (g_netMask & kNetBitAirdrop) != 0;
 }
 
+// 1.0.1 groups: true once the half that runs (the engine's, or Thinker's under Thinker) is fully written.
+bool g_revealOk = false;          // fix 1: combat reveal
+bool g_bombardOk = false;         // fix 2: bombard scan skips undetected stacks
+bool g_duelOk = false;            // fix 3: the repaired counter-battery duel
+bool g_askOk = false;             // fix 4: #HASTY before a human's hasty Long Range Fire duel (no net bit)
+
 uint32_t LocalNetMask()
 {
-    return (g_local ? kNetBitAiVis : 0) | kNetBitHumanLeaks | (g_cargoOne && g_cargoOk ? kNetBitCargoOne : 0) |
-           (g_local && g_podOk ? kNetBitPodRadius : 0) | (g_airdropOn && g_airdropOk ? kNetBitAirdrop : 0);
+    const bool family = ThinkerAllows();                    // the AI filter and the settings nested under it
+    return (g_local && family ? kNetBitAiVis : 0) | kNetBitHumanLeaks | (g_cargoOne && g_cargoOk && family ? kNetBitCargoOne : 0) |
+           (g_local && g_podOk && family ? kNetBitPodRadius : 0) | (g_airdropOn && g_airdropOk ? kNetBitAirdrop : 0) |
+           (g_revealOk ? kNetBitReveal : 0) | (g_local && g_bombardOk && g_revealOk ? kNetBitBombAi : 0) |
+           (g_bombardOk ? kNetBitBombHuman : 0) | (g_duelOk ? kNetBitDuel : 0);
+}
+
+// The 1.0.1 rules (bits 5..8). Single player: the local value. Network game: the host uses the mask it LAST
+// BROADCAST (latched in WrapUpkeepSend; off before its first broadcast), a client the mask it received -- so the
+// host and its clients change together at a NEXT-UPKEEP, never mid-turn on one machine only. A 1.0.0 host sends no
+// such bit, so a 1.0.1 client then runs these rules the vanilla way, as its host does.
+// The mask in force on this machine in a network game: a host's last broadcast; otherwise -- a client, or a machine
+// that became host mid-session and has not broadcast yet (review 2026-11-15) -- the mask it last received, which is
+// what every other peer still runs until the next upkeep.
+bool NetBitInForce(uint32_t bit)
+{
+    if (Rd<int>(kVA_NetIsServer) != 0 && g_hostSentValid) return (g_hostSent & bit) != 0;
+    return g_netValid && (g_netMask & bit) != 0;
+}
+
+bool NewRuleActive(uint32_t bit, bool localOn, bool installed)
+{
+    if (!installed) return false;
+    if (Rd<int>(kVA_MultiplayerActive) == 0) {
+        NetMasksReset();                      // a later network session must not inherit an old mask
+        return localOn;
+    }
+    if (!g_netOk) return false;
+    return NetBitInForce(bit);
 }
 
 // ---- the visibility predicate ---------------------------------------------------------------------
@@ -1110,8 +1169,11 @@ int __cdecl WrapGetoutWithdraw(int owner, int intruder)
 void __cdecl WrapUpkeepSend(int msg, int dest, int p1, int p2, int p3, int p4)
 {
     if ((msg & 0xFFFF) == kMsgNextUpkeep && Rd<int>(kVA_NetIsServer) != 0) {
-        p3 = static_cast<int>(LocalNetMask());
+        const uint32_t mask = LocalNetMask();
+        p3 = static_cast<int>(mask);
         p4 = static_cast<int>(kNetMagic);
+        g_hostSent = mask;                    // the host follows what it told its clients (NewRuleActive)
+        g_hostSentValid = true;
     }
     reinterpret_cast<FMsgData>(At(kVA_MessageData))(msg, dest, p1, p2, p3, p4);
 }
@@ -1193,7 +1255,7 @@ bool CloakBlown(const BYTE* v, int own)
 
 void __cdecl DrawCloakMark(BYTE* frame)
 {
-    if (!g_markOn) return;
+    if (!g_markOn || !ThinkerAllows()) return;               // nested under the AI filter, like the cargo rule
     const int n = Rd<int>(kVA_VehCount);
     const int off = *reinterpret_cast<int*>(frame - 0x14);
     if (off < 0 || off % kVehSize != 0) return;
@@ -1477,6 +1539,464 @@ bool BuildAirdropFile()
     return ok;
 }
 
+// ===================================================================================================================
+// 1.0.1 -- four groups specified in work\briefs\cloak-filter-1.0.1-spec.md (the measurements, the audits and every
+// address live there; the history and the reasons in cloak-filter-1.0.1-design.md). Each group has an ENGINE half
+// (installed here, never under Thinker) and a THINKER 5.5 half (thinkeraivis.cpp), sharing the C functions below.
+//   fix 1  a real combat reveals a hidden attacker's stack to the defending faction (bit 5)
+//   fix 2  the bombard redirect's scan skips stacks the firer has not detected (bits 6 AI, 7 human)
+//   fix 3  the redirect's counter-battery duel is repaired: fair, non-interactive, else blocked (bit 8)
+//   fix 4  #HASTY before a human's hasty Long Range Fire duel; DUELHASTY for the redirect's duel on one machine
+// ===================================================================================================================
+
+constexpr uintptr_t kVA_VehAttackFlags = 0x0093E904;  // bit 0 = local interactive pass, bit 1 = execute
+constexpr uintptr_t kVA_CurrentVehID   = 0x009A64DC;  // the unit battle_fight_2's tail treats as the attacker
+constexpr uintptr_t kVA_RoadRate       = 0x00949738;  // Rules->move_rate_roads
+constexpr uintptr_t kVA_ScriptFile     = 0x00691B0C;  // the script file name the engine passes to popp
+constexpr uintptr_t kVA_VehSkip        = 0x005C1D20;
+constexpr uintptr_t kVA_VehSpeed       = 0x005C1540;  // veh_speed(veh, a2)
+constexpr uintptr_t kVA_CanArty        = 0x005C0DB0;  // can_arty(unit, allow_sea): Thinker write_jumps it to its port
+constexpr uintptr_t kVA_BattleFight    = 0x00506A60;
+constexpr uintptr_t kVA_ParseSays      = 0x00625EC0;  // parse_says(slot, text, -1, -1)
+constexpr uintptr_t kVA_ParseNum       = 0x00625E30;  // parse_num(slot, value)
+constexpr int kVehState = 0x04, kVehMoves = 0x28;
+constexpr uint32_t kStateHasMoved = 0x4, kStateNoHaste = 0x1000, kStateUsedNerveGas = 0x80000;
+constexpr uint32_t kDiploPact = 0x1, kDiploTreaty = 0x2, kDiploTruce = 0x4, kDiploVendetta = 0x10;
+const int kTableOffsetX[25] = { 0, 1, 2, 1, 0, -1, -2, -1, 0, 2, 2, -2, -2, 1, 3, 3, 1, -1, -3, -3, -1, 4, -4, 0, 0 };
+const int kTableOffsetY[25] = { 0, -1, 0, 1, 2, 1, 0, -1, -2, -2, 2, 2, -2, -3, -1, 1, 3, 3, 1, -1, -3, 0, 0, 4, -4 };
+using FFight5   = int(__cdecl*)(int veh, int offset, int a3, int a4, int a5);
+using FVehSpeed = int(__cdecl*)(int veh, int a2);
+using FCanArty  = int(__cdecl*)(int unit, int allowSea);
+using FSays     = void(__cdecl*)(int slot, const char* text, int a3, int a4);
+using FNum      = void(__cdecl*)(int slot, int value);
+
+inline bool ByteB(int r) { return (r & 0xFF) != 0; }   // a bool return may leave junk in the rest of eax
+const char* UnitName(int unit) { return reinterpret_cast<const char*>(At(kVA_Units) + unit * kUnitSize); }
+
+// ---- fix 1: the combat reveal (bit 5, parent-gated) ----------------------------------------------------------------
+// Called at the point where battle_fight_2's two branches split -- every EXECUTED combat passes it, never an
+// odds-only, check-only or cancelled one (spec fix 1). The engine marks the attacker for the defender only while the
+// LOCAL player watches the battle, so an AI hit by another AI's hidden unit stayed blind and machines disagreed.
+// Single player: when the filter's own rule calls the attacker's stack hidden from the defender (the cloak setting
+// on), every unit of it is marked (as the engine's spot_stack would; HiddenStack reads every unit's bit).
+// Network game (review 2026-11-15, M1): the seen bit feeds rules every machine must agree on (the filter, the bombard
+// scan skip, ZOC), so bit 5 is carried whenever the group is installed and EVERY machine first makes the engine's own
+// render-gated write itself -- the attacker marked for the defender, as the watching machine already does -- and then,
+// with the host's cloak setting on, the whole hidden stack. Every machine ends with the same bits.
+void __cdecl CombatReveal(int atk, int def)
+{
+    const bool net = Rd<int>(kVA_MultiplayerActive) != 0;
+    if (!NewRuleActive(kNetBitReveal, g_local != 0, g_revealOk)) return;
+    const int n = Rd<int>(kVA_VehCount);
+    if (atk < 0 || atk >= n || def < 0 || def >= 8 || VehFaction(atk) == def) return;
+    const bool hidden = HiddenStack(atk, def);                             // BEFORE the mark below (it reads that bit)
+    if (net) Veh(atk)[kVehVisibility] |= static_cast<BYTE>(1u << def);   // what the watching machine writes anyway
+    // the whole stack only with the cloak rule on -- in a network game the rule as LAST BROADCAST (host) / received
+    // (client), never the host's live checkbox, so every machine marks the same units even after a mid-turn toggle
+    if (net && !(g_coreOk && NetBitInForce(kNetBitAiVis)))
+        return;
+    if (!hidden) return;
+    int top = atk, guard = 0;
+    for (int p = *reinterpret_cast<int16_t*>(Veh(top) + kVehPrev); p >= 0 && p < n && guard++ < 4096;
+         p = *reinterpret_cast<int16_t*>(Veh(p) + kVehPrev))
+        top = p;
+    guard = 0;
+    for (int i = top; i >= 0 && i < n && guard++ < 4096; i = *reinterpret_cast<int16_t*>(Veh(i) + kVehNext))
+        Veh(i)[kVehVisibility] |= static_cast<BYTE>(1u << def);
+}
+
+void* g_revealResume = nullptr;   // 0x5084AE: the untouched jne
+
+// 0x5084A8 `mov eax,[ebp+0x18] ; cmp eax,1` (6 bytes) -> here. [ebp+8] = attacker id, [ebp-0xC] = defending faction.
+void __declspec(naked) StubCombatReveal()
+{
+    __asm {
+        pushad
+        pushfd
+        push dword ptr [ebp - 0x0C]
+        push dword ptr [ebp + 0x08]
+        call CombatReveal
+        add  esp, 8
+        popfd
+        popad
+        mov  eax, dword ptr [ebp + 0x18]
+        cmp  eax, 1
+        jmp  dword ptr [g_revealResume]
+    }
+}
+
+// ---- fix 2: the bombard scan skips undetected stacks (bits 6 AI, 7 human) -----------------------------------------
+// action_destroy's redirect scan asks stack_check(stack, 15, owner) per neighbour tile; answering "none here" for a
+// stack the FIRER has not detected keeps the scan going, so an undetected stack neither takes the shot nor blocks the
+// bombardment. AI firers: the cloak setting (parent); human firers: always (the human leaks are closed regardless of
+// the setting, user D2); natives: the cloak half is vanilla. The non-war skip below (bit 8) applies to every firer.
+bool DuelActive();
+bool MutualWar(int f, int g);
+
+bool DuelSafe(int veh, int tx, int ty);
+
+// The stack cannot take the shot, so the scan passes it by as if it were not there (user 2026-11-15: a player must
+// never be left with a bombardment that silently does nothing -- the next eligible stack is considered, and with none
+// left the bombardment lands). A stack takes the shot only when BOTH hold:
+//  - it holds artillery the scan counts that is at war with the firer: stack_check type 15 (0x5B9A72) counts a unit
+//    only when `owner < 0 || its faction == owner` (owner = whose_territory at 0x4CABD6 -> a3: -1 on unowned land, or
+//    where the firer has no commlink with the owner) and can_arty(unit, 1) holds -- so a peaceful owner's artillery
+//    is passed by even beside an unrelated at-war unit (audit 2026-11-15);
+//  - the duel against it would be fair (DuelSafe: the firer can bombard, the square is not a base, and EVERY unit on
+//    it, artillery or not, is mutually at war with the firer -- the engine picks the defender, so a friendly unit on
+//    the square could be the one attacked). Everything DuelRun would BLOCK is passed by here instead; its BLOCK stays
+//    as the safety net (a record that no longer matches).
+// can_arty is the engine's own predicate (Thinker write_jumps it to its port, which its own stack_check type 15 calls).
+bool DuelIneligible(int id, int actor, int owner)
+{
+    const int n = Rd<int>(kVA_VehCount);
+    const int f = VehFaction(actor);
+    int top = id, guard = 0;
+    for (int p = *reinterpret_cast<int16_t*>(Veh(top) + kVehPrev); p >= 0 && p < n && guard++ < 4096;
+         p = *reinterpret_cast<int16_t*>(Veh(p) + kVehPrev))
+        top = p;
+    guard = 0;
+    bool answers = false;
+    for (int i = top; i >= 0 && i < n && guard++ < 4096 && !answers; i = *reinterpret_cast<int16_t*>(Veh(i) + kVehNext)) {
+        const int g = VehFaction(i);
+        if (owner >= 0 && g != owner) continue;                       // not counted by type 15
+        if (!MutualWar(f, g)) continue;
+        const int unit = *reinterpret_cast<const int16_t*>(Veh(i) + kVehUnit);
+        if (unit >= 0 && ByteB(reinterpret_cast<FCanArty>(At(kVA_CanArty))(unit, 1))) answers = true;
+    }
+    if (!answers) return true;   // nothing counted at war (or nothing counted at all: stack_check would answer 0 too)
+    return !DuelSafe(actor, *reinterpret_cast<const int16_t*>(Veh(id) + kVehX), *reinterpret_cast<const int16_t*>(Veh(id) + kVehY));
+}
+
+bool BombardSkip(int stack, int actor, int owner)
+{
+    const int n = Rd<int>(kVA_VehCount);
+    if (actor < 0 || actor >= n || stack < 0 || stack >= n) return false;
+    const int f = VehFaction(actor);
+    // With the duel repaired (bit 8), a stack that cannot take the shot (DuelIneligible: no counted artillery at war
+    // with the firer, or no fair duel against it -- a friendly unit of any kind on it, a base square, a firer that
+    // cannot bombard) is passed by: the scan goes on, and with no stack left the bombardment lands (user 2026-11-15).
+    // Runs only through the scan's own hook, so it relies on the duel group requiring the scan group
+    // (InstallArtilleryGroups / InstallThinkerArtilleryGroups): never decouple them.
+    if (DuelActive() && DuelIneligible(stack, actor, owner)) return true;
+    // The hidden-stack half reads seen bits, so it may run only where every machine holds the same ones (review
+    // 2026-11-15):
+    //  - AI firers (bit 6): an AI's own discoveries (BumpCheck) run in the replicated order_veh, and the combat reveal
+    //    (bit 5) writes the defender's bit on every machine -- so the half requires the reveal group too;
+    //  - human firers (bit 7): single machine only. A human's bump discovery (order_veh 0x595206..0x595219 ->
+    //    spot_stack 0x5B58E0, a local or-write at 0x5B5A40, no message) sets the bit on the mover's machine alone,
+    //    and the 0x2413 bombard then runs on every machine: one would duel, the others land the shot. A network game
+    //    keeps 1.0.0's scan for humans (bit 7 is still advertised; a network peer ignores it).
+    const bool on = IsFilteredAi(f) ? NewRuleActive(kNetBitBombAi, g_local != 0, g_bombardOk && g_revealOk)
+                  : (f > 0 && f < 8 && IsHuman(f)) ? (Rd<int>(kVA_MultiplayerActive) == 0 &&
+                                                      NewRuleActive(kNetBitBombHuman, true, g_bombardOk))
+                  : false;
+    return on && VehFaction(stack) != f && HiddenStack(stack, f);
+}
+
+int __cdecl BombardStackCheck(int stack, int type, int a3, int a4, int a5, int actor)
+{
+    if (BombardSkip(stack, actor, a3)) return 0;     // a3 = the territory owner the scan passes (type 15's filter)
+    return reinterpret_cast<FStackCk>(At(kVA_StackCheck))(stack, type, a3, a4, a5);
+}
+
+// 0x4CACC2 `call stack_check` -> here; action_destroy's [ebp+8] (never written in it) is the firer.
+void __declspec(naked) StubBombardStackCheck()
+{
+    __asm {
+        push dword ptr [ebp + 0x08]
+        push dword ptr [esp + 0x18]
+        push dword ptr [esp + 0x18]
+        push dword ptr [esp + 0x18]
+        push dword ptr [esp + 0x18]
+        push dword ptr [esp + 0x18]
+        call BombardStackCheck
+        add  esp, 0x18
+        ret
+    }
+}
+
+// ---- fix 3: the repaired counter-battery duel (bit 8, always on) ---------------------------------------------------
+bool DuelActive() { return NewRuleActive(kNetBitDuel, true, g_duelOk); }
+
+struct DuelRec { int veh, unit, faction, x, y; BYTE moves; };
+DuelRec g_duel = { -1, 0, 0, 0, 0, 0 };
+int g_askHasty = 0;          // fix 4: 1 = a marked Long Range Fire call, 2 = the redirect's duel on one machine
+int g_duelDeclined = 0;      // fix 4: the redirect's DUELHASTY was answered "Await preparations and lose the turn"
+
+void DuelRecord(int veh)
+{
+    g_duel.veh = -1;
+    if (veh < 0 || veh >= Rd<int>(kVA_VehCount)) return;
+    const BYTE* v = Veh(veh);
+    g_duel = { veh, *reinterpret_cast<const int16_t*>(v + kVehUnit), v[kVehFaction],
+               *reinterpret_cast<const int16_t*>(v + kVehX), *reinterpret_cast<const int16_t*>(v + kVehY), v[kVehMoves] };
+}
+
+bool DuelRecordMatches(int veh)
+{
+    if (g_duel.veh != veh || veh < 0 || veh >= Rd<int>(kVA_VehCount)) return false;
+    const BYTE* v = Veh(veh);
+    return g_duel.unit == *reinterpret_cast<const int16_t*>(v + kVehUnit) && g_duel.faction == v[kVehFaction] &&
+           g_duel.x == *reinterpret_cast<const int16_t*>(v + kVehX) && g_duel.y == *reinterpret_cast<const int16_t*>(v + kVehY);
+}
+
+// f and g are at war in both directions, with no truce / treaty / pact either way; natives are at war with everyone.
+bool MutualWar(int f, int g)
+{
+    if (f == g) return false;
+    if (f == 0 || g == 0) return true;
+    if (f < 0 || f >= 8 || g < 0 || g >= 8) return false;
+    const uint32_t a = *reinterpret_cast<const uint32_t*>(At(kVA_Factions) + f * kFactionSize + kFactionDiplo + g * 4);
+    const uint32_t b = *reinterpret_cast<const uint32_t*>(At(kVA_Factions) + g * kFactionSize + kFactionDiplo + f * 4);
+    const uint32_t peace = kDiploPact | kDiploTreaty | kDiploTruce;
+    return (a & kDiploVendetta) && (b & kDiploVendetta) && !(a & peace) && !(b & peace);
+}
+
+// The duel is fought only when the firer can bombard, the square is not a base, and EVERY unit on it is foreign and
+// mutually at war with the firer (a pact partner sharing the square, or a treaty, would otherwise be attacked with no
+// question asked: act_of_aggression / SURPRISE). Pure: no engine call with side effects, no RNG.
+bool DuelSafe(int veh, int tx, int ty)
+{
+    const int n = Rd<int>(kVA_VehCount);
+    if (veh < 0 || veh >= n) return false;
+    const BYTE* v = Veh(veh);
+    const int unit = *reinterpret_cast<const int16_t*>(v + kVehUnit);
+    if (unit < 0 || !ByteB(reinterpret_cast<FCanArty>(At(kVA_CanArty))(unit, 1))) return false;
+    const BYTE* sq = MapSq(tx, ty);
+    if (!sq || (*reinterpret_cast<const uint32_t*>(sq + 8) & 1) != 0) return false;        // a base square
+    const int f = v[kVehFaction];
+    int top = reinterpret_cast<FTile2>(At(kVA_VehAt))(tx, ty);
+    if (top < 0 || top >= n) return false;
+    int guard = 0;
+    for (int p = *reinterpret_cast<int16_t*>(Veh(top) + kVehPrev); p >= 0 && p < n && guard++ < 4096;
+         p = *reinterpret_cast<int16_t*>(Veh(p) + kVehPrev))
+        top = p;
+    int count = 0;
+    guard = 0;
+    for (int i = top; i >= 0 && i < n && guard++ < 4096; i = *reinterpret_cast<int16_t*>(Veh(i) + kVehNext)) {
+        if (!MutualWar(f, VehFaction(i))) return false;
+        ++count;
+    }
+    return count > 0;
+}
+
+// The redirect's combat call (engine 0x4CACFD; Thinker +0xA13C4 through WrapPillageFight). `next` is the original
+// battle_fight / mod_battle_fight, `restoreFlags` what VehAttackFlags must read afterwards (the engine's stale value;
+// Thinker's 0), `thinker` selects Thinker's BLOCK parity (its own flags-0 pass marks the firer HAS_MOVED, and
+// Thinker's veh_wake would otherwise hand a skipped human unit its moves back).
+
+void DuelNotice(int f);   // below, with the duel's script file
+int DuelRun(int veh, int offset, int a3, int a4, int a5, FFight5 next, bool thinker)
+{
+    const int n = Rd<int>(kVA_VehCount);
+    if (veh < 0 || veh >= n || offset <= 0 || offset >= 25) return 0;   // repair active: a fair duel or BLOCK, never vanilla's
+    BYTE* v = Veh(veh);
+    const int tx = WrapMapX(*reinterpret_cast<const int16_t*>(v + kVehX) + kTableOffsetX[offset]);
+    const int ty = *reinterpret_cast<const int16_t*>(v + kVehY) + kTableOffsetY[offset];
+    if (!DuelSafe(veh, tx, ty) || !DuelRecordMatches(veh)) {                // BLOCK: no shot, no terrain damage
+        if (thinker) *reinterpret_cast<uint32_t*>(v + kVehState) |= kStateHasMoved;
+        g_duel.veh = -1;
+        return 0;
+    }
+    const int savedFlags = Rd<int>(kVA_VehAttackFlags);
+    const int savedIn = g_aivisInDuel, savedAsk = g_askHasty;
+    const int f = v[kVehFaction];
+    *reinterpret_cast<int*>(At(kVA_VehAttackFlags)) = 2;                     // execute, non-interactive (as 0x536893)
+    v[kVehMoves] = g_duel.moves;                                             // a direct duel's moves: undo the entry veh_skip
+    *reinterpret_cast<uint32_t*>(v + kVehState) &= ~kStateUsedNerveGas;      // no stale "used nerve gas"
+    *reinterpret_cast<int*>(At(kVA_CurrentVehID)) = veh;                     // the tail's attacker (as order_veh does)
+    g_aivisInDuel = 1;
+    // fix 4: on one machine only, the human firer is asked DUELHASTY if the duel would be hasty (the stub decides)
+    g_askHasty = (g_askOk && Rd<int>(kVA_MultiplayerActive) == 0 && f > 0 && f < 8 && IsHuman(f) &&
+                  f == Rd<int>(kVA_CurrentPlayer)) ? 2 : 0;
+    g_duelDeclined = 0;
+    DuelNotice(f);                                                           // a real duel, never a BLOCK
+    const int r = next(veh, offset, a3, a4, a5);
+    g_askHasty = savedAsk;
+    g_aivisInDuel = savedIn;
+    *reinterpret_cast<int*>(At(kVA_VehAttackFlags)) = savedFlags;
+    g_duel.veh = -1;
+    if (g_duelDeclined) {                                                    // "lose the turn": nothing happened yet
+        g_duelDeclined = 0;
+        if (veh < Rd<int>(kVA_VehCount)) {
+            reinterpret_cast<FVeh1>(At(kVA_VehSkip))(veh);
+            if (thinker) *reinterpret_cast<uint32_t*>(Veh(veh) + kVehState) |= kStateHasMoved;
+        }
+    }
+    return r;
+}
+
+int __cdecl WrapDestroySkip(int veh)
+{
+    DuelRecord(veh);
+    return reinterpret_cast<FVeh1>(At(kVA_VehSkip))(veh);
+}
+
+int __cdecl WrapBombardDuel(int veh, int offset, int a3, int a4, int a5)
+{
+    const FFight5 next = reinterpret_cast<FFight5>(At(kVA_BattleFight));
+    if (!DuelActive()) return next(veh, offset, a3, a4, a5);
+    return DuelRun(veh, offset, a3, a4, a5, next, false);
+}
+
+void* g_ngSingle = nullptr;   // 0x5071BD: single player -> the nerve-gas block
+void* g_ngNet    = nullptr;   // 0x5071B0: network -> its flags & 1 test
+void* g_ngJoin   = nullptr;   // 0x5073BC: the join (with 0x80000 cleared: no gas, no prompt, no synch_veh)
+
+// 0x5071A7 `mov eax,[MultiplayerActive] ; test eax,eax ; je 0x5071BD` (9 bytes) -> here.
+void __declspec(naked) StubNerveGate()
+{
+    __asm {
+        cmp  dword ptr [g_aivisInDuel], 0
+        jne  in_duel
+        mov  eax, dword ptr ds:[0x0093F660]
+        test eax, eax
+        jnz  net
+        jmp  dword ptr [g_ngSingle]
+    net:
+        jmp  dword ptr [g_ngNet]
+    in_duel:
+        jmp  dword ptr [g_ngJoin]
+    }
+}
+
+// ---- fix 4: #HASTY / DUELHASTY ------------------------------------------------------------------------------------
+const char kDuelFile[]  = "uimod_duel";
+const char kDuelLabel[] = "DUELHASTY";
+const char kDuelNotice[] = "DUELFIRE";               // the ticker line when the bombard turns into a duel
+constexpr uintptr_t kVA_NetMsg    = 0x00805338;      // the NetMessage ticker above the HUD (NetMsg_pop_2 passes it)
+constexpr uintptr_t kVA_NetMsgPop = 0x0047A890;      // NetMsg_pop(this, label, delay_ms, a4, a5): thiscall, RET 0x10
+constexpr uintptr_t kVA_DefFile   = 0x009B8AA8;      // BasePop's default script name, char[13]: NetMsg_pop reads its label
+                                                     // from this file (Popup_start 0x47A968); its last argument is unused
+constexpr uintptr_t kVA_SetDefFile = 0x006043D0;     // BasePop_set_def_file(name): 0, or 3 when longer than 12 chars
+bool g_duelFileOk = false;
+
+// The firer's own machine (display only: nothing every peer must agree on) learns why its bombardment became a duel,
+// in the base game's bottom-of-screen ticker, as "Artillery bombardment failed." is told (#ARTYBOMBFAILED, 5000 ms).
+// The ticker always reads the default script file, so ours is made the default for this one call and the previous
+// name put back at once (the popup loads its text in Popup_start, inside the call).
+void DuelNotice(int f)
+{
+    if (!g_duelFileOk || f <= 0 || f >= 8 || f != Rd<int>(kVA_CurrentPlayer) || !IsHuman(f)) return;
+    using FSet = int(__cdecl*)(const char* name);
+    using FPop = int(__fastcall*)(void* self, int edx, const char* label, int delayMs, int a4, const char* a5);
+    char saved[16] = {};
+    memcpy(saved, reinterpret_cast<const char*>(At(kVA_DefFile)), 13);
+    if (reinterpret_cast<FSet>(At(kVA_SetDefFile))(kDuelFile) != 0) return;
+    reinterpret_cast<FPop>(At(kVA_NetMsgPop))(At(kVA_NetMsg), 0, kDuelNotice, 5000, 0, nullptr);
+    reinterpret_cast<FSet>(At(kVA_SetDefFile))(saved);
+}
+
+bool BuildDuelFile()
+{
+    char path[MAX_PATH];
+    FILE* fp = nullptr;
+    if (!GameFilePath("uimod_duel.txt", path, sizeof path) || fopen_s(&fp, path, "wb") != 0 || !fp) return false;
+    const char block[] =
+        "; generated by uimod.dll (Longevity Mod) -- rewritten at every start, safe to delete\r\n\r\n"
+        "#DUELHASTY\r\n#xs 440\r\n#caption Operations Director\r\n"
+        "Enemy artillery is returning fire! A $UNITTYPE1 near the target has\r\n"
+        "opened a counter-battery duel, but our $UNITTYPE0 unit is not ready.\r\n"
+        "It would fight at only $NUM0/$NUM1 strength.\r\n\r\n"
+        "Order the assault.\r\n"
+        "Await preparations and lose the turn.\r\n\r\n"
+        "#DUELFIRE\r\n#xs 440\r\n#caption Operations Director\r\n"
+        "Enemy artillery is returning fire!\r\n\r\n";
+    const size_t n = sizeof block - 1;
+    const bool ok = fwrite(block, 1, n, fp) == n;
+    fclose(fp);
+    return ok;
+}
+
+// The ask, shared by both halves. 1 = cancel ("Await preparations"), 0 = go on. One-shot: the mark is consumed at the
+// first non-odds pass, so the fight itself and any nested battle never ask. The haste block's own gates decide
+// whether the penalty WILL apply (a duel: combat_type 3; state 0x1000 clear; not natives; unit not 0xF / 0x8; moves
+// left below the road rate). #HASTY's first answer ("Order the assault.") returns 0, the second 1 -- order_veh
+// cancels on nonzero (0x595B8A); BADIDEA runs the other way, do not copy it.
+int AskHastyCore(int atk, int f, int local, int ctype, int movesLeft, int defUnit)
+{
+    const int ask = g_askHasty;
+    g_askHasty = 0;
+    if (!ask) return 0;
+    const int flags = Rd<int>(kVA_VehAttackFlags);
+    if (ask == 1 && !(flags & 1)) return 0;                         // interactive pass only: SP 3, network check pass 1
+    if (ask == 2 && Rd<int>(kVA_MultiplayerActive) != 0) return 0;  // the redirect asks on one machine only
+    if (atk < 0 || atk >= Rd<int>(kVA_VehCount) || f <= 0 || f >= 8 || f != local || !IsHuman(f)) return 0;
+    if (ctype != 3) return 0;                                       // a duel, not a bombardment
+    const BYTE* v = Veh(atk);
+    const int unit = *reinterpret_cast<const int16_t*>(v + kVehUnit);
+    if ((*reinterpret_cast<const uint32_t*>(v + kVehState) & kStateNoHaste) || unit == 0xF || unit == 0x8 || unit < 0) return 0;
+    const int road = Rd<int>(kVA_RoadRate);
+    if (movesLeft >= road) return 0;                                // no penalty: no question
+    const char* file;
+    const char* label;
+    if (ask == 2) {
+        if (!g_duelFileOk) g_duelFileOk = BuildDuelFile();
+        if (!g_duelFileOk || defUnit < 0 || defUnit >= 0x200) return 0;   // no file / no defender: fight unasked
+        file = kDuelFile; label = kDuelLabel;
+    } else {
+        file = Rd<const char*>(kVA_ScriptFile); label = "HASTY";
+    }
+    reinterpret_cast<FSays>(At(kVA_ParseSays))(0, UnitName(unit), -1, -1);
+    if (ask == 2) reinterpret_cast<FSays>(At(kVA_ParseSays))(1, UnitName(defUnit), -1, -1);
+    reinterpret_cast<FNum>(At(kVA_ParseNum))(0, movesLeft);
+    reinterpret_cast<FNum>(At(kVA_ParseNum))(1, road);
+    const int saved = Rd<int>(kVA_VehAttackFlags);                  // a modal popup may pump network messages
+    const int r = reinterpret_cast<FPopp>(At(kVA_Popp))(file, label, 0, "bad_sm.pcx", nullptr);
+    *reinterpret_cast<int*>(At(kVA_VehAttackFlags)) = saved;
+    if (r == 0) return 0;
+    if (ask == 2) g_duelDeclined = 1;
+    return 1;
+}
+
+// Engine: [ebp+8] attacker id, [ebp-0x10] attacker faction, [ebp+0x18] combat_type, [ebp-0x24] moves left,
+// esi = defender unit * 0x34.
+int __cdecl AskHastyEngine(int atk, int f, int ctype, int movesLeft, int defUnitOff)
+{
+    return AskHastyCore(atk, f, Rd<int>(kVA_CurrentPlayer), ctype, movesLeft,
+                        defUnitOff >= 0 && defUnitOff % kUnitSize == 0 ? defUnitOff / kUnitSize : -1);
+}
+
+int __cdecl WrapArtyFight(int veh, int offset, int a3, int a4, int a5)
+{
+    const int saved = g_askHasty;
+    g_askHasty = 1;
+    const int r = reinterpret_cast<FFight5>(At(kVA_BattleFight))(veh, offset, a3, a4, a5);
+    g_askHasty = saved;
+    return r;
+}
+
+void* g_askResume = nullptr;   // 0x5070CE
+void* g_askCancel = nullptr;   // 0x507E72: pop edi ; pop esi ; mov eax,1 ; pop ebx ; mov esp,ebp ; pop ebp ; ret
+
+// 0x5070C6 `mov ecx,[ebp-0x10] ; mov edx,1` (8 bytes) -> here. eax (attacker unit*52), esi (defender unit*52) and
+// edi are live; ebx / ecx / edx / flags are free. The cancel leaves esp exactly as at the site.
+void __declspec(naked) StubPreAttack()
+{
+    __asm {
+        push eax
+        push esi
+        push dword ptr [ebp - 0x24]
+        push dword ptr [ebp + 0x18]
+        push dword ptr [ebp - 0x10]
+        push dword ptr [ebp + 0x08]
+        call AskHastyEngine
+        add  esp, 0x14
+        mov  ebx, eax
+        pop  eax
+        test ebx, ebx
+        jnz  cancel
+        mov  ecx, dword ptr [ebp - 0x10]
+        mov  edx, 1
+        jmp  dword ptr [g_askResume]
+    cancel:
+        jmp  dword ptr [g_askCancel]
+    }
+}
+
+void InstallArtilleryGroups();   // below, after the shared install helpers
+
 // ---- installation ---------------------------------------------------------------------------------
 
 bool IsCallTo(uintptr_t site, uintptr_t target)
@@ -1600,6 +2120,120 @@ void DetourSite6(uintptr_t va, void* stub)
     p[5] = 0x90;
     VirtualProtect(p, 6, old, &old);
     FlushInstructionCache(GetCurrentProcess(), p, 6);
+}
+
+// E8 rel32 re-point that reports a failed write (the 1.0.1 groups set their Ok flag only when every site is written).
+bool RetargetOk(uintptr_t site, void* fn)
+{
+    const int32_t rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(fn) - (reinterpret_cast<uintptr_t>(At(site)) + 5));
+    return WriteCode(At(site) + 1, &rel, 4);
+}
+
+// n-byte site -> `jmp stub` + NOP fill (5 <= n <= 16; the caller checked the bytes).
+bool DetourSiteN(uintptr_t va, size_t n, void* stub)
+{
+    if (n < 5 || n > 16) return false;
+    BYTE patch[16];
+    memset(patch, 0x90, sizeof patch);
+    patch[0] = 0xE9;
+    const int32_t rel = static_cast<int32_t>(static_cast<BYTE*>(stub) - (At(va) + 5));
+    memcpy(patch + 1, &rel, 4);
+    return WriteCode(At(va), patch, n);
+}
+
+bool BytesAt(uintptr_t va, const char* hex)   // "8B 45 18 ..." against the live image
+{
+    const BYTE* p = At(va);
+    auto nib = [](char c) -> int {
+        return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+    };
+    for (size_t i = 0;; ++i) {
+        while (*hex == ' ') ++hex;
+        if (!hex[0]) return true;
+        const int hi = nib(hex[0]), lo = hex[1] ? nib(hex[1]) : -1;
+        if (hi < 0 || lo < 0) return false;
+        if (p[i] != static_cast<BYTE>(hi * 16 + lo)) return false;
+        hex += 2;
+    }
+}
+
+// The four 1.0.1 groups' ENGINE halves (cloak-filter-1.0.1-spec.md). Never under Thinker: there the engine's
+// battle_fight_2 / action_destroy / action_arty are dead code and thinkeraivis.cpp installs the Thinker halves.
+void InstallArtilleryGroups()
+{
+    char s[640];
+    // fix 1: the reveal at battle_fight_2's branch split
+    {
+        const bool ok = BytesAt(0x5084A8, "8B 45 18 83 F8 01 0F 85 9C 06 00 00") && BytesAt(0x5083D9, "8B 75 F4") &&
+                        BytesAt(0x506B7B, "89 7D FC") && BytesAt(0x506D2B, "89 55 F4") && BytesAt(0x5087F7, "8B 4D F4") &&
+                        BytesAt(0x508B92, "8B 45 FC B2 01 8B CE") && BytesAt(0x506AF0, "55 8B EC 81 EC 38 01 00 00");
+        if (ok) {
+            g_revealResume = At(0x5084AE);
+            g_revealOk = DetourSiteN(0x5084A8, 6, &StubCombatReveal);
+        }
+        UimodLog(g_revealOk ? "[uimod] aivis: combat reveal installed (a real combat marks a hidden attacker's stack for the defender, on every machine)\n"
+                            : "[uimod] aivis: battle_fight_2 branch-split byte check FAILED -> combat reveal off\n");
+    }
+    // fix 2: the bombard scan's stack_check
+    {
+        const bool ok = IsCallTo(0x4CACC2, kVA_StackCheck) && BytesAt(0x4CACB7, "8B 4D E4 6A FF 6A FF 51 6A 0F 50") &&
+                        BytesAt(0x4CACF2, "8B 45 08") && BytesAt(0x4CAA50, "55 8B EC 83 EC 1C 8B 45 08");
+        if (ok) g_bombardOk = RetargetOk(0x4CACC2, &StubBombardStackCheck);
+        UimodLog(g_bombardOk ? "[uimod] aivis: bombard scan skips undetected stacks (AI: the cloak setting; humans: always)\n"
+                             : "[uimod] aivis: action_destroy scan byte check FAILED -> the bombard scan still sees undetected stacks\n");
+    }
+    // fix 3: the repaired duel (entry veh_skip, the redirect's combat call, the nerve gate)
+    {
+        const bool ok = BytesAt(0x4CAA50, "55 8B EC 83 EC 1C 8B 45 08") && IsCallTo(0x4CAA7C, kVA_VehSkip) &&
+                        IsCallTo(0x4CACFD, kVA_BattleFight) &&
+                        BytesAt(0x4CACEF, "8B 55 EC 8B 45 08 6A 00 6A 01 6A 01 52 50") &&
+                        BytesAt(0x5071A7, "A1 60 F6 93 00 85 C0 74 0D") &&
+                        BytesAt(0x5071B0, "F6 05 04 E9 93 00 01 0F 84 FF 01 00 00") &&
+                        BytesAt(0x5073BC, "F6 05 04 E9 93 00 02") && BytesAt(0x5C1D39, "88 04 95 50 28 95 00");
+        if (ok) {
+            g_ngSingle = At(0x5071BD); g_ngNet = At(0x5071B0); g_ngJoin = At(0x5073BC);
+            // the duel needs the scan skip (else a human could duel a stack it never saw); the record and the nerve
+            // gate first, the combat call -- the only active part -- last, so a failed write leaves nothing half-active
+            g_duelOk = g_bombardOk && RetargetOk(0x4CAA7C, &WrapDestroySkip) &&
+                       DetourSiteN(0x5071A7, 9, &StubNerveGate) && RetargetOk(0x4CACFD, &WrapBombardDuel);
+            if (!g_duelOk) UimodLog(g_bombardOk ? "[uimod] aivis: bombard duel: a code WRITE failed after the byte checks passed\n"
+                                                : "[uimod] aivis: bombard duel off: it needs the bombard-scan group, which is off\n");
+        }
+        UimodLog(g_duelOk ? "[uimod] aivis: bombard counter-battery duel repaired (fair, no questions, at war and off-base only; else no effect)\n"
+                 : ok     ? "[uimod] aivis: the bombard duel stays as in the base game (see the line above)\n"
+                          : "[uimod] aivis: action_destroy / nerve-gas byte check FAILED -> the bombard duel stays as in the base game\n");
+    }
+    // fix 4: #HASTY before a human's hasty Long Range Fire duel (+ DUELHASTY for the redirect, through fix 3)
+    {
+        const bool ok = BytesAt(0x4CD268, "C7 05 04 E9 93 00 03 00 00 00") && IsCallTo(0x4CD272, kVA_BattleFight) &&
+                        BytesAt(0x4CD2A3, "C7 05 04 E9 93 00 01 00 00 00") && IsCallTo(0x4CD2AD, kVA_BattleFight) &&
+                        BytesAt(0x4CD090, "55 8B EC 8B 45 08") && IsCallTo(0x506ADE, 0x506AF0) &&
+                        BytesAt(0x5070C6, "8B 4D F0 BA 01 00 00 00") && BytesAt(0x50700F, "0F 85 B1 00 00 00") &&
+                        BytesAt(0x507E72, "5F 5E B8 01 00 00 00 5B 8B E5 5D C3") &&
+                        BytesAt(0x50834C, "5F 5E B8 01 00 00 00 5B 8B E5 5D C3") &&
+                        BytesAt(0x5070DB, "80 B8 92 B8 9A 00 0B") && BytesAt(0x5070E4, "80 BE 92 B8 9A 00 0C") &&
+                        BytesAt(0x507121, "74 0F") &&
+                        IsCallTo(0x595B82, kVA_Popp) && BytesAt(0x595B8A, "85 C0 0F 85") &&
+                        BytesAt(0x595B6E, "A1 0C 1B 69 00") && BytesAt(0x595B75, "68 40 FE 68 00") &&
+                        BytesAt(0x595B7C, "68 4C FE 68 00") && BytesAt(0x68FE4C, "48 41 53 54 59 00") &&
+                        BytesAt(0x68FE40, "62 61 64 5F 73 6D 2E 70 63 78 00");
+        if (ok) {
+            g_askResume = At(0x5070CE);
+            g_askCancel = At(0x507E72);
+            // the marks first (a mark nobody consumes is reset by its own wrapper), the ask stub last
+            g_askOk = RetargetOk(0x4CD272, &WrapArtyFight) && RetargetOk(0x4CD2AD, &WrapArtyFight) &&
+                      DetourSiteN(0x5070C6, 8, &StubPreAttack);
+            if (!g_askOk) UimodLog("[uimod] aivis: hasty ask: a code WRITE failed after the byte checks passed\n");
+        }
+        if (g_askOk || g_duelOk) g_duelFileOk = BuildDuelFile();   // DUELHASTY + the DUELFIRE ticker
+        UimodLog(!g_askOk ? "[uimod] aivis: action_arty / battle_fight_2 check FAILED -> no hasty question for Long Range Fire\n"
+                 : !g_duelOk ? "[uimod] aivis: Long Range Fire asks #HASTY before a hasty artillery duel (no DUELHASTY: the duel repair is off)\n"
+                 : !g_duelFileOk ? "[uimod] aivis: Long Range Fire asks #HASTY; uimod_duel.txt could not be written -> the bombard's hasty duel is fought unasked\n"
+                 : "[uimod] aivis: Long Range Fire asks #HASTY before a hasty artillery duel; DUELHASTY for the bombard's duel\n");
+    }
+    _snprintf_s(s, sizeof s, _TRUNCATE, "[uimod] aivis: 1.0.1 engine groups: reveal %s, bombard scan %s, duel %s, hasty ask %s\n",
+                g_revealOk ? "on" : "OFF", g_bombardOk ? "on" : "OFF", g_duelOk ? "on" : "OFF", g_askOk ? "on" : "OFF");
+    UimodLog(s);
 }
 
 // ---- zone of control: the hidden-unit exemption (THE RULE, user 2026-10-30) --------------------------------------
@@ -1820,6 +2454,9 @@ void InstallAiVisibility()
     // entered through Thinker's own function pointer and its order_veh never runs, so thinkeraivis.cpp wraps the
     // pointer and detours Thinker's order_veh instead; here only Console_veh_turn's call is re-pointed.
     const bool thinker = ThinkerLoaded();
+    // 1.0.1 groups (reveal, bombard scan, duel, hasty ask): the engine halves, independent of the filter's core sites
+    // below; under Thinker, thinkeraivis.cpp installs the Thinker halves instead
+    if (!thinker) InstallArtilleryGroups();
     const bool hostsOk = thinker
         ? (IsCallTo(kSitesEnemyMove[0], kVA_EnemyMove) && TransfersIntoThinker(kSitesEnemyMove[1], 0xE8) &&
            TransfersIntoThinker(kVA_OrderVeh, 0xE9))
@@ -1925,10 +2562,21 @@ void InstallAiVisibility()
         g_zocAnyTramp = reinterpret_cast<FZoc>(DetourEntryBytes(kVA_ZocAny, sizeof kZocAnyPrologue, &HookZocAny));
         if (g_zocAnyTramp) g_zocVehTramp = reinterpret_cast<FZoc>(DetourEntryBytes(kVA_ZocVeh, sizeof kZocVehPrologue, &HookZocVeh));
         if (g_zocVehTramp) g_zocSeaTramp = reinterpret_cast<FZoc>(DetourEntryBytes(kVA_ZocSea, sizeof kZocSeaPrologue, &HookZocSea));
-        g_zocOk = g_zocSeaTramp != nullptr;
-        UimodLog(g_zocOk ? "[uimod] aivis: zone of control: a human faction's cloaked / submerged unit exerts none on a faction that has "
-                           "not yet detected it (zoc_any, zoc_veh, zoc_sea detoured; the setting gates it)\n"
-                         : "[uimod] aivis: zoc_* trampoline alloc failed -> undetected hidden units still exert zone of control\n");
+        // installed in order, each only after the one before it, so the count names which stand
+        const int zocDone = (g_zocAnyTramp ? 1 : 0) + (g_zocVehTramp ? 1 : 0) + (g_zocSeaTramp ? 1 : 0);
+        g_zocOk = zocDone == 3;
+        if (g_zocOk) {
+            UimodLog("[uimod] aivis: zone of control: a human faction's cloaked / submerged unit exerts none on a faction that has "
+                     "not yet detected it (zoc_any, zoc_veh, zoc_sea detoured; the setting gates it)\n");
+        } else {
+            char z[256];
+            _snprintf_s(z, sizeof z, _TRUNCATE,
+                        "[uimod] aivis: zoc_* detour failed after %d of 3 (zoc_any %s, zoc_veh %s, zoc_sea %s) -> "
+                        "undetected hidden units still exert zone of control%s\n", zocDone,
+                        g_zocAnyTramp ? "detoured" : "not", g_zocVehTramp ? "detoured" : "not", g_zocSeaTramp ? "detoured" : "not",
+                        zocDone > 0 ? " through the ones not detoured" : "");
+            UimodLog(z);
+        }
     } else {
         UimodLog("[uimod] aivis: zoc_* prologue byte check FAILED -> undetected hidden units still exert zone of control\n");
     }
@@ -1942,15 +2590,17 @@ void InstallAiVisibility()
         }
     }
 
-    char s[512];                             // audit 2026-10-30: the Thinker-case text is 397 chars; 320 cut the tail
+    char s[512];                             // worst case over every branch: 500 chars (audit 2026-11-16); 320 cut the tail
     _snprintf_s(s, sizeof s, _TRUNCATE,
                 "[uimod] aivis: AI perception filter installed (128 sites%s; paths %s; diplomacy %s; airdrop diversion %s; "
                 "hidden units exert no ZOC until seen %s; net carrier %s; setting %s)\n",
-                thinker ? "; bump + Thinker's planner: see the thinker lines" : " + bump",
+                thinker ? "; bump + Thinker's planner: see the thinker lines -- under Thinker the filter and the settings "
+                          "nested under it are in force only when that half installs" : " + bump",
                 pathOk ? "on" : "OFF", diploOk ? "on" : "OFF",
                 thinker ? "left to the Thinker half (its own line says whether Thinker's entry was detoured)"
                         : (g_airdropOk ? (g_airdropOn ? "on" : "installed, setting off") : "OFF"),
-                g_zocOk ? (thinker ? "on (engine primitives; Thinker's own ports: see the thinker line)" : "on") : "OFF",
+                g_zocOk ? (thinker ? "on (engine primitives; Thinker's own ports: see the thinker line)" : "on")
+                        : (g_zocAnyTramp ? "PARTIAL (see the zoc_* line)" : "OFF"),
                 g_netOk ? "on" : "OFF -> disabled in network games", g_local ? "on" : "off");
     UimodLog(s);
 }
@@ -1958,6 +2608,9 @@ void InstallAiVisibility()
 // ---- for the Thinker half (thinkeraivis.cpp) ----------------------------------------------------------
 
 bool  AiVisCoreInstalled() { return g_coreOk; }
+void  AiVisThinkerHalfInstalled() { g_thinkerHalf = true; }
+bool  AiVisForcedOff() { return !g_coreOk || !ThinkerAllows(); }
+bool  AiVisAirdropInstalled() { return g_airdropOk; }
 bool  AiVisFactionFiltered(int f) { return Enabled() && IsFilteredAi(f); }
 bool  AiVisHiddenStack(int vehId, int f) { return HiddenStack(vehId, f); }
 bool  AiVisTileHidden(int x, int y, int f) { return TileHidden(x, y, f); }
@@ -1968,4 +2621,42 @@ void  AiVisAirdropSetNext(void* next)
 {
     g_airdropNext = reinterpret_cast<FAirdrop>(next);
     g_airdropOk = next != nullptr;
+}
+
+// ---- 1.0.1 groups, for the Thinker halves (thinkeraivis.cpp) -------------------------------------------------------
+void __cdecl AiVisCombatReveal(int atk, int def) { CombatReveal(atk, def); }
+bool  AiVisBombardSkip(int stack, int actor, int owner) { return BombardSkip(stack, actor, owner); }
+void  AiVisDuelRecord(int veh) { DuelRecord(veh); }
+bool  AiVisDuelActive() { return DuelActive(); }
+int   AiVisDuelRun(int veh, int offset, int a3, int a4, int a5, void* next)
+{
+    return DuelRun(veh, offset, a3, a4, a5, reinterpret_cast<FFight5>(next), true);
+}
+int   AiVisAskHasty(int atk, int f, int local, int ctype, int movesLeft, int defUnit)
+{
+    return AskHastyCore(atk, f, local, ctype, movesLeft, defUnit);
+}
+int*  AiVisAskHastyMark() { return &g_askHasty; }
+void  AiVisSetThinkerGroups(bool reveal, bool bombard, bool duel, bool ask)
+{
+    g_revealOk = reveal;
+    g_bombardOk = bombard;
+    g_duelOk = duel;
+    g_askOk = ask;
+    if ((ask || duel) && !g_duelFileOk) g_duelFileOk = BuildDuelFile();   // DUELHASTY + the DUELFIRE ticker
+    if (ask && duel && !g_duelFileOk)
+        UimodLog("[uimod] thinker: uimod_duel.txt could not be written -> the bombard's hasty duel is fought unasked\n");
+    char s[256];
+    _snprintf_s(s, sizeof s, _TRUNCATE, "[uimod] thinker: 1.0.1 groups in thinker.dll 5.5: reveal %s, bombard scan %s, duel %s, hasty ask %s\n",
+                reveal ? "on" : "OFF", bombard ? "on" : "OFF", duel ? "on" : "OFF", ask ? "on" : "OFF");
+    UimodLog(s);
+}
+
+// desktop_init (prefs.cpp's build hook) runs at every new game and load -- but also from two places that are not a
+// game start (Console_menu_proc's menu id 0x20D, return 0x51C5D9; 0x515430, return 0x515441), where a reset on ONE
+// machine would switch its network rules off until the next upkeep. `ret` is desktop_init's return address.
+void  __cdecl AiVisOnGameStart(unsigned ret)
+{
+    if (ret == 0x0051C5D9 || ret == 0x00515441) return;
+    NetMasksReset();
 }

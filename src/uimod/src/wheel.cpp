@@ -63,6 +63,42 @@ constexpr uintptr_t kGetActiveTarget = 0x5F6A50;   // Win_get_active_target: cde
                                                    // (modal top / basepop, else the focus [0x9B7AC4] / default focus [0x9B7AEC],
                                                    // then its +0xA8 focus child when visible); 0 = the key goes nowhere
 constexpr uint32_t  kConsoleWinVtbl = 0x66EC18;   // the Console's own main window (Console+0x23D94): its key handler moves units
+// The full-screen interfaces the map hides behind: the Design Workshop, the HQ reports and the Datalinks. PRACX zooms
+// the map on a notch whenever its IsMapShowing() is true: map timers running, base screen hidden, SocialWin / TutWin
+// hidden -- it never looks for these screens. Opened from the map, the HUD's leave stops the map timers (call 0x50F440
+// @0x45CA78), so PRACX posts arrows and the screen scrolls; opened from a BASE (the workshop, or the Datalinks through
+// a picker's HELP), the HUD skipped that stop (next mode 3 = base) and the base's leave never stops them, so the notch
+// zoomed the map behind the screen (PRACX bug, user 2026-11-13). While one of them is the live interface, a notch no
+// list under the cursor takes is posted as the same arrow pairs PRACX posts on the map path.
+// The live interface is the top of the engine's mode stack (SubInterface_set_iface_mode 0x45D310 pushes the entering
+// interface's mode id, iface+4, before the leaving one's on_mode(0); SubInterface_release_iface_mode pops it).
+constexpr uintptr_t kIfaceModeTable = 0x7AE778;   // int[] mode stack; [g_iface_mode_idx] = the live interface's mode id
+constexpr uintptr_t kIfaceModeIdx   = 0x7D392C;   // g_iface_mode_idx
+constexpr uintptr_t kIfacePtrTable  = 0x7AE7F0;   // SubInterface* per mode id (each screen's build stores itself there)
+constexpr int32_t   kIfaceModeSlots = static_cast<int32_t>((kIfacePtrTable - kIfaceModeTable) / 4);   // the stack's room
+constexpr int32_t   kMapHidingModes[] = {
+    1,   // Design Workshop (DesignWin_g 0x71F2B0 + 0xA14)
+    5,   // HQ reports (ReportIf)
+    8,   // Datalinks (DatalinkWin_g 0x703EA0 + 0xA14)
+};
+// Captured ONLY when PRACX would otherwise zoom: its m_fGlobalTimersEnabled is set by its thunk on the map blink
+// timer's start (call @0x50F3E6, the only start of Time 0x915688) and cleared on the stop function 0x50F440 (which
+// stops 0x939EB0 then 0x915688, the only stop), and its wheel handler acts only while GetFocus() is the game window.
+// Opened from the map (timers stopped), PRACX keeps posting the arrows itself, with its live Wheel Scroll setting.
+constexpr uintptr_t kMapBlinkTimer = 0x915688;   // Time; +4 = the SetTimer / timeSetEvent id, nonzero while running
+// The game's main window. A notch addressed to any other window (a control of PRACX's Preferences panel, a WS_CHILD of
+// it, that holds focus or sits under the cursor) is that window's own: never captured or turned into arrows.
+constexpr uintptr_t kGameHwnd = 0x9B7B28;
+// The workshop's unit row: DesignWin_on_key 0x439A20 scrolls it on VK_LEFT / VK_RIGHT (its arrow buttons 0x17 / 0x18)
+// and has no case for VK_UP / VK_DOWN, so PRACX's posted up / down arrows never moved it. While the workshop itself is
+// the key target (Win_get_active_target() == DesignWin_g, Thinker's own GW_Design test, gui.cpp current_window), a
+// notch is posted as left / right pairs: up = left, down = right, Thinker's mapping (gui.cpp, WM_MOUSEWHEEL).
+constexpr uintptr_t kDesignWin = 0x71F2B0;
+// Thinker registers the game window's class proc first (its ModRegisterClassA; PRACX's wrapper then hands Thinker the
+// class), so ModWinProc sees every notch before PRACX and, while the key target is not the map, posts the arrows
+// itself (left / right in the workshop, up / down elsewhere) and never zooms. When the class proc lives in thinker.dll,
+// the workshop and map-hiding fallbacks stand aside and Thinker keeps the wheel (user 2026-11-14: never override it).
+constexpr char kThinkerDll[] = "thinker.dll";
 
 HHOOK g_hook = nullptr;
 int   g_lines = 1;      // PRACX ListScrollLines. PRACX's OWN default is 1 (pracxsettings.h
@@ -78,6 +114,48 @@ BYTE* At(uintptr_t va)
     return reinterpret_cast<BYTE*>(GetModuleHandleA(nullptr)) + (va - kImageBase);
 }
 template <typename T> T Rd(uintptr_t va) { return *reinterpret_cast<T*>(At(va)); }
+
+// The live interface when it is one the map hides behind (its SubInterface) AND PRACX would zoom the map on this notch
+// (see kMapBlinkTimer), or null.
+const BYTE* MapHidingIfaceUp(HWND game)
+{
+    if (Rd<uint32_t>(kMapBlinkTimer + 4) == 0 || GetFocus() != game) return nullptr;
+    const int32_t idx = Rd<int32_t>(kIfaceModeIdx);
+    if (idx < 0 || idx >= kIfaceModeSlots) return nullptr;
+    const int32_t mode = Rd<int32_t>(kIfaceModeTable + static_cast<uintptr_t>(idx) * 4);
+    for (int32_t m : kMapHidingModes)
+        if (m == mode) return Rd<const BYTE*>(kIfacePtrTable + static_cast<uintptr_t>(mode) * 4);
+    return nullptr;
+}
+
+// True when the game window's class proc is Thinker's ModWinProc: Thinker's wheel handling runs before PRACX's.
+bool ThinkerOwnsWheel(HWND game)
+{
+    const HMODULE thinker = GetModuleHandleA(kThinkerDll);
+    if (!thinker) return false;
+    const ULONG_PTR proc = GetClassLongPtrA(game, GCLP_WNDPROC);
+    HMODULE owner = nullptr;
+    const bool owns = proc && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                                 reinterpret_cast<LPCSTR>(proc), &owner) && owner == thinker;
+    static int logged = -1;
+    if (logged != static_cast<int>(owns)) {
+        logged = static_cast<int>(owns);
+        UimodLog(owns ? "[uimod] wheel: Thinker's window procedure takes the wheel first -> its workshop / Datalinks / "
+                        "report scrolling is left to it\n"
+                      : "[uimod] wheel: thinker.dll is loaded but the game window's procedure is not Thinker's -> uimod "
+                        "handles the workshop / Datalinks / report wheel\n");
+    }
+    return owns;
+}
+
+// The Design Workshop when it is the key target and the game window has focus (where PRACX and Thinker act), or null.
+const BYTE* WorkshopKeyTarget(HWND game)
+{
+    if (GetFocus() != game) return nullptr;
+    const BYTE* t = reinterpret_cast<const BYTE* (__cdecl*)()>(At(kGetActiveTarget))();
+    return (t && t == At(kDesignWin) && (t[kWinShown] & 1)) ? t : nullptr;
+}
 
 // The scrollable modal under `client` (game client coords), or null.
 const BYTE* ModalUnder(POINT client)
@@ -144,8 +222,13 @@ LRESULT CALLBACK GetMsgProc(int code, WPARAM wParam, LPARAM lParam)
         // or not it is a modal wheel.cpp captures over the map (the exe's wheel thunks and PRACX's own
         // arrows serve the full-screen screens, which are not under ModalUnder: user 2026-10-10, wheel
         // scrolling on UI screens broke when the first version dropped everything without a modal).
-        if ((m->message == WM_KEYDOWN || m->message == WM_KEYUP) && (m->wParam == VK_UP || m->wParam == VK_DOWN) &&
-            m->lParam == 0 && m->hwnd) {
+        // Left / right (our workshop unit-row notches) get the same check: to the map they would move a unit west /
+        // east. Only when Thinker does not own the wheel -- then every lParam-0 left / right is ours; Thinker's own are
+        // left exactly as Thinker posts them.
+        const bool upDown = m->wParam == VK_UP || m->wParam == VK_DOWN;
+        const bool leftRight = m->wParam == VK_LEFT || m->wParam == VK_RIGHT;
+        if ((m->message == WM_KEYDOWN || m->message == WM_KEYUP) && m->lParam == 0 && m->hwnd &&
+            (upDown || (leftRight && !ThinkerOwnsWheel(Rd<HWND>(kGameHwnd))))) {
             POINT p;
             bool ok = false;
             if (GetCursorPos(&p) && ScreenToClient(m->hwnd, &p)) {
@@ -166,16 +249,22 @@ LRESULT CALLBACK GetMsgProc(int code, WPARAM wParam, LPARAM lParam)
             }
             if (!ok) m->message = WM_NULL;
         }
-        if (m->message == WM_MOUSEWHEEL && m->hwnd) {
+        if (m->message == WM_MOUSEWHEEL && m->hwnd && m->hwnd == Rd<HWND>(kGameHwnd)) {   // see kGameHwnd
             POINT p = { static_cast<short>(LOWORD(m->lParam)), static_cast<short>(HIWORD(m->lParam)) };
             const bool inClient = ScreenToClient(m->hwnd, &p) != 0;
             VidModeClientToBackbuffer(m->hwnd, &p);   // window rects are backbuffer coords; the client is stretched when windowed
             const BYTE* under = inClient ? ModalUnder(p) : nullptr;
+            bool unitRow = false;   // the workshop's unit row: left / right instead of up / down (see kDesignWin)
+            if (!under && inClient && !ThinkerOwnsWheel(m->hwnd)) {   // under Thinker these screens are its own
+                under = WorkshopKeyTarget(m->hwnd);
+                unitRow = under != nullptr;
+                if (!under) under = MapHidingIfaceUp(m->hwnd);   // never the map behind these screens (kMapHidingModes)
+            }
             if (under) {
                 int delta = GET_WHEEL_DELTA_WPARAM(m->wParam) + g_accum;
                 g_accum = delta % WHEEL_DELTA;
                 delta /= WHEEL_DELTA;
-                const WPARAM key = delta >= 0 ? VK_UP : VK_DOWN;
+                const WPARAM key = unitRow ? (delta >= 0 ? VK_LEFT : VK_RIGHT) : (delta >= 0 ? VK_UP : VK_DOWN);
                 for (int i = abs(delta) * LinesFor(under, p); i > 0; --i) {
                     PostMessageA(m->hwnd, WM_KEYDOWN, key, 0);   // lParam 0 = the synthetic-wheel signature
                     PostMessageA(m->hwnd, WM_KEYUP, key, 0);

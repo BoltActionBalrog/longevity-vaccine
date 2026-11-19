@@ -11,7 +11,7 @@ type: project
 - **`PROVENANCE.md` + `provenance.yaml`** in the archive root: md5+sha256+size for every exe, GOG gameId `1207658936`, PRACX v1.11, SMAC linker ts `0x385E91FF` (constant, NOT a build discriminator — use hashes).
 - **Baseline hashes pinned into `patches.yaml` `target:` block** (md5+sha256 for 2d0b14, pristine_* for cc659f, patched_md5 for 27cb07).
 - **Signature relocator built** — see below.
-- **Symbolic catalog** at `D:\SmacxUi\work\patches\CATALOG.md` (every site by function+pattern+intent, grouped; re-port reference so shifted VAs can be re-hunted).
+- **Symbolic catalog** (private, hand-maintained, and stale: every site by function+pattern+intent, grouped; a re-port reference so shifted VAs can be re-hunted). `patches.yaml` is the authority.
 
 ## THE provenance finding (settles the old cc659f-vs-2d0b14 ambiguity)
 The two "pristine" candidates differ by **exactly 39 bytes**, all OUTSIDE every patch site:

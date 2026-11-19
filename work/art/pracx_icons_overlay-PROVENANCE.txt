@@ -1,0 +1,25 @@
+pracx_icons_overlay.pcx -- PRACX's icon art
+
+Source: PRACX (PlotinusRedux, DrazharLn and contributors), https://github.com/DrazharLn/pracx, file
+resources/Icons.pcx at commit 06726f8 of 2020-05-25 (MD5 76d0bb390189748d51c9a289432f03b8), the file PRACX's
+installer script packages. PRACX's last release is 1.11 (2018); its v1.10 change log adds "package BUncle's
+Icons.pcx", the grey yield icons used here. The issue reporter fixed the missing icons by copying in PRACX's own
+Icons.pcx, and their screenshot shows this same art.
+
+LICENCE: PRACX is released under CC0 (its LICENSE.txt: "Everyone is free to use, distribute, and modify this
+patch with no limitations, including bundling it in other patches", made available under Creative Commons Zero).
+
+What this file holds: only the 42 rectangles PRACX's prax.dll reads from Icons.pcx (the 24 grey yield icons it
+draws on unworked base tiles, and the 18 swatches of its territory / elevation / rainfall / rockiness map views),
+each with its 1-pixel grid border. Every other pixel is plain background: none of the stock Icons.pcx is in this
+file. Built by work\scripts\art\make_pracx_icons_overlay.py; copied into a stock GOG Icons.pcx by
+work\scripts\patch_icons.py.
+
+DERIVED FROM THE GAME'S ART: the 24 grey yield icons are not original drawings. They are the game's own resource
+icons from newicons.pcx (the nutrient, mineral and energy icons numbered 1 to 8+), recoloured to grey with the
+highlights removed and a black outline added. Measured 2026-11-14: each grey icon lines up, with no offset inside
+its 40x40 cell, with the matching cell of the 3x8 grid of numbered resource icons in newicons.pcx (cells at
+x = 174 + 41*column, y = 304 / 345 / 386). A per-colour mapping of those cells reproduces 90.6% of the grey icons'
+pixels; adding a 1-pixel black outline on the 8 neighbours of each shape, 98.7%.
+PRACX's CC0 dedication covers PRACX's own contribution, not the underlying game art. The 18 map-view swatches are
+flat colour fills.

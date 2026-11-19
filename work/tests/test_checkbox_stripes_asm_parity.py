@@ -458,7 +458,7 @@ def test_region_and_section_length():
 
 
 def test_uimod_longevity_rows_reach_the_same_law():
-    """The Longevity Mod Preferences rows are painted by uimod.dll (prefs.cpp CheckContentDraw), not by the CheckList:
+    """The Longevity Preferences rows are painted by uimod.dll (prefs.cpp CheckContentDraw), not by the CheckList:
     above g = 16 they must call the same t_ck_draw with the row's parent-local top floor-mod P staged in g_ck_ph (the
     law t_ck_list stages), gated on t_ck_draw's presence (inside .pcave2 + its entry bytes): the DLL also runs on the
     pristine exe and on builds without fix 28."""

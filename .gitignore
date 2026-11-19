@@ -7,7 +7,11 @@ dist/
 work/ghidra-projects/
 work/build/
 work/video-upscale/tools/
-src/uimod/third_party/
+# The slim ffmpeg the DLL builds against is in the repository (src/uimod/third_party/ffmpeg); a rebuild's extras are not
+src/uimod/third_party/ffmpeg/doc/
+src/uimod/third_party/ffmpeg/presets/
+src/uimod/third_party/ffmpeg/lib/pkgconfig/
+src/uimod/third_party/ffmpeg/bin/*.lib
 
 # Machine-specific game install path + target exe (copy the *.example templates)
 work/game-path.txt

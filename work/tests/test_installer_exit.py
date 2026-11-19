@@ -37,7 +37,7 @@ def _ok():
 
 
 def _nonzero():
-    return 7
+    return 9          # an arbitrary code with no meaning of its own (7 is EXIT_DECLINED)
 
 
 def _fail_clean():
@@ -90,7 +90,7 @@ def _returns_huge():
 
 ALL_OUTCOMES = [
     ("ok", _ok, ix.EXIT_OK),
-    ("nonzero", _nonzero, 7),
+    ("nonzero", _nonzero, 9),
     ("fail_clean", _fail_clean, ix.EXIT_ERROR),
     ("fail_dirty", _fail_dirty, ix.EXIT_ERROR),
     ("abort", _abort, ix.EXIT_ABORTED),
@@ -396,7 +396,7 @@ _INSTALL = _REPO / "work" / "scripts" / "install.py"
 _BAT = _REPO / "work" / "run-install.bat"
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_a_missing_dependency_still_produces_a_verdict(tmp_path):
     """THE regression test for the worst silent-exit path.
 
@@ -482,7 +482,7 @@ def _beside_bat_lock():
     return file_lock(Path(tempfile.gettempdir()) / f"smacx-bat-beside-{key}.lock", 300)
 
 
-@pytest.mark.skipif(not _BAT.exists(), reason="batch not present")
+@pytest.mark.needs_local(_BAT, "run-install.bat")
 def test_bat_healthy_run_reports_once_and_does_not_hang():
     p = _run_bat(*_SAFE)
     out = p.stdout + p.stderr
@@ -490,7 +490,7 @@ def test_bat_healthy_run_reports_once_and_does_not_hang():
     assert "INSTALLER ERROR" not in out, "layer 2 fired on a run layer 1 already reported"
 
 
-@pytest.mark.skipif(not _BAT.exists(), reason="batch not present")
+@pytest.mark.needs_local(_BAT, "run-install.bat")
 def test_bat_reports_when_the_interpreter_dies_before_any_handler(need_local):
     """A broken runtime cannot reach run_guarded, so layer 2 must speak."""
     need_local(_PY, "the bundled interpreter (tools/python)")   # without it the .bat reports a missing package instead
@@ -500,7 +500,7 @@ def test_bat_reports_when_the_interpreter_dies_before_any_handler(need_local):
     assert "not certain how far the install got" in out
 
 
-@pytest.mark.skipif(not _BAT.exists(), reason="batch not present")
+@pytest.mark.needs_local(_BAT, "run-install.bat")
 def test_bat_concurrent_runs_never_exit_silently():
     """REGRESSION: the marker name used to come from %RANDOM%, which is clock-seeded at about
     one-second granularity -- two installers started in the same second drew the SAME name, and
@@ -529,7 +529,7 @@ def test_bat_concurrent_runs_never_exit_silently():
         assert not (layer1 and layer2), f"process {i} got contradictory verdicts:\n{out}"
 
 
-@pytest.mark.skipif(not _BAT.exists(), reason="batch not present")
+@pytest.mark.needs_local(_BAT, "run-install.bat")
 def test_bat_survives_an_unwritable_temp_without_contradicting_itself():
     """REGRESSION: an unwritable %TEMP% meant the marker could not be written, which the batch
     read as 'the guard never ran' -- so a run that correctly said "Nothing on disk was changed"
@@ -544,7 +544,7 @@ def test_bat_survives_an_unwritable_temp_without_contradicting_itself():
     assert not leaked, f"leaked a marker beside the batch: {leaked}"
 
 
-@pytest.mark.skipif(not _BAT.exists(), reason="batch not present")
+@pytest.mark.needs_local(_BAT, "run-install.bat")
 def test_bat_leaves_no_marker_directories_behind(tmp_path):
     """A private %TEMP%: the machine's own is shared with every other run (other workers, other suites, other
     checkouts all run this batch), and a marker of theirs in flight between the two listings read as our leak."""
@@ -655,7 +655,8 @@ def test_a_broken_verdict_callable_falls_back_instead_of_failing(monkeypatch, ca
     out = capsys.readouterr().out
     assert code == ix.EXIT_OK
     assert "INSTALLATION SUCCESSFUL" in out
-    assert "The Longevity Vaccine is installed." in out
+    import version as ver
+    assert f"Longevity Vaccine {ver.VERSION} is installed." in out.splitlines() and "The Longevity" not in out
 
 
 def test_a_blank_verdict_falls_back(monkeypatch, capsys):

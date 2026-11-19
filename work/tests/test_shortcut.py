@@ -18,6 +18,16 @@ sys.path.insert(0, str(_SCRIPTS))
 import install as inst        # noqa: E402
 import installer_exit as ix   # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_arrow_choices import _keys  # noqa: E402
+
+
+def _never_asked(monkeypatch):
+    """Any question at all fails the test: a typed one or an arrow-key one (user-approved 2026-11-15: arrow
+    choices)."""
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("must not ask"))
+    monkeypatch.setattr(inst, "_read_key", lambda: pytest.fail("must not ask"))
+
 inst._load_modules()
 
 
@@ -87,7 +97,7 @@ def test_the_installer_writes_and_refreshes_its_own_shortcuts_icon(desk, game, m
     brought up to date; a shortcut under the player's own name is left alone."""
     (game / "thinker.exe").write_bytes(b"MZ")
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    _keys(monkeypatch, "enter")
     inst.check_desktop_shortcut(game, "pracx_thinker")
     ours = desk[0] / (inst.MOD_SHORTCUT_NAME + ".lnk")
     assert ours.is_file() and _lnk_icon(ours) == f"I={game / 'terranx.exe'},0"
@@ -96,7 +106,7 @@ def test_the_installer_writes_and_refreshes_its_own_shortcuts_icon(desk, game, m
     assert inst.create_shortcut(ours, game / "thinker.exe") == ""
     assert _lnk_icon(ours) == f"I={game / 'thinker.exe'},0"
     monkeypatch.setattr(inst, "_SHORTCUT_NAME", None)
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("an existing shortcut asks nothing"))
+    _never_asked(monkeypatch)                                         # an existing shortcut asks nothing
     inst.check_desktop_shortcut(game, "pracx_thinker")
     assert _lnk_icon(ours) == f"I={game / 'terranx.exe'},0"
     assert "You do not have a desktop shortcut" not in capsys.readouterr().out
@@ -117,19 +127,17 @@ def test_mod_exe_prefers_the_targets_exe(game):
 
 def test_yes_creates_the_named_shortcut_and_the_note_names_it(desk, game, monkeypatch, capsys):
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    asked = []
-    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or "")
+    _keys(monkeypatch, "enter")
     inst.check_desktop_shortcut(game, "pracx")
     out = capsys.readouterr().out
-    assert f"You do not have a desktop shortcut that starts the game with the mod.\n\n{ix.RULE}\n" \
-           f" DESKTOP SHORTCUT\n{ix.RULE}\n" in out
-    assert asked == [" Create a desktop shortcut that starts the game with the Longevity Vaccine mod? [Y/n] "]
+    assert f"{ix.RULE}\n DESKTOP SHORTCUT\n You do not have a desktop shortcut that starts the game with Longevity " \
+           f"Vaccine.\n{ix.RULE}\n" in out
     assert f'Created "{inst.MOD_SHORTCUT_NAME}" on your desktop.' in out
     lnk = desk[0] / (inst.MOD_SHORTCUT_NAME + ".lnk")
     assert lnk.is_file() and inst.find_shortcut_to(game / "terranx_PRACX.exe") == inst.MOD_SHORTCUT_NAME
     inst.print_play_note(game, "pracx")
     note = capsys.readouterr().out.rstrip("\n").split("\n")
-    assert note[0] == "To play with the mod, start terranx_PRACX.exe."
+    assert note[0] == "To play with Longevity Vaccine, start terranx_PRACX.exe."
     assert note[1].startswith("The GOG Galaxy Play button") and "\n" not in note[1]
     assert "Alien Crossfire" not in "\n".join(note)
     assert note[2] == f'Your desktop shortcut "{inst.MOD_SHORTCUT_NAME}" starts the right one.'
@@ -139,7 +147,7 @@ def test_yes_creates_the_named_shortcut_and_the_note_names_it(desk, game, monkey
 def test_a_first_installs_no_prompt_asks_nothing_and_makes_no_shortcut(desk, game, monkeypatch, capsys):
     """The PLAYER's --no-prompt ("never ask anything"): the hint only, even with a keyboard."""
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    _never_asked(monkeypatch)
     inst.check_desktop_shortcut(game, "pracx", ask=False)
     assert "Run the installer again to create one" in capsys.readouterr().out
     assert not (desk[0] / (inst.MOD_SHORTCUT_NAME + ".lnk")).exists()
@@ -147,7 +155,7 @@ def test_a_first_installs_no_prompt_asks_nothing_and_makes_no_shortcut(desk, gam
 
 def test_no_leaves_the_desktop_alone(desk, game, monkeypatch, capsys):
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    _keys(monkeypatch, "down", "enter")
     inst.check_desktop_shortcut(game, "pracx")
     assert "No shortcut created. Start terranx_PRACX.exe from the game folder" in capsys.readouterr().out
     assert not list(desk[0].glob("*.lnk")) and not list(desk[1].glob("*.lnk"))
@@ -158,7 +166,7 @@ def test_no_leaves_the_desktop_alone(desk, game, monkeypatch, capsys):
 def test_an_existing_shortcut_means_no_question(desk, game, monkeypatch, capsys):
     exe = game / "terranx_PRACX.exe"
     assert inst.create_shortcut(desk[0] / "My SMAC.lnk", exe) == ""
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    _never_asked(monkeypatch)
     inst.check_desktop_shortcut(game, "pracx")
     assert capsys.readouterr().out == ""
     inst.print_play_note(game, "pracx")
@@ -167,7 +175,7 @@ def test_an_existing_shortcut_means_no_question(desk, game, monkeypatch, capsys)
 
 def test_without_a_keyboard_it_only_explains(desk, game, monkeypatch, capsys):
     monkeypatch.setattr(ix, "can_ask", lambda: False)
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    _never_asked(monkeypatch)
     inst.check_desktop_shortcut(game, "pracx")
     out = capsys.readouterr().out
     assert "You do not have a desktop shortcut" in out
@@ -179,14 +187,12 @@ def test_a_foreign_shortcut_with_our_name_is_replaced_only_on_yes(desk, game, mo
     ours = desk[0] / (inst.MOD_SHORTCUT_NAME + ".lnk")
     assert inst.create_shortcut(ours, game / "terranx.exe") == ""    # wrong target, our name
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    answers = iter(["", "n"])                                        # create? yes; replace? no
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    _keys(monkeypatch, "down", "enter")                               # ONE question: Don't create a shortcut
     inst.check_desktop_shortcut(game, "pracx")
     out = capsys.readouterr().out
     assert "already exists but starts something else" in out and "Left as it is." in out
     assert inst.find_shortcut_to(game / "terranx.exe") == inst.MOD_SHORTCUT_NAME
-    answers = iter(["", ""])                                         # create? yes; replace? yes
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    _keys(monkeypatch, "enter")                                       # Replace "SMACX Longevity" ...
     inst.check_desktop_shortcut(game, "pracx")
     assert inst.find_shortcut_to(game / "terranx_PRACX.exe") == inst.MOD_SHORTCUT_NAME
 
@@ -194,7 +200,7 @@ def test_a_foreign_shortcut_with_our_name_is_replaced_only_on_yes(desk, game, mo
 def test_the_note_for_a_non_pracx_target_stays_generic(desk, game, capsys):
     inst.print_play_note(game, "vanilla")
     out = capsys.readouterr().out
-    assert "To play with the mod, start" in out and "PRACX patch" not in out
+    assert "To play with Longevity Vaccine, start" in out and "PRACX patch" not in out
     assert out.rstrip("\n").endswith(inst.ENJOY_LINE)
 
 

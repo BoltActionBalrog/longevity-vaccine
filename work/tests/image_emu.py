@@ -26,6 +26,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import config  # noqa: E402
+import host_fonts  # noqa: E402
 import pefile
 from unicorn import (Uc, UcError, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE,
                      UC_PROT_ALL)
@@ -416,7 +417,7 @@ class Emu:
 
     def api_CreateFontIndirectA(self):
         lf = bytes(self.uc.mem_read(self.arg(0), 60))
-        host = _g.CreateFontIndirectA(lf)
+        host = host_fonts.host_font(lf)           # one per distinct LOGFONT per process: never leaked per call
         h = self.new_handle(host, "font")
         height, width, esc, orient, weight = struct.unpack_from("<iiiii", lf, 0)
         self.log.append(("font", h, lf[28:60].split(b"\0")[0].decode("latin-1"), height, weight, lf[20]))

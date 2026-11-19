@@ -96,7 +96,9 @@ def test_pack_on_disk_ignores_the_players_folder_and_the_readme(tmp_path):
     (tmp_path / "portraits" / "hd").mkdir()
     (tmp_path / "portraits" / "hd" / "gaians.png").write_bytes(b"pack")
     assert not inst.pack_on_disk(tmp_path, "portraits-hd")          # no manifest: not the pack (as the game sees it)
-    (tmp_path / "portraits" / "hd" / "pack-manifest.json").write_text("{}", encoding="utf-8")
+    # a readable manifest that lists the pack (audit-q L2: "{}" lists nothing, so it is unreadable)
+    (tmp_path / "portraits" / "hd" / "pack-manifest.json").write_text('{"files": [{"name": "gaians.png", "size": 4}]}',
+                                                                   encoding="utf-8")
     assert inst.pack_on_disk(tmp_path, "portraits-hd")
 
 

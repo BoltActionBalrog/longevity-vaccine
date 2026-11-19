@@ -38,13 +38,20 @@
 // ("TOPMENU") + SetupWin_do_menu_2 0x4ADB20 (ret 0x58E722) -> Win_set_modal on a stack SetupWin
 // (vtbl 0x66D8E8; +0x1014 = the popup, +0xFD0 = highlighted reply, -1 = ESC/EXIT). Win_set_modal
 // keeps g_modal_top 0x9B7AE0 / depth 0x9B7AE4 / stack 0x9B6EF8. Console_human_turn 0x514050
-// (thiscall, this = MapWin_g 0x9156B0) is called from 4 E8 sites, none touched by Thinker 5.5;
+// (thiscall, this = MapWin_g 0x9156B0) is called from 4 E8 sites in the engine's control_turn /
+// net_control_turn -- but Thinker 5.5 runs its OWN control_game + control_turn and calls it through
+// a function pointer, and runs its own top_menu (both moments were never seen under Thinker until
+// 2026-11-10: see "the presentation hooks" below, which key on the two engine ENTRIES instead);
 // its input pump sets MapWin_g+0x23BE4 = 1 while waiting and exits on ControlTurnA 0x9B2068.
+// Thinker's top_menu returns 1 (exit) for any reply < 0, like the engine's, and its control_turn
+// leaves on ControlTurnA, so both exits below work under it unchanged.
 // Quit = Console_menu_proc case 0x5D: (single player) if GameRules 0x9A649C & 0x400 (IRONMAN)
 // auto_save 0x5ABD20; ControlTurnA = 1. Save Game = case 0x59 -> save_game(0) 0x5A9EB0, cdecl,
 // 0 = saved. X_pops_18 returns the highlighted reply on ESC unless flags & 0x40 -> -1.
 #include "modernctl.h"
 #include "update.h"
+#include "thinkercheck_core.h"   // VersionOlder (the resident installer against this DLL)
+#include "thinkerversion.h"      // ThinkerWords: {RUN} / {YOURS} for the offer's Thinker step
 #include "update_core.h"
 #include "version.h"
 
@@ -53,6 +60,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 void UimodLog(const char* msg);
 
@@ -80,6 +88,8 @@ constexpr uintptr_t kVA_ControlTurnA  = 0x009B2068;   // 1 = leave the turn loop
 constexpr uintptr_t kVA_Multiplayer   = 0x0093F660;
 constexpr uintptr_t kVA_PbemActive    = 0x0093A95C;
 constexpr uintptr_t kVA_GameRules     = 0x009A649C;   // 0x400 = RULES_IRONMAN
+constexpr uintptr_t kVA_GameState     = 0x009A64C0;   // GameState
+constexpr uint32_t  kStateScenarioEditor = 0x40;      // STATE_SCENARIO_EDITOR: the scenario editor is on
 constexpr uintptr_t kVA_BaseWin       = 0x006A7628;   // BaseWin_g; +0x9C bit0 = shown (not modal)
 constexpr uintptr_t kVA_TutWin        = 0x008C6E68;   // TutWin (tutorial / hint popup): NON-modal, +0x9C bit0 = shown
 constexpr size_t    kOfsWinShown      = 0x9C;         // Win +0x9C bit0 = shown (Win_is_visible 0x5F7E90)
@@ -156,8 +166,11 @@ const wchar_t kNoticeKey[] = L"CinematicsNotice";     // [UIMod]: the signature 
 lvupd::UpdateInfo g_info;           // the main thread's copy of the answer
 ULONGLONG g_postedAt = 0;
 bool  g_turnHookArmed = false;
-volatile LONG g_turnBegan = 0;      // set by the Console_human_turn call-site stub; cleared by the player's first input
-void* g_humanTurn = nullptr;        // Console_human_turn's address, for the stub's jmp
+volatile LONG g_turnBegan = 0;      // set by the Console_human_turn stub (entry or call sites); cleared by the player's first input
+void* g_humanTurn = nullptr;        // where the stub continues: the entry trampoline, Thinker's function, or the engine's entry
+bool  g_popupHookArmed = false;     // Popup_start's entry records each popup's label (the main-menu gate's TOPMENU test)
+void* g_popupStartNext = nullptr;   // where its stub continues: the entry trampoline or Thinker's function
+lvupd::PopupLabels g_popupLabels;   // main thread only (Popup_start runs on the game thread)
 
 void Log(const char* fmt, ...)
 {
@@ -474,6 +487,10 @@ constexpr uintptr_t kVA_HotseatTopMenuRet = 0x0058DBAA;   // multiplayer_init's 
 // left by an earlier top_menu under a sub-menu's frame lies above the sub-menu's own W. The
 // hotseat menu is top_menu(1) called from multiplayer_init: its return slot is a LIVE frame
 // above W (a stale one from an earlier visit would be below).
+// Which strip it is: the label its popup was started with, when the Popup_start hook recorded it -- "TOPMENU" for
+// the engine's main menu and for Thinker's own top_menu alike (any caller, any Thinker build that still reads its
+// menu through the engine's Popup_start). The return-address scan below is the fallback for a popup the hook has
+// not seen (hook not installed: another mod owns Popup_start's entry); it only recognises the ENGINE's top_menu.
 bool MainMenuIdle()
 {
     if (Rd<int>(kVA_GameHalted) != 1) return false;
@@ -483,7 +500,21 @@ bool MainMenuIdle()
     if (Rd<int>(kVA_ModalDepth) != 1) return false;              // the strip is the ONE modal (Load Game = a Windows dialog; credits, sub-menus stack)
     const BYTE* top = Rd<BYTE*>(kVA_ModalTop);
     if (!top || *reinterpret_cast<void* const*>(top) != At(kVA_SetupWinVtbl)) return false;
-    if (*reinterpret_cast<void* const*>(top + kOfsSetupPopup) == nullptr) return false;   // popup-driven strip
+    const void* popup = *reinterpret_cast<void* const*>(top + kOfsSetupPopup);
+    if (popup == nullptr) return false;                          // popup-driven strip
+    if (g_popupHookArmed) {
+        const int topmenu = g_popupLabels.Is(popup, "TOPMENU");
+        // Once per launch, the first idle strip says what it was taken for: a later Thinker that renamed its menu
+        // (the one way this gate goes blind again) shows up in uimod.log instead of as a silently missing prompt.
+        static bool s_said = false;
+        if (!s_said) {
+            s_said = true;
+            const int i = g_popupLabels.Index(popup);
+            Log("main-menu gate: first idle strip, popup label \"%s\" -> %s", i >= 0 ? g_popupLabels.slot[i].label : "(not recorded)",
+                topmenu == 1 ? "the TOPMENU" : topmenu == 0 ? "not the TOPMENU (no prompt here)" : "unknown: the return-address scan decides");
+        }
+        if (topmenu >= 0) return topmenu == 1;                   // a label we saw decides; unseen -> the scan below
+    }
     const uintptr_t w = reinterpret_cast<uintptr_t>(top);
     const uintptr_t hit = StackFindReturn(kVA_TopMenuRet - kImageBase);
     if (hit == 0 || hit >= w) return false;
@@ -497,6 +528,11 @@ bool TurnBegan()
     if (!g_turnBegan) return false;
     if (Rd<int>(kVA_GameHalted) != 0) return false;
     if (Rd<int>(kVA_Multiplayer) != 0 || Rd<int>(kVA_PbemActive) != 0) return false;   // single player only
+    // The scenario editor runs the same human turn (a "Save, then update" there would save the scenario being
+    // edited): never a moment for the prompt. GameState 0x40 = STATE_SCENARIO_EDITOR, the LIVE editor bit (the
+    // in-game toggle 0x4D99CE flips only it; Console_edit_lock tests it first). Not 0x8000000 EDITOR_ONLY_MODE:
+    // "Create Scenario" sets it and leaving the editor through the toggle leaves it set, saved with the game.
+    if (Rd<uint32_t>(kVA_GameState) & kStateScenarioEditor) return false;
     if (Rd<void*>(kVA_ModalTop) != nullptr || Rd<int>(kVA_ModalDepth) != 0) return false;
     if (Rd<int>(kVA_MapWin + kOfsInputPump) != 1) return false;   // Console_human_turn is waiting for the player
     if (Rd<int>(kVA_ControlTurnA) != 0) return false;
@@ -539,6 +575,12 @@ bool ArtPresent()
     return GameDirW(dir, MAX_PATH) && Join(path, MAX_PATH + 32, dir, L"longevity_sm.pcx") && FileExistsW(path);
 }
 
+// Esc means "Not now" on ANY row. The engine returns the HIGHLIGHTED reply on Esc, so a player who had moved the
+// highlight to "Quit and update" and then pressed Esc to back out would have accepted the update. While one of our
+// popups is up, the message hook (UpdateOnMessage) records an Escape key-down; Popup() then answers -1.
+// (That the hook sees keys inside X_pops_18's own loop is by design of the hook, not yet confirmed in the game.)
+volatile LONG g_popupUp = 0, g_popupEsc = 0;
+
 // Shows one popup; returns the reply index, -1 for ESC / could not show.
 int Popup(const char* body, const lvupd::ReplySet& r)
 {
@@ -552,8 +594,15 @@ int Popup(const char* body, const lvupd::ReplySet& r)
     for (int i = 0; i < r.n; ++i) s.replies[i] = r.text[i];
     g_lastPopupShown = false;
     if (!WriteLabelFile(s)) { Log("could not write uimod_update.txt -> prompt not shown"); return -1; }
-    const int reply = reinterpret_cast<FXPops18>(At(kVA_XPops18))(kLabelFile, kLabelName, -1, nullptr, kPopFlags,
-                                                                  nullptr, 1, 1, nullptr);
+    InterlockedExchange(&g_popupEsc, 0);
+    InterlockedExchange(&g_popupUp, 1);
+    int reply = reinterpret_cast<FXPops18>(At(kVA_XPops18))(kLabelFile, kLabelName, -1, nullptr, kPopFlags,
+                                                            nullptr, 1, 1, nullptr);
+    InterlockedExchange(&g_popupUp, 0);
+    if (InterlockedExchange(&g_popupEsc, 0)) {
+        if (reply >= 0) Log("Esc on reply %d -> read as Not now", reply);
+        reply = -1;
+    }
     g_lastPopupShown = true;
     Log("prompt shown (%s) -> reply %d \"%s\"", s.sprite ? "with picture" : "text only", reply,
         r.n == 0 ? "OK" : reply >= 0 && reply < r.n ? r.text[reply] : "(escape)");
@@ -641,6 +690,60 @@ void FlushIni()
     if (IniPathW(ini, MAX_PATH + 32)) WritePrivateProfileStringW(nullptr, nullptr, nullptr, ini);
 }
 
+// ---- the Thinker step's consent ([Longevity] ThinkerUpdate; lvupd::BuildThinkerConsent) -----------------------
+// Written and FLUSHED just before the updater is spawned, so the updater asks nothing again; deleted on every path
+// that does not end in a spawn (Not now, Esc, a cancelled save, a refused or failed spawn) and at every start.
+
+void DeleteThinkerConsent(const char* why)
+{
+    wchar_t ini[MAX_PATH + 32], cur[96] = L"";
+    if (!IniPathW(ini, MAX_PATH + 32)) return;
+    GetPrivateProfileStringW(L"Longevity", lvupd::kThinkerConsentKey, L"", cur, _countof(cur), ini);
+    if (!cur[0]) return;                                         // nothing there: do not touch the file
+    WritePrivateProfileStringW(L"Longevity", lvupd::kThinkerConsentKey, nullptr, ini);
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, ini);  // flush
+    Log("Thinker consent removed (%s)", why);
+}
+
+bool WriteThinkerConsent(const lvupd::UpdateInfo& u, bool keep)
+{
+    char value[96];
+    if (!lvupd::BuildThinkerConsent(u, keep, static_cast<unsigned long long>(time(nullptr)), GetCurrentProcessId(),
+                                    value, sizeof value))
+        return false;
+    wchar_t ini[MAX_PATH + 32], wide[96];
+    if (!IniPathW(ini, MAX_PATH + 32)) return false;
+    size_t k = 0;
+    for (; value[k]; ++k) wide[k] = static_cast<wchar_t>(value[k]);
+    wide[k] = 0;
+    wchar_t back[96] = L"";
+    const BOOL ok = WritePrivateProfileStringW(L"Longevity", lvupd::kThinkerConsentKey, wide, ini);
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, ini);  // flush: the updater reads the file, not our cache
+    GetPrivateProfileStringW(L"Longevity", lvupd::kThinkerConsentKey, L"", back, _countof(back), ini);
+    const bool landed = ok && wcscmp(back, wide) == 0;
+    Log("Thinker consent %s: %s", landed ? "written" : "COULD NOT BE WRITTEN", value);
+    return landed;
+}
+
+// The resident installer's VERSION is not older than this DLL: it knows `--accept thinker1`. An older one (a new DLL
+// beside an old installer copy) ignores a switch it does not know -- its --check parses with parse_known_args -- so
+// the token would only be noise there; it is sent to a copy that understands it. Either way the player gets the offer.
+bool ResidentKnowsThinker(const wchar_t* gameDir)
+{
+    wchar_t path[MAX_PATH + 64];
+    if (!Join(path, MAX_PATH + 64, gameDir, L"LongevityMods\\updater\\VERSION")) return false;
+    const HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    char buf[40] = "";
+    DWORD got = 0;
+    if (!ReadFile(h, buf, sizeof buf - 1, &got, nullptr)) got = 0;
+    CloseHandle(h);
+    buf[got] = 0;
+    while (got && (buf[got - 1] == '\n' || buf[got - 1] == '\r' || buf[got - 1] == ' ' || buf[got - 1] == '\t')) buf[--got] = 0;
+    return !thinkercheck::VersionOlder(buf, UIMOD_VERSION_STRING);
+}
+
 // ---- hand-off and exit --------------------------------------------------------------------------
 
 // `"<system>\cmd.exe" /D /S /C ""<bat>" --update --game-dir "<game>" --wait-pid <pid> --only-listed [--modules a,b] [--manifest "<v>"]"`
@@ -649,6 +752,7 @@ void FlushIni()
 // release the prompt came from (LONGEVITY_TRUST_KEY reaches it through the inherited environment).
 // A path or value with a character cmd.exe would interpret is refused (then F7 tells the player
 // where to download).
+bool SpawnVisible(const wchar_t* cmdExe, wchar_t* cmd, const wchar_t* cwd, const wchar_t* env);   // below
 bool SpawnUpdater(const char* const* mods, int nMods)
 {
     if (!FileExistsW(g_job.bat)) { Log("hand-off: %ls not found", g_job.bat); return false; }
@@ -666,11 +770,20 @@ bool SpawnUpdater(const char* const* mods, int nMods)
             g_job.bat, g_job.gameDir, g_job.manifest[0] ? g_job.manifest : L"-", nMods, nMods > 0 ? mods[0] : "-");
         return false;
     }
+    return SpawnVisible(cmdExe, cmd, g_job.gameDir, nullptr);
+}
+
+// One visible console for the resident installer: `cmd` (built by lvupd::Build*CommandLine) under `cmdExe`, created
+// SUSPENDED, widened to the system's CPUs, then resumed. No inherited handles and no job object: the console must
+// outlive the game. `env` is a Unicode environment block for the child, or null to inherit ours. True only when the
+// child's thread really resumed -- the Thinker startup check (thinkerversion.cpp) ends the game on that answer.
+bool SpawnVisible(const wchar_t* cmdExe, wchar_t* cmd, const wchar_t* cwd, const wchar_t* env)
+{
     STARTUPINFOW si; memset(&si, 0, sizeof si);
     si.cb = sizeof si;
     PROCESS_INFORMATION pi; memset(&pi, 0, sizeof pi);
-    const BOOL ok = CreateProcessW(cmdExe, cmd, nullptr, nullptr, FALSE, CREATE_NEW_CONSOLE | CREATE_SUSPENDED, nullptr,
-                                   g_job.gameDir, &si, &pi);
+    const DWORD flags = CREATE_NEW_CONSOLE | CREATE_SUSPENDED | (env ? CREATE_UNICODE_ENVIRONMENT : 0);
+    const BOOL ok = CreateProcessW(cmdExe, cmd, nullptr, nullptr, FALSE, flags, const_cast<wchar_t*>(env), cwd, &si, &pi);
     if (!ok) { Log("hand-off failed (error %lu): %ls", GetLastError(), cmd); return false; }
     DWORD_PTR cpusBefore = 0, cpusAfter = 0;
     WidenAffinity(pi.hProcess, &cpusBefore, &cpusAfter);         // the updater (cmd -> Python) inherits it
@@ -759,13 +872,27 @@ void Present(lvupd::Context ctx)
     int nAccepted = 0;
     const bool hadUpdate = u.hasBase || u.nStale > 0;
 
+    // The update's Thinker step (the pipe's thinker= line): the offer says what happens to Thinker Mod, and -- when
+    // the installer allows it -- carries "Update Longevity Vaccine only". The folder's build is named from the pipe
+    // when it is a plain version, else from the loaded thinker.dll's own label.
+    const bool thinkerStep = u.hasBase && u.hasThinker;
+    bool longevityOnly = false;
     if (hadUpdate) {                                                      // F2
         lvupd::ReplySet r;
-        lvupd::ReplySetFor(ctx, lvupd::kPromptUpdate, &r);
-        if (!lvupd::BuildUpdateBody(u, ctx, body, sizeof body)) return;
+        lvupd::ReplySetFor(ctx, lvupd::kPromptUpdate, &r, thinkerStep ? lvupd::ThinkerDirection(u) : lvupd::kThinkerNone,
+                           thinkerStep && u.thinkerLongevityOnly);
+        char run[96] = "", yours[96] = "";
+        if (thinkerStep && !ThinkerWords(lvupd::ThinkerIsDevPin(u) ? nullptr : u.thinkerOffered, run, sizeof run, yours, sizeof yours))
+            run[0] = 0;                                                   // Thinker is not in this process: the neutral fallback
+        if (!lvupd::BuildUpdateBody(u, ctx, body, sizeof body, run)) return;
+        if (thinkerStep)
+            Log("the update carries a Thinker step: have \"%s\", offered \"%s\", Longevity-only %s", u.thinkerHave[0] ? u.thinkerHave : "?",
+                u.thinkerOffered, u.thinkerLongevityOnly ? "allowed" : "not allowed");
         switch (lvupd::ActionFor(r, Popup(body, r))) {
         case lvupd::kActSaveQuitUpdate: wantSave = true; quitPending = true; break;
         case lvupd::kActQuitUpdate:     quitPending = true; break;
+        case lvupd::kActLongevityOnly:                                    // in a game it always saves first
+            longevityOnly = true; quitPending = true; wantSave = ctx == lvupd::kCtxInGame; break;
         case lvupd::kActNever:
             if (u.hasBase) Decline("base", lvupd::DeclineVersionFor(false, u.baseTo));
             for (int i = 0; i < u.nStale; ++i) Decline(u.stale[i].id, lvupd::DeclineVersionFor(false, u.stale[i].to));
@@ -821,7 +948,11 @@ void Present(lvupd::Context ctx)
         Notice(lvupd::kSaveCancelledBody, "OK", nullptr);
         return;
     }
+    // The player said yes to the update popup itself (not only to a pack): its Thinker answer goes to the updater.
+    // If it cannot be written the updater simply asks its own question; nothing is lost.
+    const bool consent = thinkerStep && updateAccepted && WriteThinkerConsent(u, longevityOnly);
     if (!SpawnUpdater(mods, nMods)) {                                     // F7
+        if (consent) DeleteThinkerConsent("the updater could not be started");
         Notice(lvupd::kNoInstallerBody, "OK", nullptr);
         return;
     }
@@ -829,18 +960,148 @@ void Present(lvupd::Context ctx)
         Notice(lvupd::kQuitManuallyBody, "OK", nullptr);
 }
 
-// ---- the turn-begin hook -------------------------------------------------------------------------
-// Four `call Console_human_turn` sites are retargeted at a stub that raises the token and jumps
-// on (ecx = MapWin_g preserved, the return address stays the call site's). Byte-checked: any
-// site that is not the plain E8 to 0x514050 (another mod) leaves the hook off, and the prompt
-// then shows at the main menu only.
+// ---- the presentation hooks ----------------------------------------------------------------------
+// The two moments are recognised inside ENGINE functions that every caller goes through, never at call sites
+// or by a caller's return address: Thinker 5.5 replaces the game loop (control_game -> its own control_turn,
+// which calls Console_human_turn through its function pointer) and the main menu (its own top_menu, which calls
+// Popup_start / SetupWin_do_menu_2 from thinker.dll), so a call-site hook and a 0x58E722 scan both went blind
+// under Thinker (confirmed live 2026-11-10, 1.0.0: the offer was logged, never shown).
+//   Console_human_turn 0x514050 (thiscall)       its entry raises g_turnBegan, then the function runs
+//   Popup_start        0x406380 (thiscall RET 0x18)  its entry records (popup, label); MainMenuIdle asks for "TOPMENU"
+// Each entry is accepted in exactly two states: the engine's prologue (byte-checked; the trampoline is those bytes
+// + a jmp back -- they hold no relative operand) or an E9 into thinker.dll (a later Thinker that replaces the
+// function outright: chained, our stub first, then Thinker's function). Anything else (another mod) leaves that
+// hook off: the turn start falls back to the three control_turn call sites, the main menu to the return-address
+// scan -- the exact pre-2026-11-10 behaviour. Every write is read back.
 
-__declspec(naked) void StubHumanTurn()
+__declspec(naked) void StubHumanTurn()   // entry or call-site stub: ecx = MapWin_g and the stack are untouched
 {
     __asm {
         mov  dword ptr [g_turnBegan], 1
         jmp  dword ptr [g_humanTurn]
     }
+}
+
+// Popup_start(this = ecx, file, label, ...): [esp+8] = label at entry. Records, then continues with every
+// register as the caller left it.
+void __cdecl RecordPopupLabel(const void* popup, const char* label)
+{
+    char buf[lvupd::PopupLabels::kLabelCap];
+    bool cut = false;
+    const char* safe = nullptr;
+    if (label) {
+        __try {
+            int k = 0;
+            for (; k < lvupd::PopupLabels::kLabelCap - 1 && label[k]; ++k) buf[k] = label[k];
+            cut = label[k] != '\0';
+            buf[k] = '\0';
+            safe = buf;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            safe = nullptr;                                   // unreadable: forget the popup, never guess
+        }
+    }
+    g_popupLabels.Record(popup, safe, cut);
+}
+
+__declspec(naked) void StubPopupStart()
+{
+    __asm {
+        pushad
+        mov  eax, dword ptr [esp + 0x28]     // label: [esp+8] at entry, +0x20 for pushad
+        push eax
+        push ecx
+        call RecordPopupLabel
+        add  esp, 8
+        popad
+        jmp  dword ptr [g_popupStartNext]
+    }
+}
+
+// Engine prologues (identical in GOG's exe, the PRACX base and every build we bake; test_update_presentation_hooks.py
+// pins them against the baked exe, patches.yaml, PRACX's hook tables and Thinker 5.5's write surface).
+const BYTE kHumanTurnPrologue[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08 };                  // push ebp; mov ebp,esp; sub esp,8
+const BYTE kPopupStartPrologue[9] = { 0x55, 0x8B, 0xEC, 0x51, 0xA1, 0x0C, 0x1B, 0x69, 0x00 };  // ...; push ecx; mov eax,[0x691B0C]
+constexpr uintptr_t kVA_PopupStart = 0x00406380;
+
+bool InThinkerDll(uintptr_t a)
+{
+    const HMODULE m = GetModuleHandleA("thinker.dll");
+    if (!m) return false;
+    const BYTE* base = reinterpret_cast<const BYTE*>(m);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+    const uintptr_t lo = reinterpret_cast<uintptr_t>(base);
+    return a >= lo && a < lo + nt->OptionalHeader.SizeOfImage;
+}
+
+bool WriteChecked(BYTE* p, const BYTE* bytes, size_t n)
+{
+    DWORD old;
+    if (!VirtualProtect(p, n, PAGE_EXECUTE_READWRITE, &old)) return false;
+    memcpy(p, bytes, n);
+    VirtualProtect(p, n, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), p, n);
+    return memcmp(p, bytes, n) == 0;
+}
+
+// Detours the entry at `va` onto `stub`; *next is where the stub continues and is set BEFORE the entry changes.
+// Returns "engine" / "thinker" for the state it found, nullptr when the entry is as it was (left alone, or a
+// failed write undone). *broken = a write failed AND could not be undone: the caller must not fall back to
+// anything that runs the entry's original bytes (none of this is expected; VirtualProtect is the only real
+// failure, and it writes nothing).
+const char* DetourEntry(uintptr_t va, const BYTE* prologue, size_t n, void* stub, void** next, bool* broken)
+{
+    BYTE* p = At(va);
+    BYTE patch[16];
+    *broken = false;
+    if (n < 5 || n > sizeof patch) return nullptr;
+    if (memcmp(p, prologue, n) == 0) {
+        BYTE* tr = static_cast<BYTE*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+        if (!tr) return nullptr;
+        memcpy(tr, p, n);
+        tr[n] = 0xE9;
+        const int32_t back = static_cast<int32_t>(reinterpret_cast<uintptr_t>(p + n) - reinterpret_cast<uintptr_t>(tr + n + 5));
+        memcpy(tr + n + 1, &back, 4);
+        DWORD was;
+        VirtualProtect(tr, 32, PAGE_EXECUTE_READ, &was);      // complete: read+execute from here on (a failed protect leaves it RWX, still correct)
+        FlushInstructionCache(GetCurrentProcess(), tr, n + 5);
+        *next = tr;
+        memset(patch, 0x90, sizeof patch);
+        patch[0] = 0xE9;
+        const int32_t fwd = static_cast<int32_t>(reinterpret_cast<uintptr_t>(stub) - reinterpret_cast<uintptr_t>(p + 5));
+        memcpy(patch + 1, &fwd, 4);
+        if (!WriteChecked(p, patch, n)) {
+            if (memcmp(p, prologue, n) == 0 || WriteChecked(p, prologue, n)) {   // nothing landed, or undone
+                *next = nullptr;
+                VirtualFree(tr, 0, MEM_RELEASE);
+            } else {
+                *broken = true;                              // keep the trampoline: whatever landed may still reach it
+            }
+            return nullptr;
+        }
+        return "engine";
+    }
+    if (p[0] == 0xE9) {
+        int32_t rel; memcpy(&rel, p + 1, 4);
+        const uintptr_t target = reinterpret_cast<uintptr_t>(p + 5) + rel;
+        if (!InThinkerDll(target)) return nullptr;
+        BYTE orig[5];
+        memcpy(orig, p, 5);
+        void* const prev = *next;
+        *next = reinterpret_cast<void*>(target);
+        patch[0] = 0xE9;
+        const int32_t fwd = static_cast<int32_t>(reinterpret_cast<uintptr_t>(stub) - reinterpret_cast<uintptr_t>(p + 5));
+        memcpy(patch + 1, &fwd, 4);
+        if (!WriteChecked(p, patch, 5)) {
+            if (memcmp(p, orig, 5) == 0 || WriteChecked(p, orig, 5)) *next = prev;
+            else *broken = true;                             // *next stays Thinker's function: our stub, if it landed, needs it
+            return nullptr;
+        }
+        return "thinker";
+    }
+    return nullptr;
 }
 
 bool IsCallTo(uintptr_t site, uintptr_t target)
@@ -862,17 +1123,50 @@ void Retarget(uintptr_t site, void* fn)
     FlushInstructionCache(GetCurrentProcess(), p, 5);
 }
 
-void ArmTurnHook()
+// Armed only when something may be shown: update checks on, or a startup notice queued (before or after
+// InstallUpdateCheck -- UpdateQueueStartupNotice arms too). Idempotent; never armed without PRACX.
+bool g_hooksAllowed = false;    // InstallUpdateCheck passed its PRACX gate
+bool g_hooksTried = false;
+
+void ArmPresentationHooks()
 {
+    if (!g_hooksAllowed || g_hooksTried) return;
+    g_hooksTried = true;
+    bool broken = false;
+    // the main menu: Popup_start's entry
+    if (const char* how = DetourEntry(kVA_PopupStart, kPopupStartPrologue, sizeof kPopupStartPrologue,
+                                      reinterpret_cast<void*>(&StubPopupStart), &g_popupStartNext, &broken)) {
+        g_popupHookArmed = true;
+        Log("main-menu hook armed (Popup_start entry, %s) -> the TOPMENU strip is recognised by its label, any caller",
+            how);
+    } else {
+        Log(broken ? "main-menu hook: the write to Popup_start's entry failed and could not be undone (see the next lines)"
+                   : "main-menu hook: Popup_start's entry holds neither the engine's prologue nor a jump into thinker.dll -> "
+                     "the main menu is recognised by the engine top_menu's return address only");
+    }
+
+    // the turn start: Console_human_turn's entry; else the three control_turn call sites
+    if (const char* how = DetourEntry(kVA_ConsoleHumanTurn, kHumanTurnPrologue, sizeof kHumanTurnPrologue,
+                                      reinterpret_cast<void*>(&StubHumanTurn), &g_humanTurn, &broken)) {
+        g_turnHookArmed = true;
+        Log("turn-begin hook armed (Console_human_turn entry, %s) -> every caller", how);
+        return;
+    }
+    if (broken) {
+        g_turnHookArmed = true;                              // the stub may be live and continues to g_humanTurn
+        Log("turn-begin hook: the write to Console_human_turn's entry failed and could not be undone -> no call-site fallback");
+        return;
+    }
     for (uint32_t s : kHumanTurnSites)
         if (!IsCallTo(s, kVA_ConsoleHumanTurn)) {
-            Log("turn-begin hook: site 0x%X is not the expected call -> in-game prompts off (main menu only)", s);
+            Log("turn-begin hook: neither Console_human_turn's entry nor call site 0x%X is as expected -> in-game prompts off (main menu only)", s);
             return;
         }
     g_humanTurn = At(kVA_ConsoleHumanTurn);
     for (uint32_t s : kHumanTurnSites) Retarget(s, reinterpret_cast<void*>(&StubHumanTurn));
     g_turnHookArmed = true;
-    Log("turn-begin hook armed (3 sites)");
+    Log("turn-begin hook armed (3 control_turn call sites; Console_human_turn's entry is another mod's) -> "
+        "a game loop that calls it from elsewhere (Thinker) is not seen");
 }
 
 } // namespace
@@ -889,6 +1183,12 @@ void InstallUpdateCheck()
         g_phase = kPhaseDone;
         return;
     }
+    // The presentation hooks go on only when something may be shown: a check that really started (below), or a
+    // startup notice queued (it needs the same two moments when update checks are off; one queued later arms
+    // them itself).
+    g_hooksAllowed = true;
+    if (g_noticePending) ArmPresentationHooks();
+    DeleteThinkerConsent("a new start: a consent is only ever for the update it was given to");
     wchar_t ini[MAX_PATH + 32];
     g_enabled = IniPathW(ini, MAX_PATH + 32)
         ? (GetPrivateProfileIntW(L"UIMod", L"CheckForUpdates", kUpdateCheckDefault, ini) != 0 ? 1 : 0)
@@ -919,8 +1219,10 @@ void InstallUpdateCheck()
     }
     if (!lvupd::ExtractLvManifest(GetCommandLineW(), j.manifest, sizeof j.manifest / sizeof *j.manifest))
         j.manifest[0] = 0;
+    const bool acceptThinker = ResidentKnowsThinker(j.gameDir);
+    if (!acceptThinker) Log("the resident installer is older than this build (or its VERSION is unreadable) -> the check does not ask for the Thinker line");
     if (!lvupd::BuildCheckCommandLine(j.python, j.script, j.gameDir, j.manifest[0] ? j.manifest : nullptr,
-                                      j.cmd, sizeof j.cmd / sizeof *j.cmd)) {
+                                      j.cmd, sizeof j.cmd / sizeof *j.cmd, acceptThinker)) {
         Log("could not build the check command line (a quote in a path?) -> no update check");
         g_phase = kPhaseDone;
         return;
@@ -935,7 +1237,7 @@ void InstallUpdateCheck()
     if (j.manifest[0]) Log("check started (test manifest from --lv-manifest: %ls)", j.manifest);
     else Log("check started");
     if (j.delayMs) Log("check held back %lu s (--lv-delay)", j.delayMs / 1000u);
-    ArmTurnHook();
+    ArmPresentationHooks();                                    // the check is running: its answer needs a moment
 }
 
 void UpdatePoll()
@@ -973,6 +1275,7 @@ void UpdatePoll()
 void UpdateOnMessage(MSG* m)
 {
     if (!m) return;
+    if (g_popupUp && m->message == WM_KEYDOWN && m->wParam == VK_ESCAPE) InterlockedExchange(&g_popupEsc, 1);
     if (m->message == kMsgPresent) {
         if (m->hwnd != Rd<HWND>(kVA_phWnd)) return;
         if (ModernCtlBusy()) {                                   // the hover line is inside the engine's drag painter
@@ -1012,10 +1315,28 @@ bool UpdateSubscribeAll()
     wchar_t ini[MAX_PATH + 32];
     if (!IniPathW(ini, MAX_PATH + 32)) return false;
     const BOOL ok = WritePrivateProfileStringW(L"Longevity", L"DeclinedUpdates", L"", ini);
+    // "every Don't ask me again": the Thinker startup check's too (thinkerversion.cpp; user 2026-11-14). Deleting a
+    // key that is not there succeeds, so this never turns a good reset into a failure report.
+    const BOOL thinkerOk = WritePrivateProfileStringW(L"UIMod", kThinkerDontAskKey, nullptr, ini);
     UpdateCheckSet(1);
     UpdateCheckSave();                                          // an action, not a setting: persists at once, like the clear
-    Log("subscribe-all: declines cleared%s; CheckForUpdates=1 saved", ok ? "" : " (WRITE FAILED)");
+    Log("subscribe-all: declines cleared%s; Thinker mismatch question re-armed%s; CheckForUpdates=1 saved",
+        ok ? "" : " (WRITE FAILED)", thinkerOk ? "" : " (WRITE FAILED)");
     return ok != 0;
+}
+
+// ---- shared with the Thinker startup check (thinkerversion.cpp), which runs in PreInit, before InstallUpdateCheck ----
+bool UpdateGameDirW(wchar_t* out, size_t cap) { return GameDirW(out, cap); }
+bool UpdateIniPathW(wchar_t* out, size_t cap) { return IniPathW(out, cap); }
+const wchar_t* UpdateRuntimeExeRel()
+{
+    unsigned long major = 0, minor = 0;
+    OsVersion(&major, &minor);
+    return lvupd::RuntimeExeRel(major, minor);
+}
+bool UpdateSpawnVisible(const wchar_t* cmdExe, wchar_t* cmd, const wchar_t* cwd, const wchar_t* env)
+{
+    return SpawnVisible(cmdExe, cmd, cwd, env);
 }
 
 int  UpdateCheckGet() { return g_enabled; }
@@ -1046,6 +1367,7 @@ void UpdateQueueStartupNotice(const char* body, const char* sig)
     strncpy_s(g_noticeSig, sig, _TRUNCATE);
     g_noticePending = true;
     Log("startup notice queued (shown at the main menu / turn start)");
+    ArmPresentationHooks();                                   // no-op before InstallUpdateCheck's PRACX gate / when armed
 }
 
 void UpdateCheckSet(int on) { g_enabled = on ? 1 : 0; }

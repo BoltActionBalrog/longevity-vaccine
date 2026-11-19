@@ -35,6 +35,7 @@
 
 #include "pssphere.h"        // PsSphereWouldBePop(): the numbers for the "Pop:" line on a sphere / stapled base
 #include "thinkercompat.h"   // ThinkerLoaded() / ThinkerRange()
+#include "thinkerversion.h"  // ThinkerOnPin(): the startup check's one decision
 #include "version.h"        // UIMOD_THINKER_SUPPORTED_*: the Thinker build this half is measured on
 
 void UimodLog(const char* msg);   // init.cpp
@@ -216,6 +217,10 @@ void InstallThinkerText()
 {
     uintptr_t lo, hi;
     if (!ThinkerLoaded() || !ThinkerRange(&lo, &hi)) return;
+    if (!ThinkerOnPin()) {                                     // reduced mode: nothing of ours touches thinker.dll
+        UimodLog("[uimod] thinker: not the supported Thinker Mod build -> Thinker's base-screen lines keep its own placement\n");
+        return;
+    }
     g_base = reinterpret_cast<BYTE*>(lo);
 
     const IMAGE_DOS_HEADER* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(g_base);

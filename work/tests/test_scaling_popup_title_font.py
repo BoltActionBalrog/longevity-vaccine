@@ -40,6 +40,7 @@ from unicorn.x86_const import (  # noqa: E402
     UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EBX, UC_X86_REG_EDI, UC_X86_REG_EIP, UC_X86_REG_ESI, UC_X86_REG_ESP)
 
 import apply_patches as ap  # noqa: E402
+import host_fonts  # noqa: E402
 import scaling_laws as SL  # noqa: E402
 import test_scaling_faction_font as T  # noqa: E402   the image + real GDI behind Font_init / Font_width
 
@@ -196,8 +197,7 @@ _gdi.SelectObject(_DC, _gdi.CreateDIBSection(_DC, struct.pack("<IiiHHIIiiII", 40
 
 def ink_rows(lf: bytes, s: str):
     """(top, bottom) ink rows of `s` drawn TA_BASELINE with the LOGFONT `lf`, relative to the baseline (bottom exclusive)."""
-    h = _gdi.CreateFontIndirectA(ctypes.create_string_buffer(lf, 60))
-    _gdi.SelectObject(_DC, h)
+    _gdi.SelectObject(_DC, host_fonts.host_font(lf))   # one per distinct LOGFONT per process (no per-call leak)
     ctypes.memset(_BITS, 0, _DW * _DH * 4)
     _gdi.SetTextAlign(_DC, 0x18)
     _gdi.SetBkMode(_DC, 1)

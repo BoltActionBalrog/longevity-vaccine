@@ -1,0 +1,25 @@
+{
+  "_comment": "How a thinker.dll's own label (its MOD_VERSION) is read and named to the player. Shared by the DLL (src/uimod/src/thinkercheck_core.h, through tests/test_thinker_check.py) and by any Python reader of the same grammar. 'label' is the string; 'run' is {RUN}; 'run_vs' is {RUN} when compared with the version in 'vs'; 'same' is whether the label is a plain version equal to 'vs'.",
+  "cases": [
+    {"label": "Thinker Mod v5.5", "kind": "version", "version": "5.5", "run": "Thinker Mod 5.5", "vs": "5.5", "run_vs": "a different build of Thinker Mod 5.5", "same": true},
+    {"label": "Thinker Mod v5.6", "kind": "version", "version": "5.6", "run": "Thinker Mod 5.6", "vs": "5.5", "run_vs": "Thinker Mod 5.6", "same": false},
+    {"label": "Thinker Mod v5.4", "kind": "version", "version": "5.4", "run": "Thinker Mod 5.4", "vs": "5.5", "run_vs": "Thinker Mod 5.4", "same": false},
+    {"label": "Thinker Mod v5.5.0", "kind": "version", "version": "5.5.0", "run": "Thinker Mod 5.5.0", "vs": "5.5", "run_vs": "a different build of Thinker Mod 5.5.0", "same": true},
+    {"label": "Thinker Mod v5.5.1", "kind": "version", "version": "5.5.1", "run": "Thinker Mod 5.5.1", "vs": "5.5", "run_vs": "Thinker Mod 5.5.1", "same": false},
+    {"label": "Thinker Mod v5", "kind": "version", "version": "5", "run": "Thinker Mod 5", "vs": "5.5", "run_vs": "Thinker Mod 5", "same": false},
+    {"label": "Thinker Mod v10.0", "kind": "version", "version": "10.0", "run": "Thinker Mod 10.0", "vs": "5.5", "run_vs": "Thinker Mod 10.0", "same": false},
+    {"label": "Thinker Mod v5.5 beta", "kind": "version", "version": "5.5", "run": "Thinker Mod 5.5", "vs": "5.5", "run_vs": "a different build of Thinker Mod 5.5", "same": true},
+    {"label": "Thinker Mod v5.5.", "kind": "version", "version": "5.5", "run": "Thinker Mod 5.5", "vs": "5.6", "run_vs": "Thinker Mod 5.5", "same": false},
+    {"label": "Thinker Mod v5.5b", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false},
+    {"label": "Thinker Mod v5.5_2", "kind": "version", "version": "5.5", "run": "Thinker Mod 5.5", "vs": "5.5", "run_vs": "a different build of Thinker Mod 5.5", "same": true},
+    {"label": "Thinker Mod v", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false},
+    {"label": "Thinker Mod vX", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false},
+    {"label": "Thinker Mod v1.2.3.4.5", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false},
+    {"label": "Thinker Mod v123456.1", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false},
+    {"label": "Thinker Mod develop build", "kind": "develop", "version": "", "run": "a development build of Thinker Mod", "vs": "5.5", "run_vs": "a development build of Thinker Mod", "same": false},
+    {"label": "Thinker Mod develop build 2", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false},
+    {"label": "thinker mod v5.5", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false},
+    {"label": "RELEASE 2.0", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false},
+    {"label": "", "kind": "unrecognised", "version": "", "run": "an unrecognised build of Thinker Mod", "vs": "5.5", "run_vs": "an unrecognised build of Thinker Mod", "same": false}
+  ]
+}

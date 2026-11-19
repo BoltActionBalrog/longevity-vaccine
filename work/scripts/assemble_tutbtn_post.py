@@ -1,4 +1,7 @@
-"""Assemble thunk_tutbtn_post v3 -- the 2D-zoom shrink's dim-descale fixup.
+"""Assemble thunk_tutbtn_post v6 -- the 2D-zoom shrink's dim-descale fixup + the TutWin label font.
+
+v6 (2026-11-10): the TutWin canvas font is t_ffn(TUTWIN_BTN_FONT) = t_ffn(16, 0), the def-dialog / body font
+(v4 pushed 12 = Arial regular, by inference).  History of v3 follows.
 
 PORT OF: scaling_laws.py :: btn_native_dim()  (the SOURCE OF TRUTH, v2 CEIL).
 
@@ -60,15 +63,17 @@ TEMPLATE = (
     "F7 F1 "                                   # div ecx
     "A3 {abs32:g_btn_nativeW} "                # mov [g_btn_nativeW],eax
     "89 86 C4 04 00 00 "                       # mov [esi+0x4c4],eax
-    # TutWin-only canvas font. v4 (2026-09-17, audit finding 3.7): the TOUR/Close buttons draw with the
-    # engine's default label Font 0x7D3948 = Arial 12 REGULAR (probe hook_btnfont_probe.js); t_ffn(12, 0)
-    # = Arial fl(12g/16) regular on the (12,0) slot -- v3 asked the pool for scale_px(12,g) = Arial Narrow bold.
+    # TutWin-only canvas font. v6 (2026-11-10): t_ffn(TUTWIN_BTN_FONT) = t_ffn(16, 0) -- the dialog-row
+    # buttons draw with popups_tutorial's def-DIALOG font g_text_font_v0 = find_font(16, 0) = Arial Narrow 16
+    # bold, the body font (pristine CrashLandTooltip.png glyph-exact).  v4 (2026-09-17) pushed 12 on the
+    # inference that they use the default label font (Arial 12 regular) -- wrong; v3 had the face right but
+    # sized from 12.
     "8B 86 C4 00 00 00 "                       # mov eax,[esi+0xc4]
     "3D 68 6E 8C 00 "                          # cmp eax,TutWin 0x8c6e68
     "74 08 "                                   # je font
     "81 FE C4 78 8C 00 "                       # cmp esi,TutWin+0xA5C
     "75 1C "                                   # jne exit
-    "6A 00 6A 0C "                             # font: push 0; push 12   (NATIVE size + variant)
+    "6A 00 6A 10 "                             # font: push 0; push 16   (NATIVE size + variant = TUTWIN_BTN_FONT)
     "E8 {rel32:t_ffn} "
     "83 C4 08 "                                # add esp,8
     "8D 8E 44 04 00 00 "                       # lea ecx,[esi+0x444]
@@ -155,7 +160,7 @@ def resolve(tpl: str, base_va: int) -> bytes:
 def main() -> int:
     blob = resolve(TEMPLATE, BASE_VA)
     n = len(blob)
-    print(f"thunk_tutbtn_post v4  {n} bytes (slot 0x4000..0x{0x4000+n-1:04X}, "
+    print(f"thunk_tutbtn_post v6  {n} bytes (slot 0x4000..0x{0x4000+n-1:04X}, "
           f"free gap ends 0x42A0)")
     assert n == 0x87, n
     assert 0x4000 + n <= 0x42A0
@@ -167,6 +172,11 @@ def main() -> int:
     assert blob[0x14] == 0x7E and 0x16 + blob[0x15] == exit_off, "jle(g)"
     assert blob[0x61] == 0x75 and 0x63 + blob[0x62] == exit_off, "jne(tutwin)"
     assert blob[0x59] == 0x74 and blob[0x5A] == 0x08, "je(font)"
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from scaling_laws import TUTWIN_BTN_FONT
+    font_off = 0x5B + 8                         # past the cmp esi / jne
+    assert blob[font_off:font_off + 4] == bytes([0x6A, TUTWIN_BTN_FONT[1], 0x6A, TUTWIN_BTN_FONT[0]]), \
+        "font push pair != scaling_laws.TUTWIN_BTN_FONT"
 
     # structural disasm (capstone if available)
     try:

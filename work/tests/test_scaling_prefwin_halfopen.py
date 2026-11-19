@@ -102,9 +102,8 @@ def law_channels(g):
             "slider frame>labels T|B": (lab_t - (sf[1] + k), (sf[3] - k + 1) - lab_b),
             "slider frame>labels L | sliders R": (lab_l - (sf[0] + k), (sf[2] - k + 1) - sl_r),
             "right panel>Longevity frame L|R": (dl[0] - (rp[0] + k), (rp[2] - k + 1) - dl[2] - 1),
-            "Longevity frame>labels T|B": (fl(334, g) - (dl[1] + k), (dl[3] - k + 1) - lab_b),
-            "right panel>slider frame B": (rp[3] - k + 1) - sf[3] - 1,
-            "right panel>Longevity frame B": (rp[3] - k + 1) - dl[3] - 1}
+            "Longevity frame>labels T|B": (fl(305, g) - (dl[1] + k), (dl[3] - k + 1) - (fl(327, g) + fl(20, g))),
+            "right panel>slider frame B": (rp[3] - k + 1) - sf[3] - 1}
 
 
 # ============================================================================== 1. laws
@@ -131,7 +130,7 @@ def test_law_native_identity():
                   "right panel>list T | More B": (2, 2), "~panel gap": 3, "right panel>slider frame L|R": (2, 2),
                   "slider frame>labels T|B": (2, 2), "slider frame>labels L | sliders R": (2, 2),
                   "right panel>Longevity frame L|R": (2, 2), "Longevity frame>labels T|B": (2, 2),
-                  "right panel>slider frame B": 3, "right panel>Longevity frame B": 3}, \
+                  "right panel>slider frame B": 3}, \
         "the vanilla census (pristine image, prefwin_halfopen_emu at 1024x768): every pair mirrored"
 
 
@@ -164,7 +163,7 @@ def test_law_mirror_rule(g):
 SPACINGS = (("backdrop>inner L|R", 0, 3), ("backdrop>inner T|B", 0, 3), ("backdrop>inner T|B", 1, 3),
             ("inner>panels L|R", 0, 2), ("inner>left panel T|B", 0, 2), ("left panel>buttons L|R", 0, 2),
             ("right panel>list L|R", 0, 2), ("left panel>buttons T|B", 0, 2), ("~panel gap", None, 3),
-            ("right panel>slider frame B", None, 3), ("right panel>Longevity frame B", None, 3))
+            ("right panel>slider frame B", None, 3))
 
 
 def spacing_errors(g):
@@ -208,13 +207,13 @@ def test_law_spacing_census(g):
 
 @pytest.mark.parametrize("g", G_RANGE)
 def test_law_gaps_bounded(g):
-    """The derived gaps -- the panel gap (vanilla 3) and each slider frame's bottom gap to the right panel (vanilla 3)
-    -- never under 1 px (no stroke on a stroke); the slider-frame gaps within 1.25 px of vanilla x g/16 at every g, the
+    """The derived gaps -- the panel gap (vanilla 3) and the audio slider frame's bottom gap to the right panel (vanilla
+    3; uimod.dll's frame sits a button row higher since 2026-11-13, above the More button) -- never under 1 px (no stroke on a stroke); the slider-frame gaps within 1.25 px of vanilla x g/16 at every g, the
     panel gap within 1.69 px (v4: g 23 / 39 trade it for fewer broken relations) and within 1.375 px at the standard
     screens (2560x1440: the user's choice, 7 vs 5.62)."""
     ch = law_channels(g)
-    for name in ("right panel>slider frame B", "right panel>Longevity frame B"):
-        assert ch[name] >= 1 and abs(16 * ch[name] - 3 * g) <= 20, (g, name, ch[name])
+    name = "right panel>slider frame B"
+    assert ch[name] >= 1 and abs(16 * ch[name] - 3 * g) <= 20, (g, name, ch[name])
     gap = ch["~panel gap"]
     assert gap >= 1 and abs(16 * gap - 3 * g) <= (22 if g in (18, 20, 22, 25, 30, 40) else 27), (g, gap)
 
@@ -236,7 +235,7 @@ def test_law_split_is_optimal(g):
     s_t, s_b = f(10) - 3 * k, (f(390) - k) - (f(360) + f(20)) - 2 * k
     gap0 = f(256) - (f(33) + f(214)) - 2 * k
     bot = f(360) + f(20)
-    sfb = [bot - (f(356) + f(20) + (f(t + 3) - f(t) - k) + k) for t in (287, 331)]
+    sfb = [bot - (f(356) + f(20) + (f(t + 3) - f(t) - k) + k) for t in (287,)]   # the audio frame closes the panel
     hs, vs = [], []
     for a in range(s_l + 1):
         for b in range(s_l + 1):
@@ -420,3 +419,26 @@ def test_e2e_prefwin(baked_exe, bak_path, g):
         old = PH.screen(str(bak_path), w, h, page=4)
         assert np.array_equal(p, old["p"]), "g = 16: the pristine pixels"
         assert m == PH.measure(old)
+
+
+# ============================================================================== Longevity tab: two pages, More gap, rows
+
+@pytest.mark.parametrize("g", G_RANGE)
+def test_law_dll_more_gap(g):
+    """The Longevity frame sits PREF_DLL_MORE_GAP (10) native above the stock More button (owner, 2026-11-14): the
+    device gap from its drawn bottom to More's top stays within 1.625 px of 10 x g/16 and never under the native 10's
+    floor, at every g.  The frame's bottom mirrors its top about its labels (symmetry over 1-px exactness), so the
+    gap carries that rule's floors: over 1 px at g 22 (15 vs 13.75), 27, 30, 31 (21 vs 19.375, the worst) and 38 --
+    accepted by the owner 2026-11-14 (an 11-native gap, all standard screens within 0.5 px, was offered and declined)."""
+    gap = SL.pref_dll_more_gap(g)
+    assert abs(16 * gap - SL.PREF_DLL_MORE_GAP * max(g, 16)) <= 26, (g, gap)
+    assert gap >= SL.PREF_DLL_MORE_GAP * max(g, 16) // 16 - 1, (g, gap)
+
+
+def test_longevity_page1_rows_fit_above_frame():
+    """Page 1's lines at vanilla's 22-native pitch end above the Longevity frame's top (native; the gate's floor is
+    monotonic, so every g keeps the order): TabY0 11 (the in-game log) + 3 + 22 i, each row 20 tall."""
+    tab_y0 = 11
+    last = SL.pref_longevity_row_top(tab_y0, SL.PREF_LONGEVITY_PAGE1_LINES - 1) + SL.PREF_LONGEVITY_ROW_H
+    assert last <= SL.PREF_FRAME_NATIVE["dll"][1], (last, SL.PREF_FRAME_NATIVE["dll"])
+    assert SL.PREF_FRAME_NATIVE["dll"][3] + SL.PREF_DLL_MORE_GAP == SL.PREF_CONTENT_LAST_Y   # More's row top, 360

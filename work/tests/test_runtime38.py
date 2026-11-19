@@ -28,7 +28,7 @@ import release as rel  # noqa: E402
 _STAGED = _REPO / "work" / "build" / "runtime38" / "python.exe"
 _SRC = _REPO / "tools" / "python38" / "python.exe"
 PY38 = _STAGED if _STAGED.is_file() else _SRC
-pytestmark = pytest.mark.skipif(not PY38.is_file(), reason="no Windows 7 interpreter (run fetch_python38.py)")
+pytestmark = pytest.mark.needs_local(PY38, "the Windows 7 interpreter (run fetch_python38.py)")
 
 
 def _run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -36,6 +36,10 @@ def _run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
            "PATH": __import__("os").environ.get("PATH", ""),
            "PYTHONDONTWRITEBYTECODE": "1",
            "PYTHONPATH": str(_TESTS / "does-not-exist")}      # must be ignored (._pth)
+    # A fresh environment still gets the suite's network sink (conftest _no_network; audit-l L5): a child that fetched
+    # would otherwise reach the network directly.
+    env.update({k: v for k, v in __import__("os").environ.items()
+                if k.upper() in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY")})
     return subprocess.run([str(PY38), *args], capture_output=True, text=True, timeout=300, env=env, cwd=cwd)
 
 
@@ -62,8 +66,8 @@ def test_every_shipped_script_compiles_under_38():
     assert p.returncode == 0, f"a shipped script is not 3.8-clean:\n{p.stdout}{p.stderr}"
 
 
-needs_staged = pytest.mark.skipif(not _STAGED.is_file(),
-                                  reason="runtime38 not staged (build_runtime.py): the raw embeddable has no pefile/yaml")
+needs_staged = pytest.mark.needs_local(
+    _STAGED, "the staged runtime38 (build_runtime.py): the raw embeddable has no pefile/yaml")
 
 
 @needs_staged

@@ -9,14 +9,24 @@
 //   kExcluded  the four sites whose bytes would fail Thinker's guard: Thinker's call / Scient byte is now inside the
 //              span; we overwrite the whole span with ours (decisions 1-3: dw_scale, menu strip, credits subwin).
 //   kRestore   our E8 passed Thinker's guard and Thinker's call replaced its rel32; ours goes back (decision 2).
+//   kMinImm32  the Design Workshop's z-plane allocation size: an imm32 that must be AT LEAST ours (a baked sibling
+//              site fills 2 MB of it). Read, and raised only when smaller -- whatever value was there.
 //   Chain      both: our call-redirect thunk + the core it jumps to are copied into a trampoline whose one entry into
 //              the engine function now enters Thinker's function instead (read from the E8 Thinker left at the site),
 //              and the site's E8 is re-pointed at the trampoline (decision 4: base-screen set_font / eco-damage line).
 // The kExcluded sites are written WITHOUT Thinker too: a player who starts terranx.exe directly in a Thinker folder
 // runs the Thinker overlay with the rest of each group on disk, and e.g. the Design Workshop's 54 other sites assume
 // the 2 MB depth buffer this pass sets.
+//
+// WHICH sites are written is decided by thinkersites_core.h (pure; tests\test_thinker_sites.py drives it through
+// every state an exe can be in): a site only when it matches AND our code is at the other end of every call it
+// makes, the sites of one patches.yaml group together or not at all. This file performs the plan and reads it back.
+// On a Thinker that is not the pinned build (reduced mode) the chains and undos stay out; the engine-byte sites
+// above still follow the same structural rule, which does not depend on the build.
 #include "thinkercompat.h"
 #include "thinker_sites.h"
+#include "thinkersites_core.h"   // SiteMatches / DestsPresent / MinImm32 / Plan
+#include "thinkerversion.h"   // the ONE detection: ThinkerPresent / ThinkerOnPin / ThinkerImageRange
 
 #include <windows.h>
 #include <cstdint>
@@ -29,7 +39,8 @@ namespace {
 
 using namespace thinker_sites;
 
-HMODULE g_thinker = nullptr;
+// thinker.dll's image, from the startup check's detection (thinkerversion.cpp). Zero when Thinker is absent or its
+// header is unreadable: then no address is "inside thinker.dll" and a site that Thinker rewrote does not match.
 uintptr_t g_thLo = 0, g_thHi = 0;
 
 BYTE* At(uint32_t va)
@@ -47,21 +58,9 @@ void Log(const char* fmt, ...)
     UimodLog(buf);
 }
 
-bool ModuleRange(HMODULE m, uintptr_t* lo, uintptr_t* hi)
-{
-    const BYTE* base = reinterpret_cast<const BYTE*>(m);
-    auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (!m || dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
-    auto nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-    if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
-    *lo = reinterpret_cast<uintptr_t>(base);
-    *hi = *lo + nt->OptionalHeader.SizeOfImage;
-    return true;
-}
-
 bool InThinker(uintptr_t a)
 {
-    return g_thinker && g_thLo <= a && a < g_thHi;
+    return g_thHi != 0 && g_thLo <= a && a < g_thHi;
 }
 
 uintptr_t CallTarget(const BYTE* e8)
@@ -83,71 +82,32 @@ bool WriteCode(BYTE* p, const BYTE* bytes, size_t n)
     return memcmp(p, bytes, n) == 0;
 }
 
-const Window* WindowAt(const Site& s, uint32_t i)
+// The live image as thinkersites_core.h reads it: `len` bytes at `va`, or null when they are not committed, readable
+// memory (a destination beyond an exe that carries no code cave must not fault).
+const uint8_t* ReadLive(void*, uint32_t va, uint32_t len)
 {
-    for (uint32_t k = 0; k < s.nwindows; ++k)
-        if (s.windows[k].off <= i && i < s.windows[k].off + s.windows[k].len) return &s.windows[k];
-    return nullptr;
+    const BYTE* p = At(va);
+    const uintptr_t end = reinterpret_cast<uintptr_t>(p) + len;
+    for (uintptr_t a = reinterpret_cast<uintptr_t>(p); a < end;) {      // every region the span touches
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(a), &mbi, sizeof mbi) != sizeof mbi || mbi.State != MEM_COMMIT ||
+            mbi.Protect == 0 || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+            return nullptr;
+        const uintptr_t next = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (next <= a) return nullptr;
+        a = next;
+    }
+    return p;
 }
 
-// The live bytes of a site must be exactly what the table predicts: outside Thinker's windows the reference bytes
-// (the clean base for kExcluded, ours for kRestore); inside a write_call window either the reference bytes (Thinker
-// not loaded, or this build of Thinker did not write there) or an E8 whose target lies in thinker.dll; inside the
-// Scient window the clean byte or Scient's. Anything else is a Thinker build this table was not generated against.
-bool SiteMatches(const Site& s, char* why, size_t n)
+// A span can be made writable (and is put back as it was). Asked for EVERY site of a group before the first byte of
+// the group is written: "all or nothing" must hold when a write is refused, not only when a site does not match.
+bool CanWrite(BYTE* p, size_t n)
 {
-    const BYTE* p = At(s.va);
-    const BYTE* ref = s.mode == kExcluded ? s.clean : s.ours;
-    for (uint32_t i = 0; i < s.len; ++i) {
-        const Window* w = WindowAt(s, i);
-        if (!w) {
-            if (p[i] != ref[i]) {
-                _snprintf_s(why, n, _TRUNCATE, "+%u reads %02X, expected %02X", i, p[i], ref[i]);
-                return false;
-            }
-            continue;
-        }
-        if (i != w->off) continue;                         // a window is judged at its first byte
-        if (w->kind == kCall) {
-            if (memcmp(p + i, ref + i, w->len) == 0) continue;
-            if (p[i] == 0xE8 && InThinker(CallTarget(p + i))) continue;
-            // Thinker's write_call over an FF15 site writes `90 E8 rel32` (patch.cpp write_call): a 6-byte window
-            if (w->len == 6 && p[i] == 0x90 && p[i + 1] == 0xE8 && InThinker(CallTarget(p + i + 1))) continue;
-            _snprintf_s(why, n, _TRUNCATE, "+%u reads %02X %02X %02X %02X %02X: neither the expected bytes nor a call into thinker.dll",
-                        i, p[i], p[i + 1], p[i + 2], p[i + 3], p[i + 4]);
-            return false;
-        }
-        if (p[i] == s.clean[i] || p[i] == w->scient_new) continue;
-        _snprintf_s(why, n, _TRUNCATE, "+%u reads %02X, expected %02X (clean) or %02X (Scient)", i, p[i], s.clean[i], w->scient_new);
-        return false;
-    }
+    DWORD old;
+    if (!VirtualProtect(p, n, PAGE_EXECUTE_READWRITE, &old)) return false;
+    VirtualProtect(p, n, old, &old);
     return true;
-}
-
-// Returns 1 applied, 0 already ours, -1 failed.
-int ApplySite(const Site& s)
-{
-    BYTE* p = At(s.va);
-    if (memcmp(p, s.ours, s.len) == 0) {
-        Log("[uimod] thinker: %s @ 0x%08X already carries our bytes\n", s.id, s.va);
-        return 0;
-    }
-    char why[200];
-    if (!SiteMatches(s, why, sizeof why)) {
-        Log("[uimod] thinker: %s @ 0x%08X NOT applied: %s\n", s.id, s.va, why);
-        return -1;
-    }
-    // Judged over the whole window: Thinker's write_call rewrites only the rel32 of a call the clean base already has.
-    bool hadThinker = false;
-    for (uint32_t k = 0; k < s.nwindows; ++k)
-        hadThinker |= memcmp(p + s.windows[k].off, s.clean + s.windows[k].off, s.windows[k].len) != 0;
-    if (!WriteCode(p, s.ours, s.len)) {
-        Log("[uimod] thinker: %s @ 0x%08X NOT applied: the write did not land\n", s.id, s.va);
-        return -1;
-    }
-    Log("[uimod] thinker: %s @ 0x%08X applied (%u bytes%s)\n", s.id, s.va, s.len,
-        hadThinker ? ", over Thinker's write" : s.mode == kExcluded ? ", clean on disk, no Thinker write there" : "");
-    return 1;
 }
 
 // Returns 1 chained, 0 nothing to do (Thinker left the site alone), -1 failed.
@@ -168,7 +128,13 @@ int InstallChain(const Chain& c)
             static_cast<unsigned>(tgt));
         return -1;
     }
-    if (memcmp(At(c.thunk_va), c.thunk_bytes, c.thunk_len) != 0 || memcmp(At(c.core_va), c.core_bytes, c.core_len) != 0) {
+    const uint8_t* thunk = ReadLive(nullptr, c.thunk_va, c.thunk_len);
+    const uint8_t* core = ReadLive(nullptr, c.core_va, c.core_len);
+    if (!thunk || !core) {                                   // an exe without our code cave: nothing to chain
+        Log("[uimod] thinker: %s: the cave thunk/core is not mapped (an exe without our code) -> not chained\n", c.id);
+        return -1;
+    }
+    if (memcmp(thunk, c.thunk_bytes, c.thunk_len) != 0 || memcmp(core, c.core_bytes, c.core_len) != 0) {
         Log("[uimod] thinker: %s: the cave thunk/core bytes differ from the generated table (regenerate thinker_sites.h) -> not chained\n", c.id);
         return -1;
     }
@@ -236,52 +202,94 @@ int UndoThinkerCall(const Undo& u)
 
 } // namespace
 
+// Both answers come from the startup check's one detection (thinkerversion.cpp). A thinker.dll that attaches later
+// than that is not looked for: it would meet our bytes at its own guards and stop itself.
 bool ThinkerLoaded()
 {
-    return g_thinker != nullptr;
+    return ThinkerPresent();
 }
 
 bool ThinkerRange(uintptr_t* lo, uintptr_t* hi)
 {
-    if (!g_thinker) {
-        // Decided at InstallThinkerCompat, but a first-use check (pssphere's ThinkerCheck) may run after a thinker.dll
-        // that attached later than Init: look once more before answering "absent" (audit 2026-10-30).
-        HMODULE m = GetModuleHandleA("thinker.dll");
-        if (m && ModuleRange(m, &g_thLo, &g_thHi)) g_thinker = m;
-        if (!g_thinker) return false;
-    }
-    *lo = g_thLo;
-    *hi = g_thHi;
-    return true;
+    return ThinkerImageRange(lo, hi);
 }
 
 void InstallThinkerCompat()
 {
-    g_thinker = GetModuleHandleA("thinker.dll");
-    if (g_thinker && !ModuleRange(g_thinker, &g_thLo, &g_thHi)) {
-        UimodLog("[uimod] thinker: thinker.dll is loaded but its PE headers are unreadable -> treated as absent\n");
-        g_thinker = nullptr;
+    const bool present = ThinkerPresent();
+    // Chains enter Thinker's functions and undos replace its calls: both are measured on the pinned build only.
+    // On any other build they are not installed (reduced mode: nothing of ours calls into or chains into thinker.dll).
+    const bool onPin = ThinkerOnPin();
+    if (!ThinkerImageRange(&g_thLo, &g_thHi)) g_thLo = g_thHi = 0;
+    if (present) {
+        Log("[uimod] thinker: PRACX + Thinker compatibility pass (%u sites, %u chains)%s\n", kNumSites, kNumChains,
+            onPin ? "" : " -- not the supported build: chains and undos are NOT installed");
     }
-    if (g_thinker) {
-        Log("[uimod] thinker: thinker.dll loaded at %p (%u KB) -> PRACX + Thinker compatibility pass (%u sites, %u chains)\n",
-            g_thinker, static_cast<unsigned>((g_thHi - g_thLo) >> 10), kNumSites, kNumChains);
-    } else {
-        UimodLog("[uimod] thinker: not loaded\n");
+
+    thinkersites::View view;
+    view.read = &ReadLive;
+    view.thinkerLo = static_cast<uint32_t>(g_thLo);
+    view.thinkerHi = static_cast<uint32_t>(g_thHi);
+    thinkersites::Action plan[thinkersites::kMaxSites];
+    char why[thinkersites::kMaxSites][thinkersites::kWhyLen];
+    thinkersites::Plan(kSites, kNumSites, view, plan, why);
+    // A site the plan writes but Windows will not let us write takes its whole group out BEFORE anything is written.
+    for (uint32_t i = 0; i < kNumSites; ++i) {
+        if (plan[i] != thinkersites::Action::Write || CanWrite(At(kSites[i].va), kSites[i].len)) continue;
+        for (uint32_t j = 0; j < kNumSites; ++j) {
+            if (kSites[j].mode == kMinImm32 || strcmp(kSites[j].group, kSites[i].group) != 0) continue;
+            if (plan[j] != thinkersites::Action::Write) continue;
+            plan[j] = thinkersites::Action::SkipGroup;
+            _snprintf_s(why[j], thinkersites::kWhyLen, _TRUNCATE, "its group %s is not applied: %s cannot be made writable",
+                        kSites[i].group, kSites[i].id);
+        }
     }
 
     int applied = 0, already = 0, failed = 0;
-    bool dwFailed = false;
+    bool cannotStart = false;
     for (uint32_t i = 0; i < kNumSites; ++i) {
-        const int r = ApplySite(kSites[i]);
-        if (r > 0) ++applied;
-        else if (r == 0) ++already;
-        else {
+        const Site& s = kSites[i];
+        BYTE* p = At(s.va);
+        switch (plan[i]) {
+        case thinkersites::Action::AlreadyOurs:
+            Log("[uimod] thinker: %s @ 0x%08X already carries our bytes\n", s.id, s.va);
+            ++already;
+            break;
+        case thinkersites::Action::MinEnough:
+            Log("[uimod] thinker: %s @ 0x%08X already holds 0x%08X, at least the 0x%08X we need -> left as it is\n", s.id, s.va,
+                thinkersites::Imm32(p), thinkersites::Imm32(s.ours));
+            ++already;
+            break;
+        case thinkersites::Action::Write:
+        case thinkersites::Action::MinWrite: {
+            // Judged over the whole window: Thinker's write_call rewrites only the rel32 of a call the clean base already has.
+            bool hadThinker = false;
+            for (uint32_t k = 0; k < s.nwindows; ++k)
+                hadThinker |= memcmp(p + s.windows[k].off, s.clean + s.windows[k].off, s.windows[k].len) != 0;
+            if (!WriteCode(p, s.ours, s.len)) {
+                Log("[uimod] thinker: %s @ 0x%08X NOT applied: the write did not land\n", s.id, s.va);
+                ++failed;
+                cannotStart |= s.mode == kMinImm32;
+                break;
+            }
+            Log("[uimod] thinker: %s @ 0x%08X applied (%u bytes%s)\n", s.id, s.va, s.len,
+                hadThinker ? ", over Thinker's write" : s.mode == kExcluded ? ", clean on disk, no Thinker write there" : "");
+            ++applied;
+            break;
+        }
+        case thinkersites::Action::SkipGroup:
+            Log("[uimod] thinker: %s @ 0x%08X NOT applied: %s\n", s.id, s.va, why[i]);
             ++failed;
-            if (strncmp(kSites[i].id, "Caviar.", 7) == 0) dwFailed = true;
+            break;
+        case thinkersites::Action::Fatal:
+            Log("[uimod] thinker: %s @ 0x%08X cannot be applied: %s\n", s.id, s.va, why[i]);
+            ++failed;
+            cannotStart = true;
+            break;
         }
     }
     int chained = 0, chainFailed = 0;
-    if (g_thinker) {
+    if (onPin) {
         for (uint32_t i = 0; i < kNumChains; ++i) {
             const int r = InstallChain(kChains[i]);
             if (r > 0) ++chained;
@@ -289,7 +297,7 @@ void InstallThinkerCompat()
         }
     }
     int undone = 0, undoFailed = 0;
-    if (g_thinker) {
+    if (onPin) {
         for (const Undo& u : kUndo) {
             const int r = UndoThinkerCall(u);
             if (r > 0) ++undone; else if (r < 0) ++undoFailed;
@@ -298,12 +306,8 @@ void InstallThinkerCompat()
     Log("[uimod] thinker: %d site(s) applied, %d already ours, %d failed; %d chain(s) installed, %d failed; %d Thinker call(s) undone, %d failed\n",
         applied, already, failed, chained, chainFailed, undone, undoFailed);
 
-    if (dwFailed) {
-        // The one failure that is not cosmetic: the Design Workshop's other 54 sites assume the 2 MB depth buffer
-        // this byte allocates. Say so once, before any window exists.
-        MessageBoxA(nullptr,
-                    "Longevity Vaccine could not apply its Design Workshop memory patch (details in uimod.log).\n\n"
-                    "Avoid the Design Workshop until the mod is updated.",
-                    "Longevity Vaccine", MB_OK | MB_ICONWARNING);
-    }
+    // The one failure the game cannot run with: a baked sibling site fills 2 MB of the buffer this size allocates, so
+    // a smaller size is a heap overrun whenever that code runs -- not something a player avoids by staying out of one
+    // screen (user 2026-11-14). Say so and stop.
+    if (cannotStart) ThinkerCannotStart();
 }

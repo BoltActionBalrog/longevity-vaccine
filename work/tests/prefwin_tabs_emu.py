@@ -4,7 +4,7 @@ wave-8 W8P):
   column(exe, W, H)   a fresh boot at 1024x768, the interface strings, SW / SH written and g recomputed by the image's
                       own thunk_ensure_scale; uimod.dll's two PrefWin changes reproduced as the DLL makes them -- the
                       Gamma button's `add edx, 0x9A` imm @0x48DD03 -> 0xB0 (prefs.cpp gammaNew, written before the
-                      build) and, after the real PrefWin_build 0x48D840, its "Longevity Mod Preferences" tab:
+                      build) and, after the real PrefWin_build 0x48D840, its "Longevity Preferences" tab:
                       FlatButton_ctor 0x607CF0 + BaseButton_init 0x607210(text, 0x5F, [0x85788C], [0x857890] + 0x84,
                       [0x857894], [0x686B88], PrefWin, 0) (prefs.cpp BuildWidgets; its block registered in
                       g_dll_pref_lo / _hi first, as BuildWidgets does, so the zoom stubs draw it) -- so every row reaches
@@ -107,7 +107,7 @@ def column(exe, w, h, dll=True, show=False, stock=False):
             e.w32(AP.G_DLL_LO, tab)
             e.w32(AP.G_DLL_HI, tab + 0xC00 - 1)
         e.call(FLATBUTTON_CTOR, ecx=tab)
-        e.call(BASEBUTTON_INIT, ecx=tab, args=(e.cstr("Longevity Mod Preferences"), DLL_TAB_ID, e.s32(TAB_X),
+        e.call(BASEBUTTON_INIT, ecx=tab, args=(e.cstr("Longevity Preferences"), DLL_TAB_ID, e.s32(TAB_X),
                                                e.s32(TAB_Y0) + DLL_TAB_DY, e.s32(TAB_W), e.s32(TAB_H), PREFWIN, 0))
         rows.append(tab)
     if show:

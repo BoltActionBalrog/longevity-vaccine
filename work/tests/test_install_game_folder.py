@@ -233,10 +233,10 @@ def test_the_question_is_a_ruled_block_after_one_blank_line(games, monkeypatch, 
     lines = _block(capsys.readouterr().out, "earlier output")
     label = inst.check_game_folder(games["good"])[1]
     # The folder's kind in brackets on its own row, three spaces after the path (user 2026-11-04).
-    assert lines[:10] == ["earlier output", "", ix.RULE, " CHOOSE THE GAME FOLDER",
-                          " <keys>Up/Down: move   Enter: choose", ix.RULE,      # blue (user 2026-11-04)
-                          f" > <good>Install into {games['good']}   ({label})",
-                          "   Browse for a different folder", "   Quit", ix.RULE]
+    assert lines[:10] == ["earlier output", "", ix.RULE, " CHOOSE THE GAME FOLDER", ix.RULE,
+                          " <keys>Up/Down: move   Enter: choose",       # blue (user 2026-11-04), above the rows (2026-11-15)
+                          f"<good> -> Install into {games['good']}   ({label})",      # the whole row green
+                          "    Browse for a different folder", "    Quit", ix.RULE]
 
 
 def test_down_picks_another_folder_found(games, monkeypatch, capsys):
@@ -245,7 +245,7 @@ def test_down_picks_another_folder_found(games, monkeypatch, capsys):
     _keys(monkeypatch, "down", "enter")              # the bad one is not listed: the second row is "second"
     assert inst.resolve_game_dir(_args()) == games["second"]
     out = capsys.readouterr().out
-    assert f"   Install into {games['second']}" in out
+    assert f"    Install into {games['second']}" in out
 
 
 def test_the_marker_stops_at_both_ends(games, monkeypatch):
@@ -275,7 +275,7 @@ def test_nothing_found_asks_and_enter_opens_the_picker(games, monkeypatch, capsy
     assert inst.resolve_game_dir(_args()) == games["good"]
     out = capsys.readouterr().out
     assert "could not find Alpha Centauri" in out and "No folder chosen" in out
-    assert " > Choose the game folder in a window" in out and "   Quit" in out
+    assert " -> Choose the game folder in a window" in out and "    Quit" in out
     assert not any(m in out for m in ("SmacxUi", "GOG Galaxy")), out
 
 

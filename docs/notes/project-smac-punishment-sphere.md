@@ -29,7 +29,7 @@ energy_intake_2, so a third pass cannot restore). Badge glyph by kind: gold sphe
 STAPLE badge (laws ps_staple_raster/ps_staple_ramp: same disc/ring/size law, U-bracket; psbadge::RasterStaple; parity
 tests). Glyph = candidate A "clamp" of work\art\staple_badge_candidates_preview.png, PROVISIONAL. Under Thinker the
 superdrone-face NOPs are restored only inside the draw_pop would-be window, and Thinker's PSYCH relabel call at
-0x408DBD is put back to the engine's 0x645470 (user: squash; our design never relabels). DLL b171eb03 in the workspace. Glyph CHANGED 2026-10-29 (user: the literal staple did not read): the nerve-staple BUTTON in miniature -- solid red disc,
+0x408DBD squashes Thinker's relabel (user: squash; our design never relabels; since 2026-11-15 by CHAINING, see below). DLL b171eb03 in the workspace. Glyph CHANGED 2026-10-29 (user: the literal staple did not read): the nerve-staple BUTTON in miniature -- solid red disc,
 black X on the upper half (centre -0.30R, +-0.34R, stroke 0.30R wide, min 1.5 px), white blindfold band 0.12R..0.40R;
 3 colour classes + 2 edge tones (PS_STAPLE_TONES), majority-class 4x4 raster (ps_staple_class / ps_staple_raster).
 DLL 3b0b80a9 in the workspace; GLYPH APPROVED by the maintainer 2026-10-29 (do not relitigate); previews work\_ps_badge_preview\law_staple_d*_x8.png; awaiting the maintainer's verdict. FINAL glyph 2026-10-29 (user, after the red button-with-blindfold vanished on the red drone face; ideation sheet A-D on the
@@ -37,3 +37,10 @@ real face, user chose "B minus the blindfold"): WHITE disc (246,246,246) + black
 + black rim (r > 0.88R); tones 0 black / 1 grey edge / 2 white. PopEnter now computes the would-be totals at draw time
 when the cache is stale (Thinker's action_staple only redraws the tile; nothing recomputed the base). DLL d9d0088b. INVERTED 2026-10-29 (user): BLACK disc + white X + thin white rim (same geometry; tones 0 black disc / 1 grey edge / 2 white).
 DLL 9bd8779a in the workspace. This is the glyph to keep unless the maintainer says otherwise.
+
+**2026-11-15: Thinker PSYCH label = CHAIN, not undo.** The 10-29 squash restored crt_strcat (0x645470) at 0x408DBD for
+EVERY base and so lost Thinker's "Captured Base: N turns" countdown. Now 0x408DBD -> PsychLabelChain: crt_strcat only for
+labels 971/327 on a sphere/stapled base (pslabel_core.h KeepOwn mirrors Thinker's own test), Thinker's
+BaseWin_draw_psych_strcat (5.5 RVA 0x14E10) for everything else. All three Thinker chains need a target inside
+thinker.dll (ThinkerBranchTarget). Branch claude/thinker-captured-base-cbd17e commits 9ac7520 + 3d45f26, DLL 39d8371d, NOT deployed,
+NOT seen in game. Tests: work\tests\test_pssphere_psych_label.py runs Thinker's real function under Unicorn.

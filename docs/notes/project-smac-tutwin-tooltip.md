@@ -134,3 +134,6 @@ falsified an hour of inference.
 (= the screenshot key) appends the TutWin / g_current_basepop / modal-top geometry (screen + local rects, canvas, box, margins,
 +30E8/+30F0/+30F4, type, title ptr, +30D4) and g / g_title_left/right to uimod.log. Read-only, VirtualQuery-guarded, no hooks
 -> safe where Frida attach is not ([[feedback-frida-attach-branch-target]]). The flag file was REMOVED from the game dir 2026-09-19 (user request); create an empty `uimod_debug.flag` next to the exe to re-enable.
+
+## 2026-11-10 button LABEL font corrected
+Vanilla TOUR/Close/Continue/End Tour/OK = Arial Narrow 16 bold (the def-dialog font = g_text_font_v0 = find_font(16,0), the body font; pristine CrashLandTooltip.png glyph-exact). thunk_tutbtn_post v6 pushes t_ffn(16,0) (was v4 t_ffn(12,0) Arial regular, by inference). The v6.2 note above ("fonted once at 12px") was wrong about the size. See [[project-smac-font-face-weight-audit]].

@@ -1,0 +1,230 @@
+  - id: quayle.gwinit
+    status: confirmed
+    group: holobook_scale
+    function: quayle
+    virtual_addr: 0x004966c8
+    length: 5
+    original_bytes: "E8 D3 EA FF FF"   # call Holobook_gwinit -> the builder, then the full-height letterbox levers (window, rects, buttons, fonts, imm8s)
+    new_bytes:      "E8 {rel32:t_hb_build}"
+    pattern: call_target_redirect
+
+  - id: Holobook_open_item.gwinit
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_open_item
+    virtual_addr: 0x00496621
+    length: 5
+    original_bytes: "E8 7A EB FF FF"   # call Holobook_gwinit (uncalled entry, same shape as quayle) -> t_hb_build
+    new_bytes:      "E8 {rel32:t_hb_build}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.paint_gate
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x004956d0
+    length: 5
+    original_bytes: "55 8B EC 6A FF"   # push ebp / mov ebp,esp / push -1 -> ret while t_hb_build resizes the window (stale page/tier) (E9 -> t_hb_drawgate)
+    new_bytes:      "E9 0B AE 5B 00"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.frame_backdrop
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x004957c7
+    length: 5
+    original_bytes: "E8 34 A7 14 00"   # Buffer_copy_4 of frame.pcx 1024x768 1:1 at (0,0) -> Lanczos-3 + FS to the letterbox
+    new_bytes:      "E8 {rel32:t_hb_bd_frame}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.art_backdrop
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x004957f7
+    length: 5
+    original_bytes: "E8 04 A7 14 00"   # Buffer_copy_4 of Holobook.pcx 800x600 1:1 at the content origin -> pair-NN (field 64/197) at num/16
+    new_bytes:      "E8 {rel32:t_hb_bd_art}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.artbox
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495a35
+    length: 5
+    original_bytes: "E8 36 29 14 00"   # Buffer_draw of artbox<page>.pcx 420x520 (key 9) at the art rect -> pair-NN at num/16
+    new_bytes:      "E8 {rel32:t_hb_artbox}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.font_495754
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495754
+    length: 6
+    original_bytes: "8B 0D E4 40 8A 00"   # mov ecx,[0x8a40e4] -> the num font (vanilla's snapped size x num/16) when armed (E9 -> t_hb_font_495754)
+    new_bytes:      "E9 57 B3 5B 00 90"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.font_49584d
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x0049584d
+    length: 5
+    original_bytes: "A1 E8 40 8A 00"   # mov eax,[0x8a40e8] -> the num font (vanilla's snapped size x num/16) when armed (E9 -> t_hb_font_49584d)
+    new_bytes:      "E9 8E B2 5B 00"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.font_495b01
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495b01
+    length: 6
+    original_bytes: "8B 15 E4 40 8A 00"   # mov edx,[0x8a40e4] -> the num font (vanilla's snapped size x num/16) when armed (E9 -> t_hb_font_495b01)
+    new_bytes:      "E9 FA AF 5B 00 90"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.font_495c1b
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495c1b
+    length: 6
+    original_bytes: "8B 0D F0 40 8A 00"   # mov ecx,[0x8a40f0] -> the num font (vanilla's snapped size x num/16) when armed (E9 -> t_hb_font_495c1b)
+    new_bytes:      "E9 10 AF 5B 00 90"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.font_495d2e
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495d2e
+    length: 5
+    original_bytes: "A1 F0 40 8A 00"   # mov eax,[0x8a40f0] -> the num font (vanilla's snapped size x num/16) when armed (E9 -> t_hb_font_495d2e)
+    new_bytes:      "E9 2D AE 5B 00"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.font_495df1
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495df1
+    length: 5
+    original_bytes: "A1 E0 40 8A 00"   # mov eax,[0x8a40e0] -> the num font (vanilla's snapped size x num/16) when armed (E9 -> t_hb_font_495df1)
+    new_bytes:      "E9 8A AD 5B 00"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.font_496068
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00496068
+    length: 5
+    original_bytes: "A1 E0 40 8A 00"   # mov eax,[0x8a40e0] -> the num font (vanilla's snapped size x num/16) when armed (E9 -> t_hb_font_496068)
+    new_bytes:      "E9 33 AB 5B 00"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.font_4962bd
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x004962bd
+    length: 5
+    original_bytes: "A1 E8 40 8A 00"   # mov eax,[0x8a40e8] -> the num font (vanilla's snapped size x num/16) when armed (E9 -> t_hb_font_4962bd)
+    new_bytes:      "E9 FE A8 5B 00"
+    pattern: detour_inplace
+
+  - id: Holobook_draw.wrap_495848
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495848
+    length: 5
+    original_bytes: "E8 D3 80 14 00"   # wrap call -> vanilla's line breaks (word-fit measured with the vanilla font at the vanilla width)
+    new_bytes:      "E8 {rel32:t_hb_w_title}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.wrap_49599f
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x0049599f
+    length: 5
+    original_bytes: "E8 7C 7F 14 00"   # wrap call -> vanilla's line breaks (word-fit measured with the vanilla font at the vanilla width)
+    new_bytes:      "E8 {rel32:t_hb_w_intro}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.wrap_495dd4
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495dd4
+    length: 5
+    original_bytes: "E8 47 7B 14 00"   # wrap call -> vanilla's line breaks (word-fit measured with the vanilla font at the vanilla width)
+    new_bytes:      "E8 {rel32:t_hb_w_intro}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.wrap_495fbc
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495fbc
+    length: 5
+    original_bytes: "E8 9F 63 14 00"   # wrap call -> vanilla's line breaks (word-fit measured with the vanilla font at the vanilla width)
+    new_bytes:      "E8 {rel32:t_hb_w_measure}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.wrap_49601f
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x0049601f
+    length: 5
+    original_bytes: "E8 0C 75 14 00"   # wrap call -> vanilla's line breaks (word-fit measured with the vanilla font at the vanilla width)
+    new_bytes:      "E8 {rel32:t_hb_w_entry}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.caption_495b45
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495b45
+    length: 5
+    original_bytes: "E8 E6 75 14 00"   # caption writer -> +0xA94 := hb_caption_rect(page) first
+    new_bytes:      "E8 {rel32:t_hb_cap}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.caption_495c5f
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495c5f
+    length: 5
+    original_bytes: "E8 CC 74 14 00"   # caption writer -> +0xA94 := hb_caption_rect(page) first
+    new_bytes:      "E8 {rel32:t_hb_cap}"
+    pattern: call_target_redirect
+
+  - id: Holobook_draw.caption_495d5e
+    status: confirmed
+    group: holobook_scale
+    function: Holobook_draw
+    virtual_addr: 0x00495d5e
+    length: 5
+    original_bytes: "E8 4D 7D 14 00"   # caption writer -> +0xA94 := hb_caption_rect(page) first
+    new_bytes:      "E8 {rel32:t_hb_cap8}"
+    pattern: call_target_redirect
+
+  - id: Font_find_line_break_l.hb_vanilla_breaks
+    status: confirmed
+    group: holobook_scale
+    function: Font_find_line_break_l
+    virtual_addr: 0x00619370
+    length: 7
+    original_bytes: "83 EC 10 8B 44 24 18"   # sub esp,0x10 / mov eax,[esp+0x18] -> while a Holobook wrap is armed: the vanilla font and width (E9 -> t_hb_flb)
+    new_bytes:      "E9 4B 73 43 00 90 90"
+    pattern: detour_inplace
+

@@ -305,6 +305,9 @@ def test_the_summary_tee_is_inert_outside_the_block(capsys):
 
 def test_the_crash_log_follows_the_game_folder(tmp_path, monkeypatch):
     import installer_exit as ix
+    # bootstrap.run() (called in-process by test_bootstrap) sets this global and nothing resets it: on the same
+    # xdist worker this test then started from another test's folder. Start from main's own initial state.
+    monkeypatch.setattr(inst, "_CRASH_LOG_GAME_DIR", None)
     assert inst.crash_log_dir() is None                  # before main knows the folder: beside the script
     monkeypatch.setattr(inst, "_CRASH_LOG_GAME_DIR", tmp_path / "game")
     assert inst.crash_log_dir() == tmp_path / "game" / "LongevityMods" / "logs"
@@ -321,7 +324,7 @@ def test_the_crash_log_follows_the_game_folder(tmp_path, monkeypatch):
 
 def test_both_entry_points_route_the_crash_log(tmp_path):
     src = (_REPO / "work" / "scripts" / "install.py").read_text(encoding="utf-8")
-    assert "log_dir=crash_log_dir))" in src
+    assert "log_dir=crash_log_dir," in src
     boot = (_REPO / "work" / "scripts" / "bootstrap.py").read_text(encoding="utf-8")
     assert "log_dir=_crash_log_dir," in boot and "inst._CRASH_LOG_GAME_DIR = game_dir" in boot
 
@@ -366,7 +369,7 @@ def test_the_kept_count_is_small_and_the_update_path_uses_the_helper():
     a = src.index("def do_update(")
     b = src.index("\ndef ", a + 1)
     body = src[a:b]
-    assert "run_patch_logged(patch_log, game_dir, target, spec, work, companions, notes=left_alone)" in body
+    assert "run_patch_logged(patch_log, game_dir, target, spec, work, companions, notes=left_alone," in body
     assert "tx.apply_transactional(" not in body, "the update path never calls the patcher unlogged"
     assert "(log: {patch_log})" in body, "a failed commit names the log"
 

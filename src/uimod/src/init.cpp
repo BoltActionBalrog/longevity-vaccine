@@ -35,7 +35,9 @@
 #include "pssphere.h"
 #include "musicfix.h"
 #include "riotfix.h"
+#include "leaderfree.h"
 #include "blinkfix.h"
+#include "rowarrowfix.h"
 #include "cursorscale.h"
 #include "hudmovesfix.h"
 #include "thinkercompat.h"
@@ -51,6 +53,7 @@
 #include "vidmode.h"
 #include "wheel.h"
 #include "interludekey.h"
+#include "pracxfocus.h"
 #include "lanjoin.h"
 #include "logredact.h"
 #include "mptimefix.h"
@@ -258,6 +261,10 @@ extern "C" void __stdcall PreInit(HMODULE prax)
     UimodLog("[uimod] PreInit: before PRACX init\n");
     EnsureDpiAware();
     EnsureNoGhosting();
+    // The Thinker Mod startup check: a thinker.dll that is not the build this release is pinned to gets our dialog
+    // HERE -- after the DPI / ghosting setup it needs, before anything touches the display, and before a single byte
+    // of ours is written. "Update now" starts the installer and ends the process. See thinkerversion.cpp.
+    ThinkerStartupCheck(true);
     VidModePreInit(prax);
 }
 
@@ -276,16 +283,17 @@ extern "C" void __stdcall Init(HMODULE self)
         UimodLog("[uimod] Init: no PRACX -> standalone mode (native Alpha Centauri)\n");
     }
 
+    // The Thinker Mod startup check ran in PreInit; this call is a no-op then. Only the one-phase developer exe (no
+    // PreInit) decides here, and gets a plain box instead of the dialog. Either way it comes BEFORE the compatibility
+    // pass, which takes "is Thinker loaded, and is it the pinned build" from it. See thinkerversion.cpp.
+    ThinkerStartupCheck(false);
+
     // PRACX + Thinker: Thinker (thinker.dll) has already verified and patched the image in memory. The sites the
     // patcher left clean on disk for it go in now, the clobbered ones come back, and the two base-screen thunks are
     // chained into Thinker's functions -- FIRST, so every later module byte-checks the final bytes. Without Thinker
-    // this still writes the sites a Thinker-folder exe started directly would otherwise lack. See thinkercompat.cpp.
+    // this still writes the sites a Thinker-folder exe started directly would otherwise lack. On a Thinker that is not
+    // the pinned build the chains and undos stay out (reduced mode). See thinkercompat.cpp.
     InstallThinkerCompat();
-
-    // A thinker.dll that is not the build this release is pinned to: one warning dialog (OK / Don't Show Again),
-    // before any window, in the installer's words. The pinned modules below still disable themselves on their own
-    // checks; this only tells the player. See thinkerversion.cpp.
-    ThinkerVersionWarning();
 
     // Thinker's own base-screen lines (satellite bonuses, stockpile, pop size, nerve staple) re-anchored at our scale:
     // its two text-writer function pointers are swapped for caller-aware wrappers. A no-op without thinker.dll;
@@ -329,7 +337,7 @@ extern "C" void __stdcall Init(HMODULE self)
     InstallMapScroll(pracx);
     InstallModernControls();
 
-    // Longevity Mod Preferences: a new PrefWin tab with the map-label font-scale
+    // Longevity Preferences: a new PrefWin tab with the map-label font-scale
     // slider. Byte-checked patches; self-disables on an unexpected exe. See prefs.cpp.
     InstallPrefsTab();
 
@@ -351,6 +359,13 @@ extern "C" void __stdcall Init(HMODULE self)
     // menu over the interlude (base-game bug, user 2026-10-30). A thread-local message hook keyed on the InterludeWin
     // class swallows that one character. Both exes. See interludekey.cpp.
     InstallInterludeKeyFix();
+
+    // PRACX's map wheel zoom and right-drag scroll need the game window to hold keyboard focus. On Wine, closing PRACX's
+    // Preferences panel after clicking one of its buttons leaves nobody with focus, so both stayed dead until a restart
+    // (PRACX bug, issue longevity-vaccine #6); and on every system Esc stopped closing the panel once a button had
+    // focus. A thread-local message hook gives the focus back and hands that Esc to the panel. PRACX only. See
+    // pracxfocus.cpp.
+    InstallPracxFocusFix(pracx);
 
     // Multiplayer over TCP/IP: two PCs behind the same router find each other's games even when the router does not
     // loop traffic back through its public address (Windows' DirectPlay NAT helper only recognises its own machine's
@@ -385,6 +400,12 @@ extern "C" void __stdcall Init(HMODULE self)
     // its REVOLT roll was inverted as well. Both exes. See riotfix.cpp.
     InstallRiotFix();
 
+    // Base-game bug: an AI probe team "freeing a captured faction leader" freed faction (slot index + 1) instead of the
+    // captive, resetting a living faction (usually the player) to a colony pod; and the jailer was told "you liberated"
+    // the leader. Both exes. Under Thinker the pick stands down (it replaces probe() and fixes that itself) and only the
+    // jailer's message is applied, pinned to 5.5; needs InstallThinkerCompat() above. See leaderfree.cpp.
+    InstallLeaderFreeFix();
+
     // Base-game bug: the in-game music kept playing over the main menu after leaving a game. Both exes.
     // See musicfix.cpp.
     InstallMusicFix();
@@ -392,6 +413,10 @@ extern "C" void __stdcall Init(HMODULE self)
     // Base-game bug: the selected unit's blink regenerated only its own tile, leaving a sliver of any sprite
     // wider than the tile drawn solid. Both exes. See blinkfix.cpp.
     InstallBlinkFix();
+
+    // Base-game bug: the base screen's unit-row scroll arrows stayed up over the screen that replaced it (a stray
+    // arrow over the Design Workshop's unit row when opened from a base). Both exes. See rowarrowfix.cpp.
+    InstallRowArrowFix();
 
     // The engine map cursors (go-to, patrol, airdrop, ...) at vanilla x g/16. Patched exe only. See cursorscale.cpp.
     InstallCursorScale();

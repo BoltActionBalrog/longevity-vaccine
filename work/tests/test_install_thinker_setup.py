@@ -480,8 +480,10 @@ def test_thinker_removed_lets_go_of_the_set_up(set_up, monkeypatch, capsys):
     (g / "thinker.dll").unlink()
     _unattended(monkeypatch)
     plan = inst.plan_thinker_setup(g, _args())
-    assert plan["action"] == "release" and "no longer in this folder" in capsys.readouterr().out
+    # said when it is carried out, not when planned: the Thinker question can still replace the plan
+    assert plan["action"] == "release" and "no longer in this folder" not in capsys.readouterr().out
     inst.apply_thinker_setup(plan)
+    assert "no longer in this folder" in capsys.readouterr().out
     assert _md5(g / "terranx.exe") == vanilla and not (g / inst.THINKER_SETUP_NAME).exists()
 
 

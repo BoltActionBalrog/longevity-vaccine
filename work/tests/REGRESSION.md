@@ -27,6 +27,19 @@ Run before any apply, and after any `patches.yaml` edit:
 work\tests\run-tests.bat              ::  or:  PY -m pytest work\tests -q
 ```
 
+**Set `LONGEVITY_REQUIRE_E2E=1` for a full run that has to prove the installer.**
+- Without it, a test whose prerequisite is missing skips, and the run still "passes".
+- With it, these skips are FAILURES instead. The release gate (operator tooling, not in the public tree) sets it.
+  - the bundled `tools\python`
+  - `work\run-install.bat`
+  - the staged runtimes (`work\build\runtime`, `work\build\runtime38`, `tools\python38`)
+  - the built `uimod.dll` and the ffmpeg DLLs
+  - the GOG binaries the patch tests read (conftest's `_missing`)
+  - the emulator packages
+- The pinned Thinker Mod files under `LONGEVITY_REFS` also fail under the gate when `LONGEVITY_REFS` is set. `refs\` is gitignored, so a plain run without it skips them. The release gate sets it to the checkout's own `refs` folder.
+- Other local prerequisites still skip quietly even then. These are the Visual Studio toolchain, DirectPlay, the other `refs\` checkouts, git history, a stock `Icons.pcx` and the HD pack sidecar.
+- A new test that needs a local file uses `@pytest.mark.needs_local(path, what)`, the `need_local` fixture or `_missing`, never a plain `skipif(not path.exists())` or `pytest.skip`. `test_audit_j.py` and `test_audit_k.py` check this for the prerequisites listed above.
+
 It checks, against the pristine `.bak` (MD5 2d0b1438) and the live
 `patches.yaml`:
 - every confirmed site's anchor + original bytes still match pristine;

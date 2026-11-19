@@ -24,7 +24,7 @@ import version as ver          # noqa: E402
 import dev_player_zip as dpz   # noqa: E402
 
 _PY = _REPO / "tools" / "python" / "python.exe"
-pytestmark = pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+pytestmark = pytest.mark.needs_local(_PY, "the bundled interpreter")
 
 
 @pytest.fixture(scope="module")
@@ -44,6 +44,7 @@ def test_the_zip_is_named_like_the_download(built):
 def test_install_bat_sits_at_the_archive_root(built):
     names = zipfile.ZipFile(built / rel.archive_name("base", ver.VERSION)).namelist()
     assert "INSTALL.bat" in names
+    assert "UNINSTALL.bat" in names
     assert "scripts/run-install.bat" in names
     assert "scripts/install.py" in names
 
@@ -70,6 +71,7 @@ def test_extraction_matches_explorers_extract_all(built):
     assert (folder / "scripts" / "run-install.bat").is_file()
     # The root launcher must be the release's own text, CRLF included.
     assert (folder / "INSTALL.bat").read_bytes() == rel._ROOT_LAUNCHER.encode("ascii")
+    assert (folder / "UNINSTALL.bat").read_bytes() == rel._ROOT_UNINSTALLER.encode("ascii")
 
 
 def test_no_extract_writes_no_downloads_folder(tmp_path):

@@ -7,7 +7,7 @@ Longevity Vaccine is a free mod for *Sid Meier's Alpha Centauri: Alien Crossfire
 - **The interface scales to your screen, up to 4K.** Every menu, popup and line of text fits your resolution and keeps the original look.
 - **Fixes the Windows 11 new-game freeze** and other crashes.
 - **Fullscreen, borderless or windowed.** Switch from the in-game preferences tab.
-- **Movies play inside the game.** Optional HD remastered cinematics.
+- **Movies play inside the game.** Optional HD cinematics upscaled by Z2k Retro ([YouTube](https://www.youtube.com/@Z2KRetroGaming), [YouTube](https://www.youtube.com/@Z2kRetroVideo)).
 - **Optional HD leader portraits** by Turovetsky ([YouTube](https://www.youtube.com/@Turovetsky), [X](https://x.com/turovetsky)), or drop in your own portrait images.
 - **Smooth map scrolling** at high resolutions.
 - **Fixes gameplay bugs.** The AI can no longer see cloaked units, etc.
@@ -28,9 +28,13 @@ You need *Sid Meier's Alpha Centauri Planetary Pack* from GOG, on Windows 7+.
 
 **Thinker Mod 5.5** is supported. Install into your Thinker folder and start `thinker.exe` as usual. The installer sets the folder up for you. It keeps your original `terranx.exe` and puts it back when you uninstall.
 
+The installer can also install Thinker Mod 5.5 for you, update an older Thinker to it, or put back missing Thinker files. Your previous Thinker is kept in `LongevityMods\backups`, and files you changed are left alone. When you uninstall, it asks whether to remove the Thinker Mod it installed too.
+
+The HD cinematics and HD portraits are optional: tick them in the installer's list. Uninstalling removes them.
+
 Other mods and the base game without Alien Crossfire are not supported.
 
-**To uninstall**, run `INSTALL.bat --uninstall` from a command prompt.
+**To uninstall**, double-click `UNINSTALL.bat` in the download (in 1.0.0, run `INSTALL.bat --uninstall` from a command prompt).
 
 ## Report a bug
 
@@ -51,7 +55,7 @@ This is the source the mod is built from. Each `v<version>` tag points at the ex
 | `work/scripts/` | The patcher, the installer, the thunk assemblers, the scaling laws, packaging and reverse-engineering tools. |
 | `work/tests/` | The regression suite. |
 | `work/symbols/terranx.h` | The symbol map of the game binary. |
-| `work/video-upscale/` | The HD Cinematics pipeline. |
+| `work/video-upscale/` | The pipeline that made the 1.0.0 HD Cinematics (the current pack is Z2k Retro's). |
 | `work/scripts/PROBES.md` | Which Frida scripts only observe and which write to the game. Read the writers. Don't run them. |
 | `docs/skills/` | How the scaling work is done. |
 | `docs/notes/` | Engineering notes and history. A `[[name]]` link means `docs/notes/name.md`. Start at `docs/notes/README.md`. |
@@ -72,7 +76,7 @@ Every scaled value is `vanilla × g/16`. `g` is the runtime scale from the scree
 ### Build and test
 
 - Some launchers, Frida probes and the Ghidra-side analysis scripts (the `work/scripts/*.py` that set `PROJECT_LOCATION`, plus a few assembler output paths) still hardcode the maintainer's checkout folder `D:\SmacxUi`. Edit the constant at the top of the file to point at yours. The patcher, the installer, the DLL build and the test suite do not depend on it.
-- Install Python 3.12 as a full install at `tools/python`, not a venv. Then run `pip install capstone keystone-engine unicorn pefile pyyaml pillow numpy scipy pytest pytest-xdist frida-tools pyghidra==3.1.0`. The pyghidra version must match Ghidra's.
+- Install Python 3.12 as a full install at `tools/python`, not a venv. Then run `pip install capstone keystone-engine unicorn pefile pyyaml pillow numpy scipy pytest pytest-xdist cryptography frida-tools pyghidra==3.1.0`. The pyghidra version must match Ghidra's.
 - Copy `work/game-path.txt.example` to `work/game-path.txt` and point it at a PRACX GOG install. The patcher expects MD5 `2d0b1438` and keeps a `.bak`. If the PRACX executable there is not named `terranx.exe`, put its name in `work/game-exe.txt` (or set `SMACX_EXE_NAME`); without it the installer tests read the wrong `.bak` and fail instead of skipping.
 - Optional: Ghidra 12.1 at `tools/ghidra_12.1_PUBLIC` and JDK 21 at `tools/jdk-21.0.11+10` for decompiling.
 - Optional: Node.js for the JavaScript scaling tests, and PowerShell 7 for `work/run-<WxH>.bat`.
@@ -80,11 +84,11 @@ Every scaled value is `vanilla × g/16`. `g` is the runtime scale from the scree
 
 Build the DLL with `src/uimod/build.bat Release`. It expects Visual Studio 2022 Community, Win32. For another edition, edit `build.bat` and `tools/run-build-ffmpeg-slim.bat`, and set `VCVARS32` for the C++ test harness.
 
-The DLL links a slim ffmpeg that you build yourself:
+The DLL links a slim ffmpeg that is already in the repository, in `src/uimod/third_party/ffmpeg`: the five DLLs, the headers and the import libraries. `work/tests/test_ffmpeg_vendored.py` pins the DLLs by hash. To rebuild it yourself:
 
-1. Put the FFmpeg 8.1 source at `tools/ffmpeg-8.1` and MSYS2 at `tools/msys64`. Put `nasm` on PATH.
+1. Put the FFmpeg 8.1 source (https://ffmpeg.org/releases/ffmpeg-8.1.tar.xz) at `tools/ffmpeg-8.1` and MSYS2 at `tools/msys64`. Put `nasm` on PATH.
 2. Run `tools/run-build-ffmpeg-slim.bat`. It writes `tools/ffmpeg-slim`.
-3. Copy `include` to `src/uimod/third_party/ffmpeg/include`. Copy `lib/*` and `bin/*.lib` to `src/uimod/third_party/ffmpeg/lib`. Copy the five DLLs in `bin` to `src/uimod/third_party/ffmpeg/bin`.
+3. Copy `include` to `src/uimod/third_party/ffmpeg/include`. Copy `lib/*` and `bin/*.lib` to `src/uimod/third_party/ffmpeg/lib`. Copy the five DLLs in `bin` to `src/uimod/third_party/ffmpeg/bin`, and update the hashes in `test_ffmpeg_vendored.py`.
 
 Run the tests:
 
@@ -109,14 +113,15 @@ The installer's end-to-end tests skip until `work/build/runtime` exists. An inst
 
 ### What the installer changes
 
-It writes to the game folder: the patched exe with a `.bak`, `uimod.dll`, the ffmpeg DLLs and a `LongevityMods` folder. It adds a desktop shortcut if you say yes. If the game folder isn't writable, it caches downloads in `%LOCALAPPDATA%\LongevityVaccine`. Every download is HTTPS and checked against a signed manifest. The DLL's only network traffic is the multiplayer home-network fix (`src/uimod/src/lanjoin.cpp`): during TCP/IP multiplayer it asks your router over UPnP on the local network and test-connects to the other PC. Single player never loads Winsock, and `DirectPlayLanFix=0` under `[UIMod]` turns the fix off.
+It writes to the game folder: the patched exe with a `.bak`, `uimod.dll`, the ffmpeg DLLs and a `LongevityMods` folder. It also copies PRACX's missing icon art into the game's `Icons.pcx` (keeping `Icons.pcx.longevity.bak`), adds the mod's notes to two Datalinks text files (`helpx.txt`, `conceptsx.txt`; uninstalling takes them out again), and under Wine or Proton moves GOG's DDrawCompat `ddraw.dll` aside to `ddraw.dll.longevity.bak`. If you ask it to install, update or repair Thinker Mod, it downloads the pinned release from the author's GitHub, checks every file's hash, and keeps the Thinker files it replaces in `LongevityMods\backups`. It adds a desktop shortcut if you say yes. If the game folder isn't writable, it caches downloads in `%LOCALAPPDATA%\LongevityVaccine`. Every download is HTTPS and checked against a signed manifest. The DLL's only network traffic is the multiplayer home-network fix (`src/uimod/src/lanjoin.cpp`): during TCP/IP multiplayer it asks your router over UPnP on the local network and test-connects to the other PC. Single player never loads Winsock, and `DirectPlayLanFix=0` under `[UIMod]` turns the fix off.
 
 ### Not in this repo
 
 - Release publishing tools. `release.py` and `sign_manifest.py` are here. No key is.
 - Most analysis scratch and game disassembly dumps. Tests that need them skip.
-- Thinker and PRACX source under `refs/`. Clone them from their own repositories if you need them.
+- Thinker and PRACX source under `refs/`: clone them to `refs/thinker` and `refs/pracx` from their own repositories if you need them. Some Thinker tests and `work/scripts/gen_thinker_data.py` also read the extracted Thinker 5.5 release (`Thinker_v5.5.zip` from its GitHub release) at `refs/thinker-release/v5.5`. Tests that need any of these skip without them.
 - The HD portrait images (Turovetsky's pack; its terms are in `THIRD_PARTY.md`). The pipeline that packs them is here.
+- The HD cinematics (Z2k Retro's pack; its terms are in `THIRD_PARTY.md`). `work/scripts/hash_hd_pack.py` and `release.py` check and pack them.
 - The private working notes that `docs/notes/README.md` describes as withheld; the engineering notes are all here.
 
 ### Contributing

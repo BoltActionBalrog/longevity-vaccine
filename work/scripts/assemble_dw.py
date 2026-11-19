@@ -2880,7 +2880,11 @@ def site_list(names: dict[str, int] | None = None) -> list[dict]:
     redirect("DesignWin_master.union_frame", g, "DesignWin_master", UNION_SITE, BOX_SPRITE, "t_bm_ho_hf", "D4: canvas-dest frame through the thick chain")
     for va, nat, th in RAIL_SITES:
         redirect(f"DesignWin_on_mode.{th.split('_')[-1]}", g, "DesignWin_on_mode", va, nat, th, "popup-family rail recipe (SE v2 / diplo)")
-    detour("FlatButton_itemdraw_stub", g, "GraphicWin_vtbl_default", ITEMDRAW_STUB, 5, "thunk_dw_btndraw", "the vtbl+0x14 default `xor eax,eax; ret 0xC`: DesignWin buttons -> thunk_se_rowdraw")
+    # 2026-11-15 replay_scale TAKES OVER this site's target: t_rp_btndraw (assemble_replay.py, pcave2 0x46180) routes the
+    # end-game Replay window's Close button to t_rp_face and passes everything else to thunk_dw_btndraw with every
+    # register, flag and stack byte unchanged -- thunk_dw_btndraw itself is unchanged.  Never point it back here.
+    names = {**names, "t_rp_btndraw": PCAVE2 + 0x46180}
+    detour("FlatButton_itemdraw_stub", g, "GraphicWin_vtbl_default", ITEMDRAW_STUB, 5, "t_rp_btndraw", "the vtbl+0x14 default `xor eax,eax; ret 0xC`: the Replay Close button -> t_rp_face, else thunk_dw_btndraw (DesignWin buttons -> thunk_se_rowdraw)")
     redirect("Caviar_draw.composite", g, "Caviar_draw", COMPOSITE_SITE, BUFFER_DRAW_2, "t_cav_blit", "dirty-rect composite (caviar_dirty_rect, src scripts/assemble_cavdirty.py); DW/picker dst hand off to thunk_dw_shim (SSAA or keyed stretch of the TN^2 target)")
     for va in FIT_SITES:
         fn = "Caviar_overlay" if va == 0x6171CF else ("PartPicker_draw_cell" if va < 0x434000 else "DesignWin_painters")

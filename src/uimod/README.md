@@ -23,19 +23,20 @@ and disables itself with a log line when the bytes differ (another mod, another 
 | `portrait.cpp`, `portrait_law.h` | Smooth leader portraits at enlarged UI scales: scanlines removed, Lanczos enlarge, scanlines regenerated at device density. |
 | `vidmode.cpp`, `gpuscale.cpp` | Persisted Fullscreen / Borderless / Windowed display mode, with a GPU present for the stretched modes. |
 | `vidsafety.h`, `vidwatch.cpp` | Display-topology safety for those modes: a monitor change (not a USB or work-area notice that leaves the monitors as they were, not PRACX's own mode switch) releases the pointer clip, topmost and the backdrop; they come back 3 s after the display settles, on the game's own monitor only (the game is never moved to another monitor by itself). A watchdog thread receives the display broadcasts (so the release happens even while the game thread is busy) and owns the escape hotkey (`[UIMod] EscapeHotkey`, default Ctrl+Alt+Shift+End). It only measures and logs the game thread's stalls and releases nothing on one: a long AI turn keeps the game thread busy for seconds while it draws. The way out of a game thread that truly hangs: the escape hotkey frees the pointer and hides the backdrop at once, but the window stays on top until the game thread runs again (leaving the topmost band is queued to it), so Ctrl+Alt+Del then Task Manager ends it. Window ghosting is off for the process, so Windows never swaps a busy game for a "not responding" copy. |
-| `prefs.cpp` | The "Longevity Mod Preferences" page in the game's Preferences window. |
+| `prefs.cpp` | The "Longevity Preferences" page in the game's Preferences window. |
 | `update.cpp`, `update_core.h` | Update checker: runs the resident installer's `--check` as a hidden child and shows the in-game prompt. The update checker does no networking in-process and trusts nothing from the network. |
 | `wheel.cpp` | Mouse wheel over lists and scrollbars, routed by what is under the cursor. |
 | `rowindent.cpp` | Reply-row text indent scales with the UI. |
 | `techwin.cpp` | Tech breakthrough window opens its text boxes at the top (original-game bug). |
 | `pssphere.cpp`, `psbadge.h` | Punishment Sphere: shows the drones the sphere suppresses (display only). |
-| `aivis.cpp` | AI perception filter: the AI no longer sees cloaked units it should not (original-game bug). |
+| `aivis.cpp` | AI perception filter: the AI no longer sees cloaked units it should not, and notices a cloaked or submerged unit that attacks it (original-game bugs). Also the Long Range Fire repairs: firing at an empty square no longer starts an artillery duel the firing unit cannot win, enemy artillery in range returns fire in a fair Artillery Duel with a message, and a hasty duel at reduced strength asks first (original-game bugs). |
 | `blinkfix.cpp` | The selected unit's blink redraws its neighbouring tiles too, so a sprite wider than its tile (big ships) no longer leaves a solid sliver on the off tick (original-game bug). |
 | `hudsync.cpp` | A resumed turn with a pending unit (a loaded game) enters move mode instead of the base game's half-selected view mode; the HUD unit panel's stored tile is synced to the unit the game waits on when it becomes current (original-game desync). |
 | `viewdragfix.cpp` | In view mode (V) a drag no longer arms a move line that the release would not honour (original-game bug: it only selected the unit). |
 | `hudmovesfix.cpp` | The HUD's "Moves" readout repaints when the engine gives up a go-to that has no route (original-game bug: it showed the pre-move count until the unit was re-selected). |
 | `musicfix.cpp` | In-game music stops when a game ends (original-game bug). |
 | `riotfix.cpp` | Drone-riot defection fix (original-game bug). |
+| `leaderfree.cpp`, `leaderfree_core.h` | An AI probe team that frees a captured faction leader frees that leader, instead of resetting a living faction (often the player) to a colony pod (original-game bug), and the faction that held the leader is told so in its own words instead of "you liberated" them (original-game bug). Under Thinker Mod, which fixes the rescue in its own probe code, only the message is applied, pinned to Thinker 5.5. |
 | `modernctl.cpp`, `praxdrag.cpp` | Modern Control Set (right-click to move, hover move-to line, Ctrl+right waypoints, Shift+right menu), the map drag-scroll button under PRACX, the camera options, and the Shift/Ctrl auto-repeat click fix (original-game bug). |
 | `dragdelay.cpp` | The drag-move hold delay setting. |
 | `mapscroll.cpp` | Smooth map scrolling under PRACX: each drag / edge-scroll step shifts the map canvas in place and re-renders only the exposed strips (the engine's filtered `MapWin_gen_map` through PRACX's wrapper, with our own strip rects), instead of PRACX's full redraw per step; the scroll's end settles with one full draw. |
@@ -47,9 +48,11 @@ and disables itself with a log line when the bytes differ (another mod, another 
 | `portrait_files.cpp`, `prewarm.cpp` | Replaceable leader portraits from the `portraits/` folder and the HD pack: fail-closed decode of untrusted image files, cache, and a background pre-bake so a faction's first portrait does not stall. |
 | `winlines.cpp`, `lineoverlay.h` | Lines the engine draws straight onto the game window, kept right while the frame is stretched into a client of another size. |
 | `thinkercompat.cpp`, `thinker_sites.h` | The "apply after Thinker" pass for the PRACX + Thinker target: re-applies our patches over the sites thinker.dll rewrites (table generated by `work/scripts/gen_thinker_sites.py`). |
-| `thinkeraivis.cpp` | The AI perception filter's Thinker half (Thinker replaces the engine's unit planner). |
+| `thinkeraivis.cpp` | The AI perception filter's and the Long Range Fire repairs' Thinker half (Thinker replaces the engine's unit planner). |
 | `thinkertext.cpp` | Thinker's own base-screen text lines placed at our scale. |
-| `thinkerversion.cpp` | One warning dialog when the game runs a Thinker Mod build this release was not measured on (OK / Don't Show Again). |
+| `thinkerversion.cpp` | The Thinker Mod startup check: when the game runs a Thinker Mod build other than the one this release is pinned to, one dialog offers [Update now] (starts the installer to install the matching Thinker and ends the game), [Not now] or [Don't ask me again]. Until then the parts of the DLL that touch thinker.dll stay off (reduced mode). |
+| `rowarrowfix.cpp` | The base screen's unit-row scroll arrows are hidden when another screen takes the console, so the Design Workshop opened from a base no longer shows a stray, dead arrow (original-game bug). |
+| `pracxfocus.cpp`, `pracxfocus_core.h` | PRACX's Preferences panel no longer leaves the map without its mouse wheel and drag scrolling under Wine (PRACX bug), and Esc closes the panel after one of its buttons was clicked. |
 
 ## Build
 
@@ -84,6 +87,6 @@ src\uimod\
   src\init.cpp           Init(HMODULE) — the entry the PRACX-chained loader calls
   src\*.cpp / *.h        one module per feature (table above)
   src\version.h          THE product version (RC-safe #defines); mirrors work\scripts\version.py
-  third_party\ffmpeg\    fetched, not committed: the slim LGPL ffmpeg (tools\build_ffmpeg_slim.sh)
+  third_party\ffmpeg\    the slim LGPL ffmpeg: DLLs, headers, import libs (tracked; built by tools\build_ffmpeg_slim.sh)
   build\                 MSBuild output + .vs\ IDE cache (git-ignored)
 ```

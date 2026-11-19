@@ -28,9 +28,10 @@ sys.path.insert(0, str(_SCRIPTS))
 
 import release as rel  # noqa: E402
 import version as ver  # noqa: E402
+from conftest import _missing  # noqa: E402  (a skip, or a FAILURE under LONGEVITY_REQUIRE_E2E: audit-k LOW-4)
 
 _PY = _REPO / "tools" / "python" / "python.exe"
-pytestmark = pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+pytestmark = pytest.mark.needs_local(_PY, "the bundled interpreter")
 
 
 def _run(*args, expect_fail: bool = False) -> subprocess.CompletedProcess:
@@ -97,9 +98,9 @@ def test_the_archive_carries_both_interpreters_when_staged(tmp_path):
     Windows 7 player with an installer that cannot start (audit 2026-10-31). Skipped until both are staged;
     runtime_root() refuses when only one is."""
     if not (rel.RUNTIME_DIR / "python.exe").is_file():
-        pytest.skip("3.12 runtime not staged")
+        _missing(rel.RUNTIME_DIR / "python.exe", "the staged 3.12 runtime")
     if not (rel.RUNTIME38_DIR / "python.exe").is_file():
-        pytest.skip("runtime38 not staged (fetch_python38.py + build_runtime.py)")
+        _missing(rel.RUNTIME38_DIR / "python.exe", "the staged runtime38 (fetch_python38.py + build_runtime.py)")
     names = {dst for _src, dst in rel.collect("base", include_python=True)}
     for required in ("tools/python/python.exe", "tools/python38/python.exe", "tools/python38/python38.zip",
                      "tools/python38/python38._pth", "tools/python38/ucrtbase.dll", "tools/python38/LICENSE.txt",
@@ -143,7 +144,7 @@ def test_the_staged_runtime_carries_no_developer_packages():
     up in the archive, not what the developer happens to have installed.
     """
     if not (rel.RUNTIME_DIR / "python.exe").is_file():
-        pytest.skip("no staged runtime; run build_runtime.py first")
+        _missing(rel.RUNTIME_DIR / "python.exe", "the staged runtime (run build_runtime.py first)")
     assert rel.check_dev_only_packages() == []
 
 
@@ -210,7 +211,7 @@ def test_the_archive_has_the_one_payload_layout(built):
     is merely where the files come from, and MODULE_SPEC is the only place the two are related.
     """
     names = set(zipfile.ZipFile(built / rel.archive_name("base", ver.VERSION)).namelist())
-    for required in ("INSTALL.bat", "scripts/run-install.bat", "scripts/install.py",
+    for required in ("INSTALL.bat", "UNINSTALL.bat", "scripts/run-install.bat", "scripts/install.py",
                      "scripts/apply_patches.py", "scripts/config.py", "scripts/version.py",
                      "scripts/installer_exit.py", "patches/patches.yaml",
                      "src/uimod/build/Release/uimod.dll", "art/longevity_sm.pcx", "CHANGELOG.txt"):
@@ -226,6 +227,9 @@ def test_the_archive_has_the_one_payload_layout(built):
 
 def test_root_launcher_is_present_crlf_and_guards_itself(built):
     z = zipfile.ZipFile(built / rel.archive_name("base", ver.VERSION))
+    for name in ("INSTALL.bat", "UNINSTALL.bat"):
+        assert z.read(name) == rel._SYNTHESISED[name].encode("ascii"), f"{name} is not the synthesised launcher"
+    assert b"--uninstall" in z.read("UNINSTALL.bat") and b"--uninstall" not in z.read("INSTALL.bat")
     data = z.read("INSTALL.bat")
     assert data.count(b"\r\n") == data.count(b"\n"), "INSTALL.bat must be CRLF for cmd"
     text = data.decode("ascii")
@@ -260,8 +264,13 @@ def test_the_runtime_modules_the_installer_needs_are_shipped(built):
     for required in ("ed25519_verify.py", "manifest.py", "fetch.py", "preflight.py",
                      "transact.py", "receipt.py", "bootstrap.py",
                      "patch_helptext.py",      # the Datalinks text patch install.py applies on every run
+                     "patch_icons.py",         # the PRACX icon fix install.py applies on every run
+
+
+                     "wine_ddraw.py",          # sets GOG's DDrawCompat aside under Wine on every run
                      "roots.pem"):             # the public roots fetch.py adds to the Windows store (Windows 7)
         assert f"scripts/{required}" in names, f"{required} is missing from the base module"
+    assert "art/pracx_icons_overlay.pcx" in names, "patch_icons.py's art is missing from the base module"
 
 
 # ---------------------------------------------------------------- manifest
@@ -319,12 +328,30 @@ def _fake_pack(out: Path, name: str, mver: str) -> Path:
     movies-hd is 1.3 GB at DEFLATE 9; the reuse path only needs a file with the right name."""
     p = out / "modules" / rel.archive_name(name, mver)
     p.parent.mkdir(parents=True, exist_ok=True)
+    # The real pack-manifest.json: release.py refuses a pack archive whose manifest is not the compiled one (audit-o).
+    # It lives only in the main checkout's dist (gitignored), so a worktree without it skips these.
+    manifest = rel._REPO / "dist" / name / "pack-manifest.json"
+    if name != "base" and not manifest.is_file():
+        from conftest import _missing
+        _missing(manifest, f"the {name} pack's pack-manifest.json (release.py checks it against the compiled hash)")
     with zipfile.ZipFile(p, "w") as z:
+        if name == "portraits-hd":
+            # A reused portrait archive must also match dist\portraits-hd member for member: the real pack's files.
+            for f in sorted(manifest.parent.iterdir()):
+                if f.is_file():
+                    z.writestr(f"portraits/hd/{f.name}", f.read_bytes())
+            return p
         z.writestr(f"{name}/x.bin", b"x")
+        if name != "base":
+            z.writestr(f"{rel.MODULE_SPEC[name]['globs'][0][2]}/pack-manifest.json", manifest.read_bytes())
         if name == "portraits-hd":
             # a reused portrait archive must carry the artist's credit and confirmed licence word for word
             z.writestr("portraits/hd/PROVENANCE.txt",
                        (rel._REPO / "work" / "art" / "portraits-hd-PROVENANCE.txt").read_bytes())
+        elif name == "movies-hd":
+            # ...and so must a reused cinematics archive, with the upscaler's (Z2k Retro's, from movies-hd 2.0.0)
+            z.writestr("movies/hd/PROVENANCE.txt",
+                       (rel._REPO / "work" / "art" / "movies-hd-PROVENANCE.txt").read_bytes())
     return p
 
 
@@ -564,13 +591,31 @@ def test_sidecar_refuses_an_empty_or_missing_pack(tmp_path):
     assert hhp.build(empty) == 2
 
 
-def test_the_real_pack_sidecar_matches_pipeline_ini():
-    """Cross-check against the built pack: 61 clips, 11 of them on the video-tuned model."""
+def test_the_real_pack_sidecar_lists_every_game_movie():
+    """Cross-check against the pack on this machine: one hashed clip per game movie, by its exact name, and one
+    upscaler recorded for all of them (since 2.0.0 Z2k Retro's; never pipeline.ini's Real-ESRGAN settings stamped
+    over another upscaler's clips)."""
     sidecar = _REPO / "dist" / "movies-hd" / hhp.SIDECAR_NAME
     if not sidecar.is_file():
         pytest.skip("HD pack sidecar not generated on this machine")
     doc = json.loads(sidecar.read_text(encoding="utf-8"))
     assert doc["clip_count"] == 61
-    anime = [c for c in doc["clips"] if c["model"] == "realesr-animevideov3"]
-    assert len(anime) == 11
+    assert sorted(c["name"] for c in doc["clips"]) == sorted(f"{n}.mp4" for n in hhp.MOVIE_CLIPS)
     assert all(len(c["sha256"]) == 64 for c in doc["clips"])
+    assert len({c["model"] for c in doc["clips"]}) == 1, "a pack has one upscaler"
+
+
+def test_a_manifest_git_cannot_date_is_refused_never_dated_zero(monkeypatch):
+    """A manifest dated 0 would be refused by every client that has seen a later one."""
+    import subprocess
+    import release as rel
+    import pytest as _pt
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 128, stdout="", stderr=""))
+    with _pt.raises(RuntimeError, match="cannot date the manifest"):
+        rel._issued()
+
+
+def test_the_manifest_is_dated_from_this_checkout_not_the_patches_path(monkeypatch, tmp_path):
+    import release as rel
+    monkeypatch.setattr(rel, "_PATCHES", tmp_path / "patches.yaml")      # a scratch tree outside git
+    assert rel._issued() > 1_700_000_000

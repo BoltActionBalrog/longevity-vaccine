@@ -124,8 +124,8 @@
     function: GraphicWin_vtbl_default
     virtual_addr: 0x00404220
     length: 5
-    original_bytes: "33 C0 C2 0C 00"   # the vtbl+0x14 default `xor eax,eax; ret 0xC`: DesignWin buttons -> thunk_se_rowdraw (E9 -> thunk_dw_btndraw)
-    new_bytes:      "E9 1B FC 61 00"
+    original_bytes: "33 C0 C2 0C 00"   # the vtbl+0x14 default `xor eax,eax; ret 0xC`: the Replay Close button -> t_rp_face, else thunk_dw_btndraw (DesignWin buttons -> thunk_se_rowdraw) (E9 -> t_rp_btndraw)
+    new_bytes:      "E9 5B DF 64 00"   # E9 -> t_rp_btndraw (replay_scale takes over the target 2026-11-15; it chains to thunk_dw_btndraw)
     pattern: detour_inplace
 
   - id: Caviar_draw.composite

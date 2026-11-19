@@ -10,8 +10,8 @@ which is not a `URLError`, so it sailed past fetch.py's retry handling and crash
 Both the offline installer runs and the `file://` traces were blind to it.
 
 HOW IT TRUSTS A LOCAL SERVER WITHOUT WEAKENING PRODUCTION CODE. `fetch.py` refuses any scheme but
-https (and `file://` when a caller opts in), and it builds `ssl.create_default_context()` with no
-hooks. So the server gets a real self-signed certificate for 127.0.0.1, and the CA is injected
+https (and `file://` when a caller opts in), and its context (`fetch.tls_context`: the Windows
+ROOT store, OpenSSL's default paths and roots.pem) has no test hooks. So the server gets a real self-signed certificate for 127.0.0.1, and the CA is injected
 through `SSL_CERT_FILE`, which OpenSSL honours and which -- measured, not assumed -- ADDS to the
 Windows system store rather than replacing it. Nothing in `fetch.py` is patched, stubbed or
 subclassed: the code under test is the code that ships.

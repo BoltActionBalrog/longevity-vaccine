@@ -1,6 +1,7 @@
 @echo off
 REM Developer-only: AI-upscale the original cinematics (movies\*.wve) into the
-REM shippable HD pack (dist\movies-hd\<name>.mp4). NOT run by end users.
+REM 1.0.0 HD pack (dist\movies-hd\<name>.mp4). NOT run by end users. Since 1.0.1 the
+REM shipped pack is Z2k Retro's; this rebuilds the earlier one IN ITS PLACE.
 REM Needs the drop-in tools in work\video-upscale\tools\ (see work\video-upscale\README.md).
 REM   run-build-hd-pack.bat                          all clips
 REM   run-build-hd-pack.bat --only opening,gaians    just these

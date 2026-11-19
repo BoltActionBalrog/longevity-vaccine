@@ -159,7 +159,7 @@ Narrow (or TNR); **SIZE-LAW** = the native size used as the scaling base is not 
 - Ours: `find_font(su(14,g), 1)` = Arial Narrow bold.
 - Defect: **SIZE-LAW + WEIGHT + FACE**. Confidence: pending the TNR runtime confirmation.
 
-### 3.7 TutWin TOUR / Close button labels
+### 3.7 TutWin TOUR / Close button labels  (SUPERSEDED 2026-11-10: vanilla is Arial Narrow 16 bold, the def-dialog font -- see the addendum)
 - Site: `thunk_tutbtn_post` (`assemble_tutbtn_post.py:66–78`).
 - Vanilla: the default button font (TNR 12 regular per §1).
 - Ours: `find_font(scale_px(12,g), 0)` → ≥14 = Arial Narrow bold.
@@ -391,3 +391,31 @@ WHERE it runs matters: `SocialWin_build` is MODAL (its tail `call [vtbl+0xE4]` =
 screen closes), so a fit placed "after the build" (v1/v2, ret-swapped) ran after the user had left the screen and its
 after-close repaint broke the SE hotkey. v3 hooks that `Win_set_modal` call (site `SocialWin_build.set_modal`,
 0x4B3C4A): fit + repaint the measured buttons, then tail-jump into the modal. Thunk `t_se_labelfit` (font_face_law).
+
+## Addendum 2026-11-10 — second sweep (player report: tutorial OK/Close in thin Arial)
+
+The 2026-09-17 fixes for findings 4, 6, 7 assumed every FlatButton label inherits the default label font. That is
+true only for buttons with no other font source: TutWin's TOUR / Close / Continue / End Tour / OK are popup DIALOG-row
+buttons and draw with popups_tutorial's def-dialog font (`Dialog_set_def_dialog_font` 0x609D20 <- `g_text_font_v0` =
+`find_font(16,0)`), the body font. A sweep of every font site (inferred vs explicit vs probed vs pixel) then found
+five more sites in the wrong face. Each vanilla font is now pinned by a pristine glyph map or a static call, and
+`work\tests\test_scaling_font_face_sites.py` carries the evidence and emulates each port from the baked bytes.
+
+| Site | Vanilla (evidence) | Was (g > 16) | Now |
+|---|---|---|---|
+| `thunk_tutbtn_post` TutWin buttons | Arial Narrow 16 bold (CrashLandTooltip.png "Close", glyph-exact) | t_ffn(12,0) Arial regular | t_ffn(16,0) = the body font |
+| `thunk_filedlg_dlgfont` file list | Arial 12 regular (Save.png "auto", glyph-exact) | find_font(popup_scale(12),0) = AN bold from g=18 | t_ffn(12,0) |
+| `thunk_filedlg_editfont` filename field | Arial 12 regular (Save.png, glyph-exact) | same | t_ffn(12,0) |
+| `thunk_nw_chatfont` MP lobby chat | 0x7D3948 = Arial 12 regular (frida_nwchatfont.log + the GetObject probe) | same | t_ffn(12,0) |
+| `hm_scalefont` MW+0x2884 MP turn clock | Font_init("Arial",14,1) @0x479FFA (direct) | t_ffn(14,1) = AN bold | t_fdirect_a14b() |
+| `hm_scalefont` pool fonts <= 12 (NO CONTACTS) | find_font(12,1) = Arial 12 bold (CommlinkMenu.png, glyph-exact) | find_font(round(12g/16),1) = AN bold | t_ffn(S,v) |
+
+Confirmed correct by pixels in the same sweep: COUNCIL button (Council.png) and scenario-editor diplomacy buttons
+(DiploEditor.png "Clear") = Arial 12 regular, so `thunk_comm_btnfont` / `thunk_diplo_btnfont` stay on t_ffn(12,0).
+Still unverified (no pristine shows the text): the MP time-control button (`thunk_comm_btnfont`, inferred from COUNCIL),
+the MP negotiation chat (`t_dw_chatfont`, Arial fl(12g/16) regular by analogy with the lobby chat), and whatever fonts
+reach `hm_scalefont`'s off-table branch (v1 estimate, AN bold).
+
+Rule: a font that a label INHERITS (canvas, def-dialog, default label font) is never inferred from a sibling —
+pin it with a pristine glyph map (resample at native pixel centres, render GDI non-antialiased with the game's
+arialn.ttf only) or a runtime read of that exact object.

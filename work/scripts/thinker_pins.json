@@ -1,0 +1,4 @@
+{
+  "_comment": "Longevity Vaccine release -> the Thinker Mod pin it shipped with (a 3-part version, or dev-YYYYMMDD). Appended for every release by hand, in the same change that moves THINKER_SUPPORTED_* (the release pipeline adds the current version itself). Read by thinker_flow.manifest_section into the manifest's thinker.release_pins.",
+  "release_pins": {}
+}

@@ -39,6 +39,7 @@ from unicorn import UC_ARCH_X86, UC_HOOK_CODE, UC_HOOK_MEM_UNMAPPED, UC_MODE_32,
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_ESP  # noqa: E402
 
 import scaling_laws as SL  # noqa: E402
+import host_fonts  # noqa: E402
 
 SW, SH, G = 0x9B7B1C, 0x9B7B20, 0x668740
 TITLE_FONT = 0x7CFE8C                      # g_popup_title_font = MainWin+0x2166C
@@ -135,7 +136,7 @@ class Emu:
     def _CreateFontIndirectA(self, p):
         lf = bytes(self.uc.mem_read(p, 60))
         tok = 0x0F000000 + len(self.real) + 1
-        self.real[tok] = _gdi.CreateFontIndirectA(ctypes.create_string_buffer(lf, 60))
+        self.real[tok] = host_fonts.host_font(lf)          # one per distinct LOGFONT per process (no per-call leak)
         self.lfs[tok] = lf
         return tok
 

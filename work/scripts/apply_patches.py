@@ -526,7 +526,7 @@ def verify_site(site: dict, data: bytes, resolver: VaResolver,
         actual_anchor = data[foff - anchor_len : foff]
         if actual_anchor != expected_anchor:
             return False, (
-                f"{sid} @ VA 0x{va:08x}: anchor mismatch — "
+                f"{sid} @ VA 0x{va:08x}: anchor mismatch: "
                 f"expected {fmt_hex(expected_anchor)}, got {fmt_hex(actual_anchor)}"
             )
 
@@ -797,8 +797,8 @@ def apply_patches(target: Path, patches_path: Path, do_apply: bool,
             err("       until then this target cannot be used, in either mode.")
             return 2
         if spec.pending:
-            err(f"ERROR: target {spec.id!r} ({spec.label}) is marked `pending: {spec.pending}` "
-                  f"-- it has not been measured on real bytes.")
+            err(f"ERROR: target {spec.id!r} ({spec.label}) is marked `pending: {spec.pending}`. "
+                  f"It has not been measured on real bytes.")
             err("       Remove the `pending` marker once base_md5/base_size are recorded.")
             return 2
         # A target with no recorded patched_md5 has never produced a verified output, so it is
@@ -806,7 +806,7 @@ def apply_patches(target: Path, patches_path: Path, do_apply: bool,
         # verification tools that never reach a player, so the rule protects nobody there and
         # would only break the workflow they exist for (e.g. --pristine --apply).
         if do_apply and not spec.patched_md5 and spec.launch:
-            err(f"ERROR: target {spec.id!r} ({spec.label}) has no recorded patched_md5 -- it "
+            err(f"ERROR: target {spec.id!r} ({spec.label}) has no recorded patched_md5. It "
                   f"has never produced a verified output.")
             err("       Dry-run is allowed (that is how you measure group eligibility);")
             err("       --apply is refused until a patched_md5 is recorded for it.")

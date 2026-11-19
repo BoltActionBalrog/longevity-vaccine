@@ -29,6 +29,7 @@ POPUP_G_PORTS = [
     "thunk_fe_pair_remap", "thunk_s54_restripe", "thunk_ensure_stripes", "restripe_core", "hm_synth_core",
     "thunk_rail_bake", "thunk_sbarrow_bg", "thunk_ed_remap", "thunk_se_stripe_top", "thunk_se_tiles",
     "thunk_dw_restripe", "thunk_dw_backdrop", "t_dl_restripe", "t_rw_restripe", "thunk_face_hybrid",
+    "t_rp_face",   # replay_scale (2026-11-15): the Replay Close face on the window grid (T = P / 2)
 ]
 NUM_PORTS = ["t_mon_face", "t_mon_panel", "t_hof_pairnn", "t_rwk_parity_nn"]
 G_WRITERS = {"thunk_ensure_scale", "t_hof_spr_pic"}

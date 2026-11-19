@@ -41,7 +41,7 @@ VTBL = 0x2710000
 
 def mk(g: int) -> Uc:
     uc = Uc(UC_ARCH_X86, UC_MODE_32)
-    uc.mem_map(A.PCAVE2, 0x38000)                                # the whole pcave2 (t_btn_edgeband is at 0x37140)
+    uc.mem_map(A.PCAVE2, 0x48000)                                # the whole pcave2 (t_btn_edgeband 0x37140; t_hb_gate 0x44000)
     uc.mem_map(0x400000, 0x26A000)                               # .text .. g_popup_scale_num page (stop targets must be fetchable)
     uc.mem_map(STACK, 0x10000)
     uc.mem_map(TRAP, 0x1000)
@@ -284,11 +284,11 @@ def test_scaling_title_font_and_gate_and_modal(g):
         for esi, mine in ((A.BTN_OK, True), (A.BTN_1, True), (A.BTN_2, True), (A.BTN_OK + 4, False), (0x7F9F58 + 0xA58, False)):
             uc = mk(g)
             uc.mem_write(A.ARMED, struct.pack("<I", armed))
-            at = run(uc, A.VA["t_ntw_gate"], {A.T_MON_GATE}, regs={UC_X86_REG_ESI: esi, UC_X86_REG_EAX: 0})
+            at = run(uc, A.VA["t_ntw_gate"], {A.T_HB_GATE}, regs={UC_X86_REG_ESI: esi, UC_X86_REG_EAX: 0})
             if armed and mine:
                 assert at == TRAP and uc.reg_read(UC_X86_REG_EAX) == 1
-            else:
-                assert at == A.T_MON_GATE and uc.reg_read(UC_X86_REG_ESP) == SP0
+            else:                                                   # 2026-11-15: the chain continues in t_hb_gate -> t_mon_gate
+                assert at == A.T_HB_GATE and uc.reg_read(UC_X86_REG_ESP) == SP0
     # modal: armed while the engine's modal runs, clear after, args + result intact, RET 0xC
     uc = mk(g)
     modal = VTBL + 0x800

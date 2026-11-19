@@ -51,6 +51,19 @@ CHAIN_SITES = {
 #: Engine entry points the chain cores end in (assemble_basewin.py SET_FONT / WRITE_L_3).
 NATIVE_VA = {"Buffer_set_font": 0x5DAC70, "Buffer_write_l_3": 0x5DCEA0}
 
+#: Sites that are a MINIMUM, not a fixed value: an imm32 the engine only needs to be "at least ours". The DLL reads
+#: the live immediate and writes ours only when it is smaller -- whatever was there (clean, Scient/Thinker's, another
+#: mod's). site id -> the instruction bytes around the immediate that prove it is still the instruction we mean, as
+#: (offset from the site's va, byte); each is verified against the clean base when the header is generated.
+#: Caviar.E_imm_618a92 is `68 <imm32>` (push size) / `E8 <rel32>` (the allocator) / `83 C4 04` at 0x618A91: the
+#: z-plane buffer whose fill count a baked sibling site raises to 2 MB, so a smaller size is a heap overrun.
+MIN_IMM32_SITES = {
+    "Caviar.E_imm_618a92": [(-1, 0x68), (4, 0xE8), (9, 0x83), (10, 0xC4), (11, 0x04)],
+}
+#: How many bytes of each call/jump destination the DLL compares before it writes a site that transfers there: a site
+#: is written only into an exe that really carries our code at the other end (the developer exe has none).
+DEST_BYTES = 8
+
 WIN_CALL, WIN_SCIENT = 1, 2
 
 
@@ -81,20 +94,60 @@ def _thinker_windows(site: dict, thinker: dict, base: T.Image) -> list[dict]:
                 raise SystemExit(f"{site['id']}: Thinker write kind {w.kind!r} at {w.addr:#x} is not modelled; "
                                  f"extend gen_thinker_sites.py and thinkercompat.cpp together")
             text = w.text.strip() or f"Scient triple {w.old[0]:02X}->{w.new[0]:02X} (patchdata.h)"
+            if w.addr < va or w.addr + fp > va + ln:
+                # the DLL judges a window against the site's own byte arrays: one that sticks out would be read past them
+                raise SystemExit(f"{site['id']}: Thinker's write at {w.addr:#x} (+{fp}) only partly overlaps the site "
+                                 f"[{va:#x}, {va + ln:#x}); widen the site or model the partial window")
             out.append({"off": w.addr - va, "len": fp, "kind": kind, "new": new, "text": text})
     return out
 
 
-def _bake(bak: Path, yaml_path: Path, workdir: Path) -> bytes:
-    """The PRACX bake (every group, the cave content these thunks live in). Same bytes in both targets."""
-    dst = workdir / "terranx_bake.exe"
+def _bake(bak: Path, yaml_path: Path, workdir: Path, target: str = "pracx") -> bytes:
+    """A bake of `target` (every group, the cave content these thunks live in). The cave bytes are the same in both
+    targets; build() checks that, and everything else the DLL will compare, against BOTH."""
+    dst = workdir / f"terranx_bake_{target}.exe"
     shutil.copy2(bak, dst)
-    spec = ap.load_targets(yaml_path)["pracx"]
+    spec = ap.load_targets(yaml_path)[target]
     with contextlib.redirect_stdout(io.StringIO()):
         rc = ap.apply_patches(dst, yaml_path, do_apply=True, spec=spec)
     if rc != 0:
-        raise SystemExit(f"apply_patches --apply on a copy of {bak} failed (rc {rc})")
+        raise SystemExit(f"apply_patches --apply ({target}) on a copy of {bak} failed (rc {rc})")
     return dst.read_bytes()
+
+
+def _verify_against_bakes(entries: list, base: T.Image, bakes: dict) -> None:
+    """What the DLL compares at run time, checked against the two exes it really runs on. A mismatch here would
+    otherwise pass every test and then, in every player's game, skip a group (a destination) or STOP THE GAME (a
+    guard of a minimum-value site) -- so it fails the generation instead (code audit 2026-11-14)."""
+    for name, img in bakes.items():
+        for e in entries:
+            va, ln = e["va"], e["len"]
+            for g in e["guards"]:
+                have = img.rd(va + g["off"], 1)[0]
+                if have != g["byte"]:
+                    raise SystemExit(f"{e['id']}: guard byte at {va + g['off']:#x} is {have:02X} in the {name} bake, not "
+                                     f"{g['byte']:02X}: a patch now touches the instruction this site's guards describe")
+            for d in e["dests"]:
+                have = img.rd(d["va"], len(d["bytes"]))
+                if have != d["bytes"]:
+                    raise SystemExit(f"{e['id']}: destination {d['va']:#x} holds {have.hex()} in the {name} bake, not "
+                                     f"{d['bytes'].hex()}: the two targets no longer share that code")
+            live = img.rd(va, ln)
+            if e["mode"] == "MIN_IMM32":
+                want = e["ours"] if name == "pracx" else e["clean"]
+            else:
+                want = e["ours"] if name == "pracx" or e["mode"] == "RESTORE" else e["clean"]
+            if live != want:
+                raise SystemExit(f"{e['id']}: the {name} bake holds {live.hex()} at the site, expected {want.hex()}")
+    for e in entries:
+        for d in e["dests"]:
+            try:
+                clean = base.rd(d["va"], len(d["bytes"]))
+            except Exception:                      # beyond the clean image: a cave section of ours
+                continue
+            if clean == d["bytes"]:
+                raise SystemExit(f"{e['id']}: destination {d['va']:#x} holds the same bytes in the clean exe: it is not OUR "
+                                 f"code, so comparing it proves nothing (and another mod may rewrite it)")
 
 
 def _disasm_extent(img: T.Image, va: int) -> tuple[int, list[dict]]:
@@ -169,22 +222,77 @@ def build(yaml_path: Path, bak: Path, thinker_src: Path) -> str:
     base = T.Image(bak)
     with tempfile.TemporaryDirectory(prefix="thinker_sites_") as td:
         raw = _bake(bak, yaml_path, Path(td))
-        bake = T.Image(Path(td) / "terranx_bake.exe", raw)
+        bake = T.Image(Path(td) / "terranx_bake_pracx.exe", raw)
         bake_md5 = hashlib.md5(raw).hexdigest()
+        raw_t = _bake(bak, yaml_path, Path(td), TARGET_ID)
+        bake_thinker = T.Image(Path(td) / f"terranx_bake_{TARGET_ID}.exe", raw_t)
 
     excluded = [by_id[i] for i in sorted(spec.exclude_sites)]
     restore = [by_id[i] for i in RESTORE_SITES]
+    # A site Thinker writes into must belong to a patches.yaml group: the DLL's all-or-nothing rule skips the GROUP
+    # in reduced mode, and a standalone site has none to skip (patches.yaml also has standalone sites; none of them
+    # may collide with Thinker).
+    for s in sites:
+        if "length" in s and not s.get("group") and _thinker_windows(s, thinker, base):
+            raise SystemExit(f"{s['id']}: Thinker writes inside this standalone site; give it a patches.yaml group "
+                             f"so reduced mode can skip it with its group")
     entries = []
     for mode, group in (("EXCLUDED", excluded), ("RESTORE", restore)):
         for s in group:
             wins = _thinker_windows(s, thinker, base)
             if not wins:
                 raise SystemExit(f"{s['id']}: Thinker writes nothing inside it; it should not be in this table")
-            entries.append({"id": s["id"], "mode": mode, "va": int(s["virtual_addr"]), "len": int(s["length"]),
+            va, ln = int(s["virtual_addr"]), int(s["length"])
+            site_mode, guards = mode, []
+            if s["id"] in MIN_IMM32_SITES:
+                if mode != "EXCLUDED" or ln != 4:
+                    raise SystemExit(f"{s['id']}: a minimum-value site must be an excluded 4-byte immediate")
+                site_mode = "MIN_IMM32"
+                for off, byte in MIN_IMM32_SITES[s["id"]]:
+                    have = base.rd(va + off, 1)[0]
+                    if have != byte:
+                        raise SystemExit(f"{s['id']}: guard byte at {va + off:#x} is {have:02X} in the clean base, not {byte:02X}")
+                    guards.append({"off": off, "byte": byte})
+            entries.append({"id": s["id"], "mode": site_mode, "va": va, "len": ln, "group": s["group"],
                             "clean": _resolve(s, "original_bytes", s2v), "ours": _resolve(s, "new_bytes", s2v),
-                            "windows": wins})
+                            "windows": wins, "dests": _dests(s, s2v, bake), "guards": guards})
+    for sid in MIN_IMM32_SITES:
+        if sid not in {e["id"] for e in entries}:
+            raise SystemExit(f"{sid}: listed as a minimum-value site but not in the table")
+    _verify_against_bakes(entries, base, {"pracx": bake, TARGET_ID: bake_thinker})
     chains = [_chain(by_id[i], n, s2v, bake) for i, n in CHAIN_SITES.items()]
     return render(entries, chains, spec, bake_md5, thinker)
+
+
+def _dests(site: dict, s2v: dict, bake: T.Image) -> list[dict]:
+    """Every symbol our bytes at this site transfer to (its rel32 segments), with the first DEST_BYTES bytes the PRACX
+    bake holds there. The DLL writes the site only when the running exe holds the same bytes at each: our code is
+    really at the other end of the call."""
+    if site["id"] in MIN_IMM32_SITES:
+        return []                                  # an immediate, not code: it transfers nowhere
+    import capstone
+    va, ln = int(site["virtual_addr"]), int(site["length"])
+    names = {s2v[p]: p for k, p in ap.ByteTemplate(site["new_bytes"]).segments if k == "rel32"}
+    cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    cs.detail = True
+    out, seen, end = [], set(), va
+    # Our bytes are code: decode them where they will live and take every call / jump that leaves the site. (A symbol
+    # in the yaml and a literal rel32 both show up here; the names are only for the header's comments.)
+    for ins in cs.disasm(_resolve(site, "new_bytes", s2v), va):
+        end = ins.address + ins.size
+        if ins.mnemonic == "call" or ins.mnemonic.startswith("j"):
+            op = ins.operands[0] if ins.operands else None
+            if op is not None and op.type == capstone.x86.X86_OP_IMM:
+                tgt = op.imm & 0xFFFFFFFF
+                if not (va <= tgt < va + ln) and tgt not in seen:
+                    seen.add(tgt)
+                    out.append({"name": names.get(tgt, "(literal)"), "va": tgt, "bytes": bake.rd(tgt, DEST_BYTES)})
+    if end != va + ln:
+        raise SystemExit(f"{site['id']}: our bytes do not decode to the end of the site ({end:#x} != {va + ln:#x})")
+    missing = set(names) - seen
+    if missing:
+        raise SystemExit(f"{site['id']}: rel32 symbols not reached by decoding: {sorted(names[m] for m in missing)}")
+    return out
 
 
 def _hex(b: bytes, per_line: int = 16, indent: str = "    ") -> str:
@@ -219,7 +327,15 @@ def render(entries: list, chains: list, spec, bake_md5: str, thinker: dict) -> s
     w("//   outside the windows must still read as the clean base, then the DLL writes `ours`. Also applied when Thinker is")
     w("//   NOT loaded (terranx.exe started directly in a Thinker folder): the rest of the group is on disk and assumes it.")
     w("// kRestore: OUR bytes are on disk; Thinker's write_call replaces our E8's rel32; the DLL writes `ours` back.")
-    w("enum SiteMode : uint8_t { kExcluded = 1, kRestore = 2 };")
+    w("// kMinImm32: an imm32 the engine needs to be AT LEAST `ours` (little-endian). The DLL checks `guards` (the")
+    w("//   instruction around it), reads the live value and writes ours only when it is smaller -- whatever was there.")
+    w("//   Never skipped with its group: a smaller value is a heap overrun under the group's baked sites.")
+    w("enum SiteMode : uint8_t { kExcluded = 1, kRestore = 2, kMinImm32 = 3 };")
+    w("// A place our bytes at a site call or jump to, and the bytes the PRACX bake holds there: the site is written only")
+    w("// when the running exe holds them too (an exe without our code caves gets none of these calls).")
+    w(f"struct Dest {{ uint32_t va; uint8_t bytes[{DEST_BYTES}]; }};")
+    w("// One byte of the instruction around a kMinImm32 immediate, at `off` bytes from the site's va.")
+    w("struct Guard { int32_t off; uint8_t byte; };")
     w("struct Site {")
     w("    const char* id;")
     w("    uint32_t va;")
@@ -228,6 +344,11 @@ def render(entries: list, chains: list, spec, bake_md5: str, thinker: dict) -> s
     w("    const uint8_t* ours;      // what the patcher would have written (resolved new_bytes)")
     w("    const Window* windows;")
     w("    uint32_t nwindows;")
+    w("    const char* group;        // the patches.yaml group: its other sites are baked on disk and assume these")
+    w("    const Dest* dests;")
+    w("    uint32_t ndests;")
+    w("    const Guard* guards;")
+    w("    uint32_t nguards;")
     w("    SiteMode mode;")
     w("};")
     w("")
@@ -269,12 +390,25 @@ def render(entries: list, chains: list, spec, bake_md5: str, thinker: dict) -> s
             kind = "kCall" if win["kind"] == WIN_CALL else "kScient"
             w(f"    {{ {win['off']:#x}, {win['len']}, {kind}, 0x{win['new']:02X} }},")
         w("};")
+        if e["dests"]:
+            w(f"static const Dest k_{n}_dest[{len(e['dests'])}] = {{")
+            for d in e["dests"]:
+                w(f"    {{ {d['va']:#010x}, {{ {', '.join(f'0x{x:02X}' for x in d['bytes'])} }} }},   // {d['name']}")
+            w("};")
+        if e["guards"]:
+            w(f"static const Guard k_{n}_guard[{len(e['guards'])}] = {{")
+            for g in e["guards"]:
+                w(f"    {{ {g['off']}, 0x{g['byte']:02X} }},")
+            w("};")
         w("")
+    modes = {"EXCLUDED": "kExcluded", "RESTORE": "kRestore", "MIN_IMM32": "kMinImm32"}
     w(f"static const Site kSites[{len(entries)}] = {{")
     for e in entries:
         n = _cname(e["id"])
-        mode = "kExcluded" if e["mode"] == "EXCLUDED" else "kRestore"
-        w(f"    {{ \"{e['id']}\", {e['va']:#010x}, {e['len']}, k_{n}_clean, k_{n}_ours, k_{n}_win, {len(e['windows'])}, {mode} }},")
+        dest = f"k_{n}_dest, {len(e['dests'])}" if e["dests"] else "nullptr, 0"
+        guard = f"k_{n}_guard, {len(e['guards'])}" if e["guards"] else "nullptr, 0"
+        w(f"    {{ \"{e['id']}\", {e['va']:#010x}, {e['len']}, k_{n}_clean, k_{n}_ours, k_{n}_win, {len(e['windows'])}, "
+          f"\"{e['group']}\", {dest}, {guard}, {modes[e['mode']]} }},")
     w("};")
     w(f"static const uint32_t kNumSites = {len(entries)};")
     w("")

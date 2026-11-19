@@ -46,6 +46,7 @@ EXIT_ABORTED = 3          # preflight refused, or the user declined; NOTHING was
 EXIT_UNSUPPORTED = 4      # the installed base is not a supported configuration
 EXIT_INTERRUPTED = 5      # Ctrl-C
 EXIT_CRASH = 6            # unexpected exception -- a bug in the installer
+EXIT_DECLINED = 7         # the player declined a consent question (chose to keep or cancel); NOTHING was changed
 MAX_OWN_CODE = 99
 
 # `install.py --check` -- the launch-time query the GAME runs as a subprocess. Its exit code is
@@ -86,7 +87,8 @@ class InstallerError(Exception):
     def __init__(self, message: str, code: int = EXIT_ERROR,
                  detail: str = None, changed: Optional[bool] = False,
                  remedy: str = None, title: str = None, disk_note=None,
-                 red: bool = False, any_key: bool = False):
+                 red: bool = False, any_key: bool = False,
+                 offer_play: bool = False, offer_play_default: bool = True):
         # changed: True = we wrote something, False = provably nothing, None = we do not know.
         # None is a legitimate answer and renders as such; guessing is what costs the user time.
         super().__init__(message)
@@ -105,6 +107,22 @@ class InstallerError(Exception):
         #: window held on ANY key rather than Enter (user 2026-11-05, the foreign-backup refusal).
         self.red = red
         self.any_key = any_key
+        #: Offer to start the game after this outcome (the Thinker repair window's no-change outcomes,
+        #: thinker-updater-design.md section 4.0), and whether Enter means yes ([Y/n]) or no ([y/N]).
+        self.offer_play = offer_play
+        self.offer_play_default = offer_play_default
+
+
+def stopped_error(disk_note=None) -> InstallerError:
+    """Ctrl-C (or EOF) at a question asked before anything is written: the optional modules, the Thinker
+    questions, automatic updates -- one outcome for every such question of a run, the folder list's too
+    (EXIT_ABORTED, NOTHING WAS CHANGED; code review 2026-11-15: a setup run had two codes and two titles).
+    Nothing was changed, and that is certain here; Ctrl-C once writing has started stays run_guarded's
+    INSTALLATION CANCELLED."""
+    # The message already says nothing was changed: no second "Nothing on disk was changed." under it (execution
+    # audit 2026-11-15), unless the caller has a note of its own.
+    return InstallerError("You stopped the installer, so nothing was changed.", code=EXIT_ABORTED, changed=False,
+                          title="NOTHING WAS CHANGED", disk_note=disk_note if disk_note else False)
 
 
 def say(*parts: object) -> None:
@@ -154,14 +172,13 @@ def blank() -> None:
 RULE = "-" * 60
 
 
-def question_head(title: str, notes=(), keys: str = None) -> None:
+def question_head(title: str, notes=(), title_kind: str = None) -> None:
     """The top of a question block, one empty line below the output above it (user rule
-    2026-11-01): a rule, the title in capitals, the keys to press (blue), the notes, a rule."""
+    2026-11-01): a rule, the title in capitals (in `title_kind`'s colour, if given), the notes, a
+    rule. An arrow-key list's keys go with its rows (ask_block), not here (user 2026-11-15)."""
     blank()
     say(RULE)
-    say(" " + title.upper())
-    if keys:
-        say(" " + painted(keys, "keys"))
+    say(" " + (painted(title.upper(), title_kind) if title_kind else title.upper()))
     for n in notes:
         say(" " + n)
     say(RULE)
@@ -174,16 +191,65 @@ def _keys_blue(prompt: str) -> str:
     return prompt
 
 
-def ask(prompt: str, title: str = None, notes=()) -> str:
+def stdin_is_console() -> bool:
+    """Is stdin a real console input? isatty() alone is not that on Windows: stdin redirected from NUL reports
+    isatty() True (it is a character device), and a question asked there polled a console that does not exist,
+    forever (verification of 9f2cb08, 2026-11-15: `install.py < NUL` and a bootstrap worker that inherited NUL hung).
+    So the handle must also be a console (GetConsoleMode succeeds). A stdin with no file handle (a test's
+    stand-in) is judged by isatty() alone."""
+    try:
+        if sys.stdin is None or not sys.stdin.isatty():
+            return False
+    except (ValueError, AttributeError, OSError):
+        return False
+    if os.name != "nt":
+        return True
+    try:
+        fd = sys.stdin.fileno()
+    except (AttributeError, ValueError, OSError):
+        return True
+    try:
+        import ctypes
+        import msvcrt
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.GetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        k.GetConsoleMode.restype = ctypes.c_int
+        mode = ctypes.c_ulong()
+        return bool(k.GetConsoleMode(ctypes.c_void_p(msvcrt.get_osfhandle(fd)), ctypes.byref(mode)))
+    except Exception:  # noqa: BLE001 - no answer is no console
+        return False
+
+
+def flush_input() -> None:
+    """Discard keys typed before a question was shown (an Enter pressed while the window waited for
+    the game to close must not answer a default-yes question unread; thinker-updater-design.md
+    section 3E). Console only; never raises."""
+    try:
+        if not stdin_is_console():
+            return
+        if os.name == "nt":
+            import msvcrt
+            while msvcrt.kbhit():
+                msvcrt.getwch()
+        else:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def ask(prompt: str, title: str = None, notes=(), flush: bool = False, title_kind: str = None) -> str:
     """input() for every question the installer puts. With `title` (every real question) it is a
     ruled block: question_head (with `notes`, the explanation above the closing rule), the prompt
     (its [Y/n] in blue), a rule under the answer. Without, just the one empty line above. Raises
     what input() raises (EOFError, KeyboardInterrupt)."""
     global _last_blank
     if title:
-        question_head(title, notes)
+        question_head(title, notes, title_kind=title_kind)
     else:
         blank()
+    if flush:
+        flush_input()
     try:
         return input((" " + _keys_blue(prompt)) if title else prompt)
     finally:
@@ -192,11 +258,64 @@ def ask(prompt: str, title: str = None, notes=()) -> str:
             say(RULE)
 
 
-def ask_block(title: str, notes, rows, keys: str = None) -> None:
-    """A question that is a list the arrow keys move through: question_head, then `rows` (the
-    caller ends them with RULE, so a redraw rewrites the closing rule with them)."""
+def ask_line(prompt: str, flush: bool = False) -> str:
+    """A one-line question with no ruled block, for a question whose answer the lines above already
+    explain (user 2026-11-15: the Thinker changelog offer): one empty line above, the prompt indented
+    like a ruled question's, its [Y/n] in blue. Raises what input() raises (EOFError, KeyboardInterrupt)."""
     global _last_blank
-    question_head(title, notes, keys)
+    blank()
+    if flush:
+        flush_input()
+    try:
+        return input(" " + _keys_blue(prompt))
+    finally:
+        _last_blank = False         # the player's answer ended the prompt's line
+
+
+#: An arrow-key list's row marker (user 2026-11-15: "->" left of the selected row, nothing after its text); the
+#: other rows keep the same indent, so every row's text starts in the same column.
+MARK_ON, MARK_OFF = " -> ", "    "
+
+
+def _plain(text: str) -> str:
+    """`text` without its colour codes."""
+    global _ANSI_RX
+    import re
+    if _ANSI_RX is None:
+        _ANSI_RX = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    return _ANSI_RX.sub("", text)
+
+
+def marked(text: str, on: bool, whole_row: bool = True) -> str:
+    """One row of an arrow-key list: ` -> text` under the marker, `    text` otherwise. The selected row, its arrow
+    included, is green as a whole (user 2026-11-15): its own colours (a blue "Thinker Mod", a red version) are
+    dropped while it is selected and come back when the marker moves off. Plain on a console without colour.
+    `whole_row=False` keeps the row's own colours under a plain marker: the one list that asks for it is the
+    optional modules' pack rows, where green means ticked, so a green unticked row would read as ticked (user
+    2026-11-15)."""
+    if not on:
+        return MARK_OFF + text
+    if not whole_row:
+        return MARK_ON + text
+    return painted(MARK_ON + _plain(text), "good")
+
+
+def ask_block(title: str, notes, rows, keys: str = None, title_kind: str = None) -> None:
+    """A question that is a list the arrow keys move through: question_head, then the keys to press
+    (blue) on their own line directly above the first row (user 2026-11-15: "Move the movement controls
+    down to the actual selections"), then `rows` (the caller ends them with RULE, so a redraw rewrites
+    the closing rule with them). redraw() rewrites `rows` only: the keys line stays where it is. No `title`: no
+    ruled head at all, just the one empty line above (user 2026-11-15: the Thinker changelog offer), then the `notes`
+    as they are, directly above the keys line (user 2026-11-16: the thinker.ini choice's note line)."""
+    global _last_blank
+    if title:
+        question_head(title, notes, title_kind=title_kind)
+    else:
+        blank()
+        for note in notes:
+            say(note)
+    if keys:
+        say(" " + painted(keys, "keys"))
     for row in rows:
         say(row)
     _last_blank = False
@@ -269,10 +388,7 @@ def interactive() -> bool:
     for a in sys.argv[1:]:
         if a == "--no-wait" or a.startswith("--no-wait="):
             return False
-    try:
-        return sys.stdin is not None and sys.stdin.isatty()
-    except (ValueError, AttributeError, OSError):
-        return False
+    return stdin_is_console()
 
 
 def wait_for_key(prompt: str = "Press Enter to close this window... ", any_key: bool = False) -> None:
@@ -336,9 +452,9 @@ def warn(text: str) -> None:
 
 
 def painted(text: str, kind: str) -> str:
-    """`text` in green ("good"), red ("bad") or blue ("keys", a control hint) on a colour console,
-    unchanged otherwise -- so a caller's own marks ([X] / [ ]) must carry the meaning without it."""
-    colour = {"good": _GREEN, "bad": _RED, "keys": _BLUE}.get(kind)
+    """`text` in green ("good"), red ("bad"), blue ("keys", a control hint) or yellow ("warn") on a colour
+    console, unchanged otherwise -- so a caller's own marks ([X] / [ ]) must carry the meaning without it."""
+    colour = {"good": _GREEN, "bad": _RED, "keys": _BLUE, "warn": _YELLOW}.get(kind)
     return (colour + text + _RESET) if (colour and _colour_ok()) else text
 
 
@@ -360,16 +476,40 @@ def bad(text: str) -> None:
 
 def status_line(label: str, status: str, width: int = 30) -> None:     # 30: the longest pack name fits
     """One summary row: `label` padded, then a coloured Success / Error / Skipped."""
-    word = {"ok": "Success", "error": "Error"}.get(status, "Skipped")
-    colour = {"ok": _GREEN, "error": _RED}.get(status, "")
+    # "Already installed" / "Updated" / "Repaired": a setup re-run's optional pack (user-approved 2026-11-17).
+    word = {"ok": "Success", "error": "Error", "kept": "Already installed", "updated": "Updated",
+            "repaired": "Repaired"}.get(status, "Skipped")
+    colour = {"ok": _GREEN, "error": _RED, "kept": _GREEN, "updated": _GREEN, "repaired": _GREEN}.get(status, "")
     row = f"  {label:<{width}} "
     say(row + ((colour + word + _RESET) if (colour and _colour_ok()) else word))
 
 
+#: The PLAYER passed --no-prompt ("Never ask anything"): set by install.main for its own run; a worker learns it from
+#: the bootstrap's LONGEVITY_PLAYER_NO_PROMPT marker.
+_PLAYER_NO_PROMPT = False
+
+
+def set_player_no_prompt(on: bool) -> None:
+    global _PLAYER_NO_PROMPT
+    _PLAYER_NO_PROMPT = bool(on)
+
+
+def player_no_prompt() -> bool:
+    return _PLAYER_NO_PROMPT or bool(os.environ.get("LONGEVITY_PLAYER_NO_PROMPT"))
+
+
 def can_ask() -> bool:
-    """Can a question be put to the player right now? A keyboard on stdin -- regardless of the
-    bootstrap's --no-prompt, which exists so a spawned worker never asks about optional extras,
+    """May a question be put to the player right now? A console (has_console), and no --no-prompt from the PLAYER
+    (execution audit 2026-11-15: the changelog question and the relaunch still asked under it) -- regardless of the
+    bootstrap's own --no-prompt, which exists so a spawned worker never asks about optional extras,
     not because nobody is watching: the update console the player just opened is watched."""
+    return has_console() and not player_no_prompt()
+
+
+def has_console() -> bool:
+    """Is someone at a console (a keyboard on stdin, no --no-wait)? Whether or not they said not to be asked: a
+    --no-prompt run in a console still fetches the update information a console run would (the optional modules on
+    offer, the Thinker builds it must refuse; verification of 7b53fbb, 2026-11-15)."""
     if os.environ.get("LONGEVITY_NO_WAIT"):
         return False
     # --no-wait straight off argv, as interactive() reads it: the bootstrap asks (the folder
@@ -378,10 +518,7 @@ def can_ask() -> bool:
     for a in sys.argv[1:]:
         if a == "--no-wait" or a.startswith("--no-wait="):
             return False
-    try:
-        return sys.stdin is not None and sys.stdin.isatty()
-    except (ValueError, AttributeError, OSError):
-        return False
+    return stdin_is_console()
 _vt_ready = None
 
 
@@ -521,15 +658,49 @@ def write_crash_log(exc: BaseException, log_dir=None) -> Optional[Path]:
         return None
 
 
-def offer_relaunch(exe: Path) -> bool:
-    """Ask whether to start the game. Declining is not a failure. Never raises."""
+#: Run-scoped variables that must never reach a process that outlives this run (the relaunched game,
+#: and through it a later updater it spawns).
+_RUN_SCOPED_ENV = ("LONGEVITY_NO_WAIT", "LONGEVITY_WORKER", "LONGEVITY_PAYLOAD_ROOT", "LONGEVITY_GUARD_MARKER",
+                   "LONGEVITY_INSTALL_LOCK", "LONGEVITY_PLAYER_NO_PROMPT", "LONGEVITY_THINKER_CONSENT")
+
+
+def outliving_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in _RUN_SCOPED_ENV}
+
+
+def arrow_choice(title, notes, options: list, at: int = 0) -> int:
+    """An arrow-key choice (install._arrow_menu: the ruled block, the keys line above the rows, the marker on row
+    `at`): the index of the row Enter took. Raises EOFError / KeyboardInterrupt as the menu does. The menu and
+    the console key reading live in install.py; imported HERE, lazily, so this module stays standard-library
+    only at import time (it owns the exit guarantee). In a run, install is already loaded (it registers itself
+    when run as a script), so this is that same module."""
+    import install as _install
+    return _install._arrow_menu(title, [[o] for o in options], at=at, notes=list(notes))
+
+
+#: "Start the game" (user-approved 2026-11-15): an arrow choice in this order, always.
+START_TITLE = "Start the game"
+CLOSE_ROW = "Close this window"
+
+
+def offer_relaunch(exe: Path, default: bool = True) -> bool:
+    """Ask whether to start the game: "Start the game (<exe>)" / "Close this window" (user-approved 2026-11-15),
+    the marker on "Start" after a run that changed something (`default`) and on "Close" after one that changed
+    nothing (only an explicit choice starts the game). True when the window is to close at once -- the game was
+    started, or the player chose "Close this window" (no separate "Press Enter" after it: the verdict is printed
+    above). False (the usual keypress wait follows) when there is no one to ask, on Ctrl-C / EOF, or when the
+    game could not be started. Never raises."""
     try:
-        if not exe or not Path(exe).exists() or not interactive():
+        if not exe or not Path(exe).exists() or not interactive() or player_no_prompt():
             return False
-        ans = ask(f"Start the game ({Path(exe).name}) now? [Y/n] ", title="Start the game").strip().lower()
-        if ans not in ("", "y", "yes"):
-            return False
-        subprocess.Popen([str(exe)], cwd=str(Path(exe).parent), close_fds=True)
+        try:
+            pick = arrow_choice(START_TITLE, [], [f"Start the game ({Path(exe).name})", CLOSE_ROW],
+                                at=0 if default else 1)
+        except ImportError:
+            return False                        # the installer's own package is broken: just wait as before
+        if pick != 0:
+            return True
+        subprocess.Popen([str(exe)], cwd=str(Path(exe).parent), close_fds=True, env=outliving_env())
         say(f"Starting {Path(exe).name}. This window will close.")
         return True
     except (EOFError, KeyboardInterrupt):
@@ -549,12 +720,34 @@ def _resolve(v, default: str) -> str:
     return v if isinstance(v, str) and v.strip() else default
 
 
+def _installed_line() -> str:
+    """The fallback success body: "Longevity Vaccine 1.0.0 is installed." (user 2026-11-14: no "The", the version)."""
+    try:
+        import version as _v
+        return f"Longevity Vaccine {_v.VERSION} is installed."
+    except Exception:  # noqa: BLE001 - a verdict must print whatever is missing
+        return "Longevity Vaccine is installed."
+
+
+def _offer_after_nothing_changed(relaunch_exe) -> bool:
+    """`Start the game ... [y/N]` after an outcome that changed nothing, when the caller named a program
+    (user 2026-11-14). Never raises."""
+    try:
+        exe = relaunch_exe() if callable(relaunch_exe) else relaunch_exe
+        return bool(exe) and offer_relaunch(exe, default=False)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def run_guarded(main_fn: Callable[[], int], *,
                 relaunch_exe=None,
+                relaunch_default=None,
                 success_title=None,
                 success_body=None,
                 success_after: Callable[[], None] = None,
-                log_dir=None) -> int:
+                log_dir=None,
+                handover=None,
+                cancelled=None) -> int:
     """Run `main_fn` so that EVERY outcome prints a verdict, states disk status, and waits.
 
     `main_fn` returns an exit code, or raises InstallerError for an expected failure. Anything
@@ -562,6 +755,9 @@ def run_guarded(main_fn: Callable[[], int], *,
 
     `relaunch_exe` may be a Path or a zero-argument callable. It is resolved AFTER main_fn
     returns, because the game directory is usually only known once the run is underway.
+
+    `cancelled`: a zero-argument callable giving (title, body, closing line) for a Ctrl-C, or None for the
+    installer's own "INSTALLATION CANCELLED" (install.py's --uninstall: "UNINSTALL CANCELLED").
     """
     code = EXIT_CRASH
     # Set when the player said yes to starting the game: the window then closes on its own
@@ -576,12 +772,38 @@ def run_guarded(main_fn: Callable[[], int], *,
             # `int(False or EXIT_OK)` is 0, so a main() returning a success flag would have
             # rendered failure as "INSTALLATION SUCCESSFUL".
             code = _normalise_code(main_fn())
-            if code == EXIT_OK:
+            h = None
+            try:
+                h = handover() if callable(handover) else None
+            except Exception:  # noqa: BLE001
+                h = None
+            if code == EXIT_OK and h is not None:
+                # The Thinker repair's hand-over (thinker-updater-design.md section 3R step 3): main_fn
+                # has returned, so the installer lock is released; only now start the update console.
+                start, fail = h
+                if start():
+                    _rule(_resolve(success_title, "UPDATE HANDED OVER"), ok=True)
+                    _vsay(_resolve(success_body, "The update continues in a new window."))
+                    import time as _time
+                    _time.sleep(3)
+                    launched = True                     # closes without a keypress
+                else:
+                    fail()
+                    code = EXIT_ABORTED
+                    _rule("NOTHING WAS CHANGED")
+                    say("The update could not be started in a new window, so nothing was changed.")
+                    try:
+                        exe = relaunch_exe() if callable(relaunch_exe) else relaunch_exe
+                        if exe:
+                            launched = offer_relaunch(exe, default=False)
+                    except Exception:  # noqa: BLE001
+                        pass
+            elif code == EXIT_OK:
                 # The verdict is settable because not every successful run is an INSTALL: an
                 # uninstall that printed "INSTALLATION SUCCESSFUL" told the user the exact
                 # opposite of what had just happened to their game.
                 _rule(_resolve(success_title, "INSTALLATION SUCCESSFUL"), ok=True)
-                _vsay(_resolve(success_body, "The Longevity Vaccine is installed."))
+                _vsay(_resolve(success_body, _installed_line()))
                 if success_after and not is_worker():       # the parent owns the verdict block
                     try:
                         success_after()
@@ -590,17 +812,28 @@ def run_guarded(main_fn: Callable[[], int], *,
                 try:
                     exe = relaunch_exe() if callable(relaunch_exe) else relaunch_exe
                     if exe:
-                        launched = offer_relaunch(exe)
+                        # [Y/n] after a change; a caller whose success changed nothing (ALREADY UP TO
+                        # DATE) says so through `relaunch_default` and gets [y/N].
+                        try:
+                            yes = relaunch_default() if callable(relaunch_default) else relaunch_default
+                        except Exception:  # noqa: BLE001
+                            yes = None
+                        launched = offer_relaunch(exe) if yes is not False else offer_relaunch(exe, default=False)
                 except Exception as e:  # noqa: BLE001
                     # The install already succeeded; a relaunch problem must not contradict that.
                     say(f"\n(could not offer to launch the game: {e})")
+            elif code == EXIT_DECLINED:
+                # A worker the player cancelled in: its own reason is printed above.
+                _rule("UPDATE CANCELLED")
+                _vsay("You cancelled the update, so your game files were not changed.")    # user-approved 2026-11-16
+                launched = _offer_after_nothing_changed(relaunch_exe)
             elif code == EXIT_ABORTED:
                 # A worker child refused before touching anything; its own message, disk
                 # statement and remedy are printed above (with `say`, not muted). Do not
                 # contradict them with "not certain how far it got".
                 _rule("NOTHING WAS CHANGED")
-                _vsay("The update was stopped before anything was changed -- see the reason "
-                      "above.")
+                _vsay("The update was stopped before anything was changed. The reason is shown above.")
+                launched = _offer_after_nothing_changed(relaunch_exe)
             else:
                 _rule("INSTALLATION DID NOT COMPLETE")
                 _vsay(f"The installer stopped with code {code}.")
@@ -625,12 +858,29 @@ def run_guarded(main_fn: Callable[[], int], *,
             if e.remedy:
                 say(f"\nWhat to do: {e.remedy}")
             wait_any = e.any_key
+            if e.offer_play and not is_worker():
+                try:
+                    exe = relaunch_exe() if callable(relaunch_exe) else relaunch_exe
+                    if exe:
+                        launched = offer_relaunch(exe, default=e.offer_play_default)
+                except Exception:  # noqa: BLE001
+                    pass
 
         except KeyboardInterrupt:
             code = EXIT_INTERRUPTED
-            _rule("INSTALLATION CANCELLED")
-            _vsay("You interrupted the installer (Ctrl-C).")
-            _disk_statement(None)
+            try:
+                c = cancelled() if callable(cancelled) else cancelled
+            except Exception:  # noqa: BLE001 - a verdict must print whatever is missing
+                c = None
+            if c:
+                title, body, closing = c
+                _rule(title)
+                _vsay(body)
+                _vsay("\n" + closing)
+            else:
+                _rule("INSTALLATION CANCELLED")
+                _vsay("You interrupted the installer (Ctrl-C).")
+                _disk_statement(None)
 
         except SystemExit as e:
             # Mapped to EXIT_ERROR rather than argparse's own 2, which would collide with

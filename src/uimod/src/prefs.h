@@ -1,4 +1,4 @@
-// uimod "Longevity Mod Preferences" tab -- a new PrefWin tab with the map-label
+// uimod "Longevity Preferences" tab -- a new PrefWin tab with the map-label
 // font-scale slider. See prefs.cpp.
 #pragma once
 

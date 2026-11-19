@@ -1,6 +1,6 @@
 ---
 name: project-smac-prefs-row-pitch-decision
-description: Longevity Preferences option rows stay on kChkRowPitch 20 native (user accepted 2026-11-07); vanilla's own option rows are 22 native and the stock pages measure 56/37/33 px at 4K/1600/1920 -- 22 fits only 14 of our 15 rows, do not re-propose
+description: SUPERSEDED 2026-11-14: Longevity Preferences rows now use vanilla's 22-native pitch on the two-page tab (owner's choice); history of the earlier 20-native decision
 type: project
 ---
 
@@ -20,4 +20,8 @@ pack) overflows by 15 native. The ways out were offered -- fold "Add Scanlines" 
 into the slack (52 / 32 px, barely visible) -- and the maintainer chose to keep 20. Only re-open if a row is removed for
 another reason (then 22 fits and the gate's floors give 55 / 34-35 / 38-39).
 
+**RE-OPENED by the maintainer, 2026-11-13:** "The sizes between the buttons are not faithful right now. Did that deliberately before because we had too many buttons to display on screen, otherwise." With the tab's two pages ([[project-smac-prefs-two-page-split]], page 1 = 12 rows) the reason for 20 is gone, and he asked for an action item: a faithfulness pass over the WHOLE Preferences menu (in the maintainer's work log, KNOWN BUGS / OPEN WORK). So once the two-page layout is in our tree, proposing vanilla's spacings again is wanted, not forbidden. He also chose not to ask the PR's author to fix the frame-to-More gap: it belongs to that pass.
+
 Related: [[project-smac-prefwin-scaling]], (a private note), [[feedback-symmetry-over-1px-scaling]].
+
+**SUPERSEDED 2026-11-14 (owner, in the Goto-path session):** with the tab split over two pages (contributor PR #2's mechanism, ported on branch `claude/hide-move-line`), the owner chose "Vanilla x g/16": `kChkRowPitch` = 22 native (scaling_laws.PREF_LONGEVITY_ROW_PITCH), page 1 = 13 lines ending at native 298 above the slider frame (now (256,302,713,350), 10 native above More). The stock tabs still draw 56/37/33 (scaled font + unscaled 3), so ours differs by ~3 px at 1600/1920 until the whole-menu faithfulness pass. He declined "match the stock tabs now" (overflows page 1) and "fix stock too" (larger) for now.

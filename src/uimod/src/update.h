@@ -34,8 +34,21 @@ void UpdateQueueStartupNotice(const char* body, const char* sig);
 void UpdateClearStartupNotice();
 
 // Preferences "Reset Skipped Updates": confirmation popup; on Yes clears every
-// "Don't ask me again" ([Longevity] DeclinedUpdates) and turns checking on. True when cleared.
+// "Don't ask me again" ([Longevity] DeclinedUpdates, and the Thinker startup check's own key below) and turns
+// checking on. True when cleared.
 bool UpdateSubscribeAll();
+
+// [UIMod] key of the Thinker startup check's "Don't ask me again" (thinkerversion.cpp): our own version string.
+constexpr wchar_t kThinkerDontAskKey[] = L"ThinkerMismatchDontAsk";
+
+// Shared with the Thinker startup check, which runs in PreInit (before InstallUpdateCheck). None of these needs the
+// update checker to be on or installed.
+bool UpdateGameDirW(wchar_t* out, size_t cap);          // the exe's directory, no trailing backslash
+bool UpdateIniPathW(wchar_t* out, size_t cap);          // Alpha Centauri.ini beside the exe (W API)
+const wchar_t* UpdateRuntimeExeRel();                   // the resident installer's interpreter for this Windows
+// `cmd` in a visible console, created suspended, widened to the system's CPUs, resumed; no inherited handles, no job
+// object. `env`: a Unicode environment block, or null to inherit. True only when the child really resumed.
+bool UpdateSpawnVisible(const wchar_t* cmdExe, wchar_t* cmd, const wchar_t* cwd, const wchar_t* env);
 
 // "Check for Updates at Startup" ([UIMod] CheckForUpdates; default 1). Takes effect at the NEXT
 // launch: an in-flight check is not cancelled.

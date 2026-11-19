@@ -80,7 +80,7 @@ def stage_one(target: Path, patches: Path, spec, work_dir: Path, say=print, summ
         raise CommitError(
             f"the staging directory ({work_dir.resolve().drive}) is on a different volume from "
             f"{target.name} ({target.resolve().drive}). The commit is an atomic rename, which "
-            f"cannot cross volumes -- stage under the game directory instead.")
+            f"cannot cross volumes. Stage under the game directory instead.")
     work_dir.mkdir(parents=True, exist_ok=True)
     src = _clean_base(target, spec)
     # Guarantee a CLEAN BACKUP in the game directory before anything is replaced.
@@ -139,7 +139,7 @@ def commit(pairs: list, say=print) -> None:
                 with live.open("r+b"):
                     pass
             except OSError as e:
-                raise CommitError(f"{live.name} is not writable ({e}) -- nothing was swapped")
+                raise CommitError(f"{live.name} is not writable ({e}); nothing was swapped")
 
     done = []
     try:
@@ -177,15 +177,17 @@ def commit(pairs: list, say=print) -> None:
             # NEVER claim a rollback that did not happen. The old code swallowed these and still
             # reported success, leaving the user believing their install was reverted.
             msg += ". COULD NOT ROLL BACK: " + ", ".join(failed) + \
-                   " -- these still hold the NEW bytes; re-run the installer to repair."
+                   ". These still hold the NEW bytes; re-run the installer to repair."
         raise CommitError(msg)
 
 
 def apply_transactional(target: Path, patches: Path, spec, work_dir: Path,
-                        companions: list = None, say=print, summary=None) -> dict:
+                        companions: list = None, say=print, summary=None, before_commit=None) -> dict:
     """Stage the exe (and any companions), then commit them together.
 
     `companions` is [(live_path, patches_path, spec), ...]. `summary` as in stage_one.
+    `before_commit(results)` runs after every candidate is staged and before the commit (the Thinker
+    swap runs there, so it and the exe rename are back to back; thinker-updater-design.md section 7).
     Returns {name: md5} for what was installed.
     """
     staged = []
@@ -199,5 +201,7 @@ def apply_transactional(target: Path, patches: Path, spec, work_dir: Path,
         staged.append((Path(live), c))
         results[Path(live).name] = _md5(c)
 
+    if before_commit is not None:
+        before_commit(dict(results))
     commit(staged, say=say)
     return results

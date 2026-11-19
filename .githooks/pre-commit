@@ -9,6 +9,9 @@
 # Install (once per clone):   git config core.hooksPath .githooks
 # Bypass for a genuine emergency:  SKIP_SCALING_TESTS=1 git commit ...   (say so in the message)
 #
+# The full suite (work\tests\REGRESSION.md) is not run here. A full run meant to prove the installer sets
+# LONGEVITY_REQUIRE_E2E=1, so a missing end-to-end prerequisite fails instead of skipping silently.
+#
 # Cost: the guards are ~0.05s and always run (serially: a named file this cheap starts no xdist workers). The
 # full sweep (~1.5 min on 64 xdist workers) runs only when a staged file can
 # actually change scaling behaviour.

@@ -17,6 +17,13 @@ Scenarios (what the prompt should show):
               with a file:// URL -> F2, and "Quit and update" performs a genuine self-update
               (download, verify, swap in the new resident updater, re-install, receipt 9.9.9).
               Afterwards re-run the checkout's installer to record 0.1.0 again.
+    thinker   core update 9.9.9 whose Thinker pin is 5.6.0     -> F2 with the Thinker step (T1), an update
+    thinker-down  the same, pinned to 5.4.0                    -> T1 worded as going back to an older build
+    thinker-fatal the "thinker" scenario, and the compiled pin's thinker.dll cannot run with 9.9.9 -> T1-G
+              The folder must hold an OFF-PIN thinker.dll for the 9.9.9 pin (any build but the fictional one
+              named), and its resident installer must emit the --check `thinker=` line (this branch or later).
+              The Thinker pin's asset name is fictional (lvtest-not-a-release.zip): answering yes ends at a
+              404, never at a real Thinker download.
 
 In every other scenario the module URLs point at a non-existent local path on purpose: the
 CHECK only needs the manifest, and a hand-off fails cleanly at the fetch (no disk change).
@@ -119,6 +126,18 @@ def build(scenario: str, game_version: str, out: Path = None) -> dict:
         modules["base"] = {"version": REAL_VERSION, "required": True, "url": archive.as_uri(),
                            "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                            "size": archive.stat().st_size}
+    elif scenario in ("thinker", "thinker-down", "thinker-fatal"):
+        import time
+        import thinker_data as td
+        doc["latest"] = "9.9.9"
+        doc["issued"] = int(time.time())
+        pid = "5.4.0" if scenario == "thinker-down" else "5.6.0"
+        doc["thinker"] = {
+            "release_pins": {"9.9.9": pid},
+            "pins": {pid: {"dll": "1" * 64, "stamp": 1, "image_size": 4096, "release_tag": "v" + pid[:-2],
+                           "download": {"asset": "lvtest-not-a-release.zip", "sha256": "2" * 64, "size": 6291456}}},
+            "fatal": {"9.9.9": [td.PIN_DLL_SHA256] if scenario == "thinker-fatal" else []},
+        }
     elif scenario != "nothing":
         raise SystemExit(f"unknown scenario {scenario!r}")
     return doc

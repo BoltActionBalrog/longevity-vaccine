@@ -1,0 +1,16 @@
+Z2k Retro's HD Cinematics (module id "movies-hd")
+
+Upscaled by Z2k Retro.
+  YouTube: https://www.youtube.com/@Z2KRetroGaming
+  YouTube: https://www.youtube.com/@Z2kRetroVideo
+
+The upscaler must be credited by that name and those links wherever the pack is distributed or shown.
+Recorded 2026-11-12 from the mod author's statement of the permission and the credit it requires.
+
+LICENCE: GNU General Public License v3.0 or later (GPL-3.0-or-later), the licence of the Longevity Vaccine
+source, as agreed with the upscaler.
+
+The pack's clips are Z2k Retro's upscales of the game's 61 cinematics (archive.org item SMAC_Cutscenes_SLP:
+Topaz Starlight Precise upscale, frame-doubled to 30 fps with Chronos), renamed to the game's own movie names.
+open.mp4 is a copy of openingx.mp4: the game's open.wve is a smaller copy of the same movie.
+No other change is made to the video.

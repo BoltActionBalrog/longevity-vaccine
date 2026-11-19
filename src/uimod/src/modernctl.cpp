@@ -21,7 +21,9 @@
 //     and only when the tile under the pointer changed (+0x1DE0C/+0x1DE10). In that mode it also WRITES the
 //     unit's waypoint bytes (Vehs[veh]+0x12..+0x23) on every move, so the hover wrapper saves and restores them.
 //   * The status window's refresh (~156 ms timer, 0x4B5D7C-0x4B5DC7) owns the same overlay in vanilla: it draws
-//     the selected unit's committed route (draw_my_dest 0x4B5D95 + Win_show) when its order is go-to, else
+//     the selected unit's committed route (draw_my_dest 0x4B5D95 + Win_show) when its order is go-to and the
+//     "Show go-to path when unit active" box is checked (GameMorePreferences 0x2000000 clear; vanilla's drag line
+//     never reads it, so neither does the hover line -- its own switch is [UIMod] HideMoveLine), else
 //     Win_hide (0x4B5DC2). Both calls are redirected to stubs that stand aside while the hover line owns the
 //     overlay (traced 2026-10-07: 1,596 hides per session wiped the line whenever the pointer rested).
 //   * MapWin_click returns at once for a RIGHT release while the go-to cursor is set (0x46D7E1 -> 0x46EAC4):
@@ -231,6 +233,8 @@ bool g_pickByRight = false;      // set only around PickByRight's own left click
 bool PickCancelByLeft(BYTE* gw, void* edx, int x, int y);
 int  g_on = kModernControlsDefault;
 int  g_rightDrag = kRightClickDragDefault;
+int  g_hideLine = kHideMoveLineDefault;   // [UIMod] HideMoveLine: the hover line is off (instant mode only)
+unsigned g_hideGen = 0;                   // bumped by every HideMoveLineSet: ModernCtlPoll re-posts once the map is live
 int  g_dragBtn = kMapDragButtonDefault;
 bool g_hoverOwned = false;        // the hover line owns the overlay (shown it, or took it over)
 bool g_inForward = false;         // inside the hover's forward to the engine's mouse_move
@@ -546,6 +550,23 @@ void __fastcall LeftClickWrap(BYTE* gw, void* edx, int x, int y)
 
 // ---- the hover line ---------------------------------------------------------------------------------------
 void HoverDbg(const char* what, int extra = 0);   // DebugLog=1 diagnostics (defined below HoverMouseMove)
+bool CollectingOurPath(int v);                    // the Ctrl+right waypoint section (below)
+
+// [UIMod] HideMoveLine (longevity-vaccine issue 8, a clean look): the hover line and its "Move to" label are off.
+// The stock "Show go-to path when unit active" is NOT this switch: vanilla's drag line never reads it (it hides
+// only a go-to unit's committed route, through the engine's own code), and the hover line must look like that
+// drag line under any map setting (owner 2026-11-14). Placing waypoints keeps the line: while Ctrl is held
+// (what AddWaypoint would take: Ctrl without Shift, waypoints allowed -- so the first waypoint is previewed) and
+// while a Ctrl+right path is being built. Instant mode only: Right-Click Drags to Move uses the engine's drag line.
+bool WaypointPreview()
+{
+    return (GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000) && Rd<int>(kVA_MultiplayerActive) == 0;
+}
+
+bool HoverHidden(int veh)
+{
+    return g_hideLine && !CollectingOurPath(veh) && !WaypointPreview();
+}
 
 void HoverTeardown()
 {
@@ -688,16 +709,16 @@ void __fastcall HoverMouseMove(BYTE* gw, void* edx, int x, int y)
     }
     int veh = -1;
     int mx = x, my = y;
-    const bool want = g_on && !g_rightDrag && MapTakesInput() && !EditorEngaged() && Rd<int>(kVA_PbemActive) == 0 &&
+    const bool unit = g_on && !g_rightDrag && MapTakesInput() && !EditorEngaged() && Rd<int>(kVA_PbemActive) == 0 &&
                       Rd<int>(kVA_SelMode) == 0 && FixMapPoint(gw, mx, my) && (veh = PickUnit(false)) >= 0;  // never SELECTS on hover: only the current unit, and only while it stands on the cursor tile (user 2026-10-10: a find here selected units near the pointer)
-    if (!want) {
+    if (unit) DropStalePath(veh);                         // whether or not the setting shows the line
+    if (!unit || HoverHidden(veh)) {
         HoverDbg("no-want", veh);
         HoverTeardown();
         g_origMove(gw, edx, x, y);
         return;
     }
     HoverDbg("draw", veh);
-    DropStalePath(veh);
     BYTE saved[kVehSaveLen];
     memcpy(saved, Veh(veh) + kVehSave0, kVehSaveLen);
     int origin[4];
@@ -817,6 +838,12 @@ bool WpVehIsOurs()
            RdP<int16_t>(Veh(v) + 0) == g_wpX && RdP<int16_t>(Veh(v) + 2) == g_wpY;
 }
 
+// v is the unit WE are collecting Ctrl+right waypoints on, still uncommitted (ModernCtlFilterKey's Esc rule).
+bool CollectingOurPath(int v)
+{
+    return v >= 0 && g_wpVeh == v && WpVehIsOurs() && VehOrder(v) == 0 && (VehFlags(v) & kVehWaypointFlag);
+}
+
 // Strips a collecting flag and its slots from a unit (never a committed path: that belongs to its order).
 void StripPath(int v)
 {
@@ -906,6 +933,7 @@ bool AddWaypoint(BYTE* gw, int x, int y)
     u[kVehWpCount] = static_cast<BYTE>(n + 1);
     RememberWpVeh(veh);
     WrP<int>(con + kConLastTileX, -1);                     // redraw the line through the new waypoint
+    g_movePosted = false;                                  // one post per click, past the 500 ms latch: the line redraws through the new waypoint
     PostPointerMove();
     return true;
 }
@@ -1014,7 +1042,8 @@ void RelabelMenu()
 void ApplyAll()
 {
     PraxDragApply(EffectiveDragButton());
-    if (!g_on || g_rightDrag) HoverTeardown();   // from the Preferences page: PrefWin is modal, the map idle
+    // from the Preferences page: PrefWin is modal, the map idle
+    if (!g_on || g_rightDrag || HoverHidden(Rd<int>(kVA_CurVeh))) HoverTeardown();
     RelabelMenu();
 }
 
@@ -1155,6 +1184,7 @@ void InstallModernControls()
     char ini[MAX_PATH]; IniPath(ini, sizeof ini);
     g_on = GetPrivateProfileIntA("UIMod", "ModernControls", kModernControlsDefault, ini) != 0 ? 1 : 0;
     g_rightDrag = GetPrivateProfileIntA("UIMod", "RightClickDragsToMove", kRightClickDragDefault, ini) != 0 ? 1 : 0;
+    g_hideLine = GetPrivateProfileIntA("UIMod", "HideMoveLine", kHideMoveLineDefault, ini) != 0 ? 1 : 0;
     g_dragBtn = static_cast<int>(GetPrivateProfileIntA("UIMod", "MapDragButton", kMapDragButtonDefault, ini));
     if (g_dragBtn < 0 || g_dragBtn > 2) g_dragBtn = kMapDragButtonDefault;
     WritePrivateProfileStringA("UIMod", "ShiftInstantMove", nullptr, ini);   // the retired setting (2026-10-07)
@@ -1200,8 +1230,8 @@ void InstallModernControls()
     ApplyAll();
     char msg[200];
     _snprintf_s(msg, sizeof msg, _TRUNCATE,
-                "[uimod] modernctl: installed; ModernControls=%d RightClickDragsToMove=%d MapDragButton=%d (effective %d) ClickKeepsView=%d BaseCloseKeepsView=%d, units @%p%s\n",
-                g_on, g_rightDrag, g_dragBtn, EffectiveDragButton(), g_clickKeepsView, g_baseKeepsView, g_vehs,
+                "[uimod] modernctl: installed; ModernControls=%d RightClickDragsToMove=%d HideMoveLine=%d MapDragButton=%d (effective %d) ClickKeepsView=%d BaseCloseKeepsView=%d, units @%p%s\n",
+                g_on, g_rightDrag, g_hideLine, g_dragBtn, EffectiveDragButton(), g_clickKeepsView, g_baseKeepsView, g_vehs,
                 g_vehs == At(kVA_Vehs) ? "" : " (relocated)");
     UimodLog(msg);
 }
@@ -1238,6 +1268,21 @@ void RightClickDragSave()
     if (!RightClickDragAvailable()) return;   // a forced-off value is never written over the player's choice
     char ini[MAX_PATH]; IniPath(ini, sizeof ini);
     WritePrivateProfileStringA("UIMod", "RightClickDragsToMove", g_rightDrag ? "1" : "0", ini);
+}
+
+int  HideMoveLineGet() { return g_hideLine; }
+void HideMoveLineSet(int on)
+{
+    if (!g_available) return;
+    g_hideLine = on ? 1 : 0;
+    ++g_hideGen;
+    ApplyAll();
+}
+void HideMoveLineSave()
+{
+    if (!g_available) return;
+    char ini[MAX_PATH]; IniPath(ini, sizeof ini);
+    WritePrivateProfileStringA("UIMod", "HideMoveLine", g_hideLine ? "1" : "0", ini);
 }
 
 bool MapDragButtonAvailable() { return PraxDragAvailable(); }
@@ -1280,11 +1325,11 @@ void BaseCloseKeepsViewSave()
 void ModernCtlFilterKey(MSG* m)
 {
     if (m->message != WM_KEYDOWN) return;
-    if (m->wParam == VK_ESCAPE && g_wpVeh >= 0 && WpVehIsOurs() && VehOrder(g_wpVeh) == 0 &&
-        (VehFlags(g_wpVeh) & kVehWaypointFlag) && Rd<int>(kVA_CurVeh) == g_wpVeh && MapTakesInput() && !EditorEngaged() &&
-        Rd<int>(kVA_SelMode) == 0 && RdP<int>(Console() + kConDragActive) == 0) {   // Esc drops the uncommitted path
+    if (m->wParam == VK_ESCAPE && CollectingOurPath(g_wpVeh) && Rd<int>(kVA_CurVeh) == g_wpVeh && MapTakesInput() &&
+        !EditorEngaged() && Rd<int>(kVA_SelMode) == 0 && RdP<int>(Console() + kConDragActive) == 0) {   // Esc drops the uncommitted path
         ClearPendingWaypoints();
         WrP<int>(Console() + kConLastTileX, -1);
+        g_movePosted = false;                             // one post per key press
         PostPointerMove();
         m->message = WM_NULL;
         return;
@@ -1304,6 +1349,7 @@ void ModernCtlPoll(const MSG* m)
     // A new unit became the one to move (Tab, the engine advancing, a click) while the pointer sat still: the
     // line waits for the next WM_MOUSEMOVE, so post one (user 2026-10-10). The wrapper then draws, or tears down.
     static int lastVeh = -2, lastMode = -1;
+    static bool lastHidden = false;
     static int tries = 0;             // posts still owed for the latest unit change
     static DWORD lastTry = 0;
     const int curVeh = Rd<int>(kVA_CurVeh), mode = Rd<int>(kVA_MoveMode);
@@ -1312,11 +1358,29 @@ void ModernCtlPoll(const MSG* m)
         HoverDbg("unit-changed", m ? static_cast<int>(m->message) : -1);
         tries = 12;
     }
+    // Hide Move Line's verdict changed while the pointer sat still -- Ctrl pressed or released (the waypoint
+    // preview), the setting switched in Preferences: the line comes or goes without a pointer move. The setting
+    // flips inside the modal PrefWin, where the map takes no input (posts would be dropped at once), so a change
+    // is taken only while the map is live; a hide is torn down by the owned-line branch below. The setting's own
+    // changes are counted (g_hideGen): switched on and off again inside one Preferences visit, the verdict looks
+    // unchanged once the map is live, but ApplyAll already tore the line down. A Ctrl flip owes the full 12 while the
+    // pointer is over the map (a press inside a Tab's nested pump can lose its posts to Console_ready's flush_input,
+    // audit round 2), and only 2 off it, where no post reaches the map wrapper to stop the burst.
+    static unsigned lastGen = 0;
+    const bool hidden = g_on && !g_rightDrag && HoverHidden(curVeh);
+    if ((hidden != lastHidden || g_hideGen != lastGen) && MapTakesInput()) {
+        const bool settingChanged = g_hideGen != lastGen;
+        lastHidden = hidden;
+        lastGen = g_hideGen;
+        HoverDbg("hide-changed", hidden ? 1 : 0);
+        const int owed = settingChanged || Rd<const BYTE*>(kVA_LastMouseWin) == MainGw() ? 12 : 2;
+        if (tries < owed) tries = owed;
+    }
     // The switch is seen from INSIDE the engine's Tab dispatch (its nested pump runs this hook), and Console_ready's
     // flush_input then discards any move posted so far (traced twice, 2026-10-10). So the need is kept, and a move
     // is posted every 40 ms until the map wrapper has run for the new unit (it zeroes `tries`) -- at most 12 times.
     if (tries > 0) {
-        if (!(g_on && !g_rightDrag && mode != 0 && curVeh >= 0 && MapTakesInput())) tries = 0;
+        if (!(g_on && !g_rightDrag && mode != 0 && curVeh >= 0 && MapTakesInput() && !hidden)) tries = 0;
         else if (GetTickCount() - lastTry >= 40) {
             lastTry = GetTickCount();
             --tries;
@@ -1326,7 +1390,9 @@ void ModernCtlPoll(const MSG* m)
         }
     }
     if (!g_hoverOwned) return;
-    if (!MapTakesInput() || !OverlayShown()) { PostPointerMove(); return; }   // teardown / re-show on the next dispatch
+    // teardown / re-show on the next dispatch; with Hide Move Line on, a Ctrl+right path committed or dropped, or
+    // Ctrl released, leaves the line no longer wanted while the pointer may sit still
+    if (!MapTakesInput() || !OverlayShown() || hidden) { PostPointerMove(); return; }
     int origin[4];
     ReadOrigin(origin);
     if (memcmp(origin, g_hoverOrigin, sizeof origin) != 0) PostPointerMove();   // the map scrolled under the line

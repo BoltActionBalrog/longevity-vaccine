@@ -135,7 +135,7 @@ def test_the_prefs_row_replaced_brighten_scanlines():
     assert re.search(r"constexpr int\s+kAirdropChkId = 0x79;", prefs)
     assert "kBrightChkId" not in prefs and "brightcheck" not in prefs
     assert "0x6F RETIRED" in prefs, "the retired id must stay documented, never reused"
-    assert "AiVisSaveAirdrop();" in prefs[prefs.index("void CommitAll()"):]
+    assert "if (!AirdropUnavailable()) AiVisSaveAirdrop();" in prefs[prefs.index("void CommitAll()"):]
     assert "AiVisSetAirdrop(kAirdropDivertDefault);" in prefs
     for name in ("prefs.cpp", "portrait.cpp", "portrait.h", "aivis.cpp"):
         assert '"PortraitScanlinesBright"' not in _src(name), name   # the ini key is neither read nor written

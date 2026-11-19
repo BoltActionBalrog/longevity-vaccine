@@ -3,7 +3,7 @@ hook_prefwin_scale.js v19, user-verified in-game at 4K/1600x1200/1920x1080/1024x
 
 v2 (2026-07-12, Longevity prefs tab): adds a DLL WIDGET REGISTRY -- four dword slots
 at FIXED cave VAs that uimod.dll fills at PrefWin-build time so its OWN PrefWin
-widgets (the "Longevity Mod Preferences" tab button + label button + font-scale
+widgets (the "Longevity Preferences" tab button + label button + font-scale
 slider) ride the SAME zoom/init machinery as the 19 engine statics:
 
   g_dll_pref_lo/hi    -- btnzoom arms for ecx in [lo,hi] (the DLL's widget block)
@@ -85,8 +85,9 @@ PORT OF the prototype's transforms, byte-faithful to its arithmetic
   thunk_pref_show     -- PrefWin_show 0x48FA00 ENTRY detour (displaces the 6-byte
                          frame prologue): (1) re-assert the window rect to the law
                          position (Popup_show-shape idempotent repair); (2) write the
-                         15 buttons' label font slot [btn+0x970] = find_font(S(14),1)
-                         (buttons seed the slot from the native def-font at init);
+                         first 14 buttons' label font slot [btn+0x970] = t_fdirect_a14b()
+                         (vanilla's Arial 14 bold), then call t_pref_morefont: More / Back
+                         keeps vanilla's default label font, t_ffn(12, 0);
                          (3) drive vtbl+0xF8 refresh of the 15 buttons + 4 sliders
                          (build-time renders predate the font fix and zoom gates).
                          The DLL's widgets do their own font/refresh in its vtable
@@ -154,6 +155,7 @@ DLL_PREF_SLIDER_OFF = 0xB128  # dword 0: DLL slider instance
 MAP_FONT_PCT_OFF = 0xB12C   # dword 100: map-label font scale percent
 MAP_FONT_OFF = 0xB130       # thunk_map_font (ends 0xB168)
 BIG_F4_OFF = 0xB170         # dword 1 (default ON since 2026-09-13): "Big F4 indicators" pref (uimod.dll checkbox) -> t_rwk_blink stamps the BASE LOCATOR ring at 2g/16
+MORE_FONT_OFF = 0xAFF0      # t_pref_morefont: the free gap after thunk_scale_boxw (0xAF00 v7 237B, ends 0xAFED) .. 0xB120
 SHOW_OFF = 0xB180           # thunk_pref_show (relocated from 0xADC0)
 TABLE_OFF = 0xB250          # g_pref_wins (relocated from 0xAE90)
 CAVE_LIMIT = 0xB800
@@ -673,7 +675,7 @@ def asm_show(win_table_va):
         test eax, eax
         jz   redraw
         mov  esi, {win_table_va}
-        mov  edi, 15
+        mov  edi, 14
     floop:
         mov  ecx, dword ptr [esi]
         cmp  dword ptr [ecx + 0x970], 0
@@ -683,6 +685,7 @@ def asm_show(win_table_va):
         add  esi, 4
         dec  edi
         jnz  floop
+        call {PCAVE2 + MORE_FONT_OFF}
     redraw:
         mov  esi, {win_table_va}
         mov  edi, 19
@@ -701,6 +704,28 @@ def asm_show(win_table_va):
         mov  ebp, esp
         sub  esp, 0x40
         jmp  {SHOW_RESUME}
+    """
+
+
+def asm_more_font():
+    """t_pref_morefont (called by thunk_pref_show after its a14b loop over the first 14 buttons): the More / Back
+    button (BTNS[-1]) keeps vanilla's default label font, scaled -- t_ffn(PREF_MORE_BTN_FONT) = Arial fl(12g/16)
+    regular (law scaling_laws.button_default_font_law).  Only a seeded (non-null) slot is touched, like the loop; a
+    null t_ffn result leaves the slot as it is.  Clobbers eax/ecx/edx (t_ffn is cdecl); esi/edi/ebx/ebp kept."""
+    s, v = SL.PREF_MORE_BTN_FONT
+    slot = BTNS[-1] + 0x970
+    return f"""
+        cmp  dword ptr [{slot}], 0
+        je   out
+        push {v}
+        push {s}
+        call {T_FFN}
+        add  esp, 8
+        test eax, eax
+        je   out
+        mov  dword ptr [{slot}], eax
+    out:
+        ret
     """
 
 
@@ -727,6 +752,11 @@ def main() -> int:
         layout.append((name, off, blob))
         off = (off + len(blob) + 0xF) & ~0xF
     assert off <= BLOCK_LIMIT, f"packed block overruns 0x{BLOCK_LIMIT:04X}: end=0x{off:04X}"
+
+    # the More / Back button's font helper, in the free gap after thunk_scale_boxw (2026-11-14)
+    morefont = assemble(asm_more_font(), PCAVE2 + MORE_FONT_OFF)
+    assert 0xAFED <= MORE_FONT_OFF and MORE_FONT_OFF + len(morefont) <= DLL_PREF_LO_OFF, f"t_pref_morefont: {len(morefont)}B"
+    layout.append(("t_pref_morefont", MORE_FONT_OFF, morefont))
 
     # tail block: registry slots + map-font thunk + relocated show/table
     layout.append(("g_dll_pref_lo", DLL_PREF_LO_OFF, (0).to_bytes(4, "little")))

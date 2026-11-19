@@ -420,10 +420,16 @@ def test_two_modules_never_share_a_staging_path():
     assert a != b and Path(a).name == Path(b).name == "pack.zip"
 
 
-def test_explicit_modules_add_to_the_stale_set_and_a_missing_one_blocks(game, table):
+def test_explicit_modules_add_to_the_stale_set_and_a_missing_one_blocks(game, table, monkeypatch):
     """`--modules portraits-hd` must not REPLACE a stale movies-hd (it was announced as "already
     current" and left behind), and asking for a pack the manifest does not offer is a blocker,
     not a warning followed by UPDATE COMPLETE."""
+    import fetch
+
+    def unreachable(url, dest, **kw):
+        raise fetch.FetchError("could not download: the test's server does not exist")
+    # The download fails here, not on the network (the suite is hermetic, user 2026-11-15; the URL never resolved).
+    monkeypatch.setattr(fetch, "download", unreachable)
     raw, sig = _signed(_doc(latest="1.0.0", modules={
         "movies-hd": {"version": "2.0.0", "url": "https://x/y.zip", "sha256": "0" * 64,
                       "size": 1}}))

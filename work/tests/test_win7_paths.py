@@ -125,7 +125,10 @@ def test_update_children_run_on_every_cpu_not_the_games_pin():
     assert "Log(" not in body, "the worker never logs (LogResult says it): nothing may delay the resume"
     log = code[code.index("void LogResult(const Result& r)"):]
     assert "check ran on CPUs 0x%llx" in log[:log.index("\n}\n")]
-    hand = code[code.index("bool SpawnUpdater("):]
+    # the hand-off and the Thinker startup check's "Update now" share one spawn (SpawnVisible)
+    updater = code[code.index("bool SpawnUpdater(const char* const* mods, int nMods)\n{"):]
+    assert "return SpawnVisible(cmdExe, cmd, g_job.gameDir, nullptr);" in updater[:updater.index("\n}\n")]
+    hand = code[code.index("bool SpawnVisible(const wchar_t* cmdExe, wchar_t* cmd, const wchar_t* cwd, const wchar_t* env)\n{"):]
     hand = hand[:hand.index("\n}\n")]
     assert "CREATE_NEW_CONSOLE | CREATE_SUSPENDED" in hand
     assert hand.index("WidenAffinity(pi.hProcess,") < hand.index("ResumeThread(pi.hThread)") < hand.index("CloseHandle(pi.hThread);")

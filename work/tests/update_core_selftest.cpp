@@ -13,6 +13,10 @@
 //   t body pack <ctx> <kind> <idx> <alsoCore|-> <exit> <infile> -> BuildPackBody
 //   t manual <reason>                       -> ManualNoticeBody
 //   t text url|noinstaller|quit|subscribe   -> the fixed strings
+//   t buildcmd-thinker <py> <script> <game> -> BuildCheckCommandLine with `--accept thinker1`
+//   t replies-lo <ctx> <kind> [<dir> <lo>]  -> ReplySetFor with a Thinker step (default: an update, lo=1)
+//   t thinker-body <ctx> <exit> <infile> <run|-> -> BuildUpdateBody for an answer with a thinker= line
+//   t thinker-consent <exit> <infile> <keep 0|1> <unix> <pid> -> BuildThinkerConsent
 #include "../../src/uimod/src/update_core.h"
 
 #include <cstdio>
@@ -41,6 +45,11 @@ static void dump(const UpdateInfo& u, ParseStatus st, int bad)
     printf("status=%s code=%d badline=%d\n", ParseStatusName(st), u.code, bad);
     if (u.latest[0]) printf("latest=%s\n", u.latest);
     if (u.hasBase) printf("base=%s>%s\n", u.baseFrom, u.baseTo);
+    if (u.hasThinker) {
+        printf("thinker=%s|%s|", u.thinkerHave[0] ? u.thinkerHave : "?", u.thinkerOffered);
+        if (u.thinkerHasBytes) printf("%llu", u.thinkerBytes);
+        printf("|%d dir=%d dev=%d\n", u.thinkerLongevityOnly ? 1 : 0, static_cast<int>(ThinkerDirection(u)), ThinkerIsDevPin(u) ? 1 : 0);
+    }
     for (int i = 0; i < u.nStale; ++i) {
         printf("stale=%s|%s|%s>%s|", u.stale[i].id, u.stale[i].label, u.stale[i].from, u.stale[i].to);
         if (u.stale[i].hasBytes) printf("%llu", u.stale[i].bytes);
@@ -102,6 +111,25 @@ int main(int argc, char** argv)
         printf("ok=%d\n%s\n", ok ? 1 : 0, ok ? out : "");
         return 0;
     }
+    if (mode == "popuplabels") {                                    // rec <key> <label|-> <cut> | is <key> <want>
+        PopupLabels t;
+        for (int i = 2; i < argc;) {
+            const std::string op = argv[i];
+            if (op == "rec" && i + 3 < argc) {
+                const void* key = reinterpret_cast<const void*>(static_cast<uintptr_t>(strtoul(argv[i + 1], nullptr, 0)));
+                const char* label = strcmp(argv[i + 2], "-") == 0 ? nullptr : argv[i + 2];
+                t.Record(key, label, atoi(argv[i + 3]) != 0);
+                i += 4;
+            } else if (op == "is" && i + 2 < argc) {
+                const void* key = reinterpret_cast<const void*>(static_cast<uintptr_t>(strtoul(argv[i + 1], nullptr, 0)));
+                printf("%d\n", t.Is(key, argv[i + 2]));
+                i += 3;
+            } else {
+                return 3;
+            }
+        }
+        return 0;
+    }
     if (mode == "delay" && argc == 3) {
         const std::wstring cmd = widen(slurp(argv[2]));
         printf("%d\n", ExtractLvDelaySeconds(cmd.c_str()));
@@ -132,6 +160,38 @@ int main(int argc, char** argv)
         if (BuildCheckCommandLine(py.c_str(), sc.c_str(), game.c_str(), mf.empty() ? nullptr : mf.c_str(), out, 4096))
             printf("%ls\n", out);
         else printf("<refused>\n");
+        return 0;
+    }
+    if (mode == "buildcmd-thinker" && argc == 5) {             // <py> <script> <game> -> BuildCheckCommandLine asking for thinker=
+        const std::wstring py = widen(argv[2]), sc = widen(argv[3]), game = widen(argv[4]);
+        wchar_t out[4096];
+        if (BuildCheckCommandLine(py.c_str(), sc.c_str(), game.c_str(), nullptr, out, 4096, true)) printf("%ls\n", out);
+        else printf("<refused>\n");
+        return 0;
+    }
+    if (mode == "replies-lo" && (argc == 4 || argc == 6)) {    // <ctx> <kind> [<dir> <lo>] -> ReplySetFor with a Thinker step
+        ReplySet r;
+        const ThinkerDir dir = argc == 6 ? static_cast<ThinkerDir>(atoi(argv[4])) : kThinkerUp;
+        ReplySetFor(static_cast<Context>(atoi(argv[2])), static_cast<PromptKind>(atoi(argv[3])), &r, dir,
+                    argc == 6 ? atoi(argv[5]) != 0 : true);
+        for (int i = 0; i < r.n; ++i) printf("%d %s\n", r.act[i], r.text[i]);
+        printf("esc=%d\n", ActionFor(r, -1));
+        return 0;
+    }
+    if (mode == "thinker-body" && argc == 6) {                 // <ctx> <exit> <infile> <run|-> -> BuildUpdateBody
+        UpdateInfo u; ParseStatus st; int bad;
+        parse_file(argv[3], argv[4], &u, &st, &bad);
+        static char out[4096];
+        const char* run = strcmp(argv[5], "-") == 0 ? nullptr : argv[5];
+        printf("%s\n", BuildUpdateBody(u, static_cast<Context>(atoi(argv[2])), out, sizeof out, run) ? out : "<refused>");
+        return 0;
+    }
+    if (mode == "thinker-consent" && argc == 7) {              // <exit> <infile> <keep 0|1> <unix> <pid> -> BuildThinkerConsent
+        UpdateInfo u; ParseStatus st; int bad;
+        parse_file(argv[2], argv[3], &u, &st, &bad);
+        char out[96];
+        printf("%s\n", BuildThinkerConsent(u, atoi(argv[4]) != 0, _strtoui64(argv[5], nullptr, 10), strtoul(argv[6], nullptr, 10),
+                                           out, sizeof out) ? out : "<refused>");
         return 0;
     }
     if (mode == "handoff" && argc >= 6) {                      // <bat> <game> <pid> <manifest|-> [id...] -> BuildUpdateCommandLine

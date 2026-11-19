@@ -4,6 +4,7 @@
     py timing_report.py --last          ... of the newest run, whatever it ran (e.g. a -k scaling)
     py timing_report.py --run <id>      ... of one named run (a timings/runs/<id>.json stem)
     py timing_report.py --history [N]   one line per run, newest last
+    py timing_report.py --failures      each failed test's message + the tests its xdist worker ran before it
     py timing_report.py -n 40           show 40 rows per table (default 20)
 
 A "full" run is the one with the most tests among the kept runs, newest wins a tie -- the
@@ -88,6 +89,27 @@ def report(path: Path, n: int) -> None:
            coll[:min(n, 10)], ("     secs    %wall  module",), wall)
 
 
+def failures(path: Path, n: int) -> None:
+    """Each failed test's recorded message and, under xdist, the n tests its worker ran just before it (report order
+    = completion order per worker): what a flake that passes alone needs to be reproduced in one process."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    tests = data["tests"]
+    order = list(tests)
+    print(f"run {data['summary']['run']}  args={' '.join(data['summary']['args']) or '(none)'}")
+    for i, (nid, t) in enumerate(tests.items()):
+        if t["outcome"] != "failed":
+            continue
+        w = t.get("w")
+        print(f"\nFAILED {nid}" + (f"  (worker {w})" if w else ""))
+        if w:
+            before = [k for k in order[:i] if tests[k].get("w") == w][-n:]
+            print(f"  the {len(before)} tests {w} ran before it, oldest first:")
+            for k in before:
+                print(f"    {tests[k]['outcome']:7s} {k}")
+        print("  " + (t.get("failure") or "(no message recorded: a run from before timing_plugin kept them)")
+              .replace("\n", "\n  "))
+
+
 def history(n: int) -> None:
     p = TIMINGS_DIR / "history.jsonl"
     if not p.is_file():
@@ -106,6 +128,7 @@ def main() -> None:
     ap.add_argument("--last", action="store_true", help="newest run, even a partial one")
     ap.add_argument("--run", help="a run id (timings/runs/<id>.json)")
     ap.add_argument("--history", nargs="?", const=30, type=int, metavar="N", help="last N runs")
+    ap.add_argument("--failures", action="store_true", help="each failure's message and its worker's prior tests")
     ap.add_argument("-n", type=int, default=20, help="rows per table")
     args = ap.parse_args()
     if args.history is not None:
@@ -114,7 +137,7 @@ def main() -> None:
     path = _pick(args)
     if path is None:
         sys.exit("no timing runs recorded yet -- run the suite once (cd work/tests && py -m pytest)")
-    report(path, args.n)
+    (failures if args.failures else report)(path, args.n)
 
 
 if __name__ == "__main__":

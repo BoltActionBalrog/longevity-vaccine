@@ -390,7 +390,7 @@ def _cli(*args, timeout=300):
                           capture_output=True, text=True, timeout=timeout)
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_list_targets_shows_every_base_and_its_writability():
     p = _cli("--list-targets")
     assert p.returncode == 0, p.stdout + p.stderr
@@ -399,7 +399,7 @@ def test_list_targets_shows_every_base_and_its_writability():
     assert "DRY-RUN" in p.stdout, "unmeasured/unlocked targets must be marked non-writable"
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_unknown_target_id_lists_the_known_ones():
     p = _cli("--target-id", "bogus")
     assert p.returncode == 2
@@ -407,7 +407,7 @@ def test_unknown_target_id_lists_the_known_ones():
     assert "pracx" in p.stdout, "the error must name what IS available"
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_an_unmeasured_target_is_refused_before_anything_else(tmp_path):
     """A target that declares no baseline cannot be used in either mode -- and the refusal must name
     the missing data rather than falling back to some other target's hash. (No such entry ships any
@@ -465,7 +465,7 @@ def test_apply_patches_refuses_apply_without_a_lock_before_touching_the_file(tmp
     assert not (tmp_path / "does-not-exist.exe").exists()
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_dry_run_reports_the_hash_it_would_produce(bak_path, target_meta):
     """This is what breaks the deadlock the dry-run-only rule creates: you cannot record a
     patched_md5 without applying, and cannot apply without it. Dry-run now tells you the hash."""
@@ -476,7 +476,7 @@ def test_dry_run_reports_the_hash_it_would_produce(bak_path, target_meta):
         "the prospective hash must match the recorded build lock")
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_the_base_is_auto_detected_by_hash(bak_path):
     """No --target-id needed: hashing the file resolves it through the table."""
     p = _cli("--target", str(bak_path))
@@ -518,21 +518,21 @@ def test_dev_only_targets_are_exempt_from_the_lock_gate():
     assert not (True and not tbl["vanilla"].patched_md5 and tbl["vanilla"].launch)
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_conflicting_base_selectors_are_rejected():
     p = _cli("--target-id", "pracx", "--pristine")
     assert p.returncode == 2
     assert "both select a base" in p.stdout
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_a_missing_patches_file_is_reported_as_missing():
     p = _cli("--list-targets", "--patches", r"Z:\nope.yaml")
     assert p.returncode == 1
     assert "not found" in p.stdout, "it used to claim the file had no targets: table"
 
 
-@pytest.mark.skipif(not _PY.exists(), reason="bundled interpreter not present")
+@pytest.mark.needs_local(_PY, "the bundled interpreter")
 def test_a_non_mapping_targets_table_is_explained_not_a_traceback(tmp_path):
     bad = tmp_path / "bad.yaml"
     bad.write_text("target:\n  md5: x\ntargets:\n  - pracx: {}\n", encoding="utf-8")

@@ -19,6 +19,11 @@ Fix: replay the guard AFTER calculate_dimensions. Detour the 6-byte `cmp [esi+0x
 the visible tile span covers the map on either axis (the predicate WorldWin_draw_box.gate already
 uses for the width), then replay the cmp and resume at the `je` @0x46A5B4. Entry state: esi = this,
 edi = 0, eax dead (both successors reload it). Pure tile-count logic -> no scale gate.
+
+2026-11-15: replay_scale TAKES OVER the site's target -- MapWin_draw_map.postcalc_guard now reads
+`push t_rp_rows; ret` (assemble_replay.py, pcave2 0x46500): the end-game replay's MapWin gets its row fix /
+centring there, then every MapWin (the main map included) reaches this thunk with every register, flag and
+stack byte as the site left them.  This thunk's bytes are unchanged; never point the site back here.
 """
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 import ks_guard  # noqa: E402,F401  (keystone hex-misread guard, see ks_guard.py)
@@ -63,7 +68,7 @@ def main():
     print(f"thunk_drawmap_fullguard @ pcave2+{OFF:#06x} (VA {VA:#x}) = {len(b)} bytes")
     print(" ".join(f"{x:02X}" for x in b))
     print()
-    print(f"site @{SITE:#x} (6B): E9 {{rel32:thunk_drawmap_fullguard}} 90  (over: 39 BE 44 1A 02 00)")
+    print(f"site @{SITE:#x} (6B): 68 {{abs32:t_rp_rows}} C3  (over: 39 BE 44 1A 02 00; t_rp_rows -> this thunk)")
 
 if __name__ == "__main__":
     main()

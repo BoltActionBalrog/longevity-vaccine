@@ -16,6 +16,7 @@
 #include "hudmovesfix.h"
 #include "modernctl.h"
 #include "thinkercompat.h"
+#include "thinkerversion.h"   // ThinkerOnPin()
 
 #include <windows.h>
 #include <cstdint>
@@ -218,7 +219,9 @@ void InstallHudMovesFix()
     BYTE* entry = At(kVA_Action);
     uintptr_t tlo = 0, thi = 0;
     bool thinkerAction = false;
-    if (entry[0] == 0xE9 && ThinkerRange(&tlo, &thi)) {
+    // Only on the pinned Thinker: on any other build its action() is not wrapped (reduced mode), and the in-function
+    // site below is then written in code Thinker never enters -- harmless, and the give-up repaint is simply absent.
+    if (entry[0] == 0xE9 && ThinkerOnPin() && ThinkerRange(&tlo, &thi)) {
         int32_t rel; memcpy(&rel, entry + 1, 4);
         const uintptr_t target = reinterpret_cast<uintptr_t>(entry + 5 + rel);
         thinkerAction = target >= tlo && target < thi;
@@ -245,5 +248,9 @@ void InstallHudMovesFix()
                     static_cast<unsigned>(live - kOrderOff));
         UimodLog(buf);
     }
-    UimodLog("[uimod] hudmovesfix: the HUD unit panel repaints when a go-to is given up\n");
+    if (!thinkerAction && entry[0] == 0xE9)                    // someone else owns action() and we did not wrap it
+        UimodLog("[uimod] hudmovesfix: action()'s entry is not the engine's and is not wrapped (another Thinker Mod build) -> "
+                 "only the cancel-after-retries repaint is active\n");
+    else
+        UimodLog("[uimod] hudmovesfix: the HUD unit panel repaints when a go-to is given up\n");
 }

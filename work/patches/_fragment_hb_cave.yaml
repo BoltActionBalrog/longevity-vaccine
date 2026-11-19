@@ -1,0 +1,87 @@
+      - id: t_hb_gate
+        offset: 0x44000
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 10 81 FE 5C 37 87 00 74 0D 81 FE A8 42 87 00 74 05 E9 B2 76 FE FF B8 01 00 00 00 C3"
+      - id: t_hb_restripe
+        offset: 0x44030
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 1E 81 F9 A0 3B 87 00 74 08 81 F9 EC 46 87 00 75 0E 60 FF 35 {abs32:g_hb_num} 51 E8 {rel32:t_mon_face} 61 E9 B4 76 FE FF"
+      - id: t_hb_build
+        offset: 0x44060
+        bytes: "C7 05 {abs32:g_hb_armed} 00 00 00 00 E8 31 51 A4 FF 85 C0 0F 85 7F 02 00 00 53 56 57 55 A1 20 7B 9B 00 A3 {abs32:g_hb_sh} 8B 0D 1C 7B 9B 00 89 0D {abs32:g_hb_sw} B8 10 00 00 00 E8 {rel32:scale_uniform} 83 F8 48 7E 05 B8 48 00 00 00 A3 {abs32:g_hb_num} 83 F8 10 0F 8E 3D 02 00 00 83 3D 68 41 8A 00 00 0F 84 30 02 00 00 B8 00 04 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 8B 0D {abs32:g_hb_sw} 29 C1 D1 F9 89 0D {abs32:g_hb_lx} B8 00 03 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 8B 0D {abs32:g_hb_sh} 29 C1 D1 F9 89 0D {abs32:g_hb_ly} B8 77 00 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_lx} A3 {abs32:g_hb_ox} B8 50 00 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_ly} A3 {abs32:g_hb_oy} C7 05 {abs32:g_mon_lut_ok} 00 00 00 00 BE B0 2C 87 00 C7 05 {abs32:g_hb_building} 01 00 00 00 6A 01 FF 35 {abs32:g_hb_sh} FF 35 {abs32:g_hb_sw} 89 F1 E8 C4 53 B8 FF C7 05 {abs32:g_hb_building} 00 00 00 00 C7 05 {abs32:g_hb_armed} 01 00 00 00 31 C0 89 86 3C 01 00 00 89 86 40 01 00 00 89 86 74 04 00 00 89 86 78 04 00 00 A1 {abs32:g_hb_sw} 89 86 44 01 00 00 89 86 7C 04 00 00 A1 {abs32:g_hb_sh} 89 86 48 01 00 00 89 86 80 04 00 00 8D 86 74 04 00 00 50 8D 8E 44 04 00 00 E8 22 7E B8 FF 6A 00 89 F1 E8 69 50 B8 FF B8 77 00 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_lx} 89 86 24 0A 00 00 B8 50 00 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_ly} 89 86 28 0A 00 00 B8 97 03 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_lx} 89 86 2C 0A 00 00 B8 A8 02 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_ly} 89 86 30 0A 00 00 31 DB BA {abs32:g_hb_rects} 8B 04 9A 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 F7 C3 01 00 00 00 75 08 03 05 {abs32:g_hb_ox} EB 06 03 05 {abs32:g_hb_oy} 89 84 9E 34 0A 00 00 43 83 FB 18 7C C9 E8 {rel32:t_hb_fonts} 8D BE AC 0A 00 00 E8 {rel32:t_hb_btn} 8D BE F8 15 00 00 E8 {rel32:t_hb_btn} A1 {abs32:g_dl_immg} A3 {abs32:g_hb_immg_save} A1 {abs32:g_hb_num} A3 {abs32:g_dl_immg} BE {abs32:g_hb_immtab} E8 {rel32:t_dl_immfix} A1 {abs32:g_hb_immg_save} A3 {abs32:g_dl_immg} 5D 5F 5E 5B 31 C0 C3"
+      - id: t_hb_btn
+        offset: 0x44300
+        bytes: "55 89 E5 83 EC 10 B8 78 00 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 89 45 FC B8 14 00 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 89 45 F8 B8 89 02 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_ox} 89 45 F4 B8 39 02 00 00 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_oy} 89 45 F0 6A 01 FF 75 F8 FF 75 FC 89 F9 E8 BB 51 B8 FF 8B 45 F4 89 87 3C 01 00 00 03 45 FC 89 87 44 01 00 00 8B 45 F0 89 87 40 01 00 00 03 45 F8 89 87 48 01 00 00 31 C0 89 87 74 04 00 00 89 87 78 04 00 00 8B 45 FC 89 87 7C 04 00 00 8B 45 F8 89 87 80 04 00 00 FF 35 {abs32:g_hb_num} 6A 01 6A 0E 68 {abs32:g_hb_btnfont} E8 {rel32:t_fdirect_at} 83 C4 10 89 87 70 09 00 00 8B 07 89 F9 FF 90 F8 00 00 00 89 EC 5D C3"
+      - id: t_hb_fonts
+        offset: 0x44400
+        bytes: "FF 35 {abs32:g_hb_num} 6A 00 6A 18 68 {abs32:g_hb_fslots} E8 {rel32:t_ffn_at} 83 C4 10 A3 {abs32:g_hb_fonts} 6A 10 6A 00 6A 18 68 {abs32:g_hb_sslots} E8 {rel32:t_ffn_at} 83 C4 10 A3 {abs32:g_hb_shadows} FF 35 {abs32:g_hb_num} 6A 02 6A 12 68 4C 0D A5 00 E8 {rel32:t_ffn_at} 83 C4 10 A3 00 0D A5 00 6A 10 6A 02 6A 12 68 0C 0E A5 00 E8 {rel32:t_ffn_at} 83 C4 10 A3 10 0D A5 00 FF 35 {abs32:g_hb_num} 6A 00 6A 0C 68 7C 0D A5 00 E8 {rel32:t_ffn_at} 83 C4 10 A3 04 0D A5 00 6A 10 6A 00 6A 0C 68 3C 0E A5 00 E8 {rel32:t_ffn_at} 83 C4 10 A3 14 0D A5 00 FF 35 {abs32:g_hb_num} 6A 00 6A 20 68 AC 0D A5 00 E8 {rel32:t_ffn_at} 83 C4 10 A3 08 0D A5 00 6A 10 6A 00 6A 20 68 6C 0E A5 00 E8 {rel32:t_ffn_at} 83 C4 10 A3 18 0D A5 00 C3"
+      - id: t_hb_drawgate
+        offset: 0x444e0
+        bytes: "83 3D {abs32:g_hb_building} 00 75 0A 55 89 E5 6A FF E9 E2 51 A4 FF C3"
+      - id: t_hb_bd_frame
+        offset: 0x44500
+        bytes: "83 3D {abs32:g_hb_armed} 00 0F 84 90 00 00 00 53 56 57 55 89 E5 89 CE 8B 45 2C 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 50 8B 45 28 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 50 8B 45 24 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_ly} 50 8B 45 20 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_lx} 50 FF 75 14 FF 75 2C FF 75 28 FF 75 1C FF 75 18 FF B6 A8 04 00 00 FF 76 54 E8 {rel32:t_mon_resample} 89 EC 5D 5F 5E 5B 31 C0 C2 1C 00 E9 5E F9 B8 FF"
+      - id: t_hb_bd_art
+        offset: 0x445b0
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 72 53 56 57 55 89 E5 89 CE A1 {abs32:g_hof_num} A3 {abs32:g_hb_hofnum_save} A1 {abs32:g_hb_num} A3 {abs32:g_hof_num} A1 {abs32:g_hof_field} A3 {abs32:g_hb_field_save} C7 05 {abs32:g_hof_field} 40 C5 00 00 6A 09 FF 75 24 FF 75 20 FF 75 14 FF 75 2C FF 75 28 FF 75 1C FF 75 18 FF B6 A8 04 00 00 FF 76 54 E8 {rel32:t_hof_pairnn} A1 {abs32:g_hb_hofnum_save} A3 {abs32:g_hof_num} A1 {abs32:g_hb_field_save} A3 {abs32:g_hof_field} 5D 5F 5E 5B 31 C0 C2 1C 00 E9 D0 F8 B8 FF"
+      - id: t_hb_artbox
+        offset: 0x44630
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 7D 53 56 57 55 89 E5 89 CE A1 {abs32:g_hof_num} A3 {abs32:g_hb_hofnum_save} A1 {abs32:g_hb_num} A3 {abs32:g_hof_num} A1 {abs32:g_hof_field} A3 {abs32:g_hb_field_save} C7 05 {abs32:g_hof_field} 00 00 00 00 FF 75 18 FF 75 20 FF 75 1C FF 75 14 8B 86 84 00 00 00 99 31 D0 29 D0 50 FF B6 80 00 00 00 6A 00 6A 00 FF B6 A8 04 00 00 FF 76 54 E8 {rel32:t_hof_pairnn} A1 {abs32:g_hb_hofnum_save} A3 {abs32:g_hof_num} A1 {abs32:g_hb_field_save} A3 {abs32:g_hof_field} 5D 5F 5E 5B 31 C0 C2 10 00 E9 B5 7C B8 FF"
+      - id: t_hb_flb
+        offset: 0x446c0
+        bytes: "83 3D {abs32:g_hb_wrap_on} 00 0F 84 B9 00 00 00 3B 0D {abs32:g_hb_wrap_font} 0F 85 AD 00 00 00 55 89 E5 83 EC 10 53 56 57 89 CB 8B 75 0C 8B 06 89 45 FC 3B 05 {abs32:g_hb_wrap_dev} 75 07 A1 {abs32:g_hb_wrap_nat} EB 0D 3B 05 {abs32:g_hb_last_dev} 75 7D A1 {abs32:g_hb_last_nat} 89 45 F8 A1 9C 3A 9B 00 89 45 F0 8B 45 F8 89 06 FF 75 10 56 FF 75 08 8B 0D {abs32:g_hb_wrap_shadow} E8 5C 00 00 00 89 45 F4 8B 3E A1 9C 3A 9B 00 87 45 F0 A3 9C 3A 9B 00 8B 45 FC 89 06 FF 75 10 56 FF 75 08 89 D9 E8 37 00 00 00 8B 4D F0 89 0D 9C 3A 9B 00 8B 55 F4 85 C0 74 08 85 D2 74 06 39 C2 73 02 89 D0 89 3D {abs32:g_hb_last_nat} 8B 0E 89 0D {abs32:g_hb_last_dev} 5F 5E 5B 89 EC 5D C2 0C 00 5F 5E 5B 89 EC 5D 83 EC 10 8B 44 24 18 E9 E5 8B BC FF"
+      - id: t_hb_caprect
+        offset: 0x447a0
+        bytes: "BA {abs32:g_hb_caps} 83 F8 01 74 10 83 C2 10 83 F8 02 74 08 83 C2 10 83 F8 08 75 7F 8B 02 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_ox} 89 86 94 0A 00 00 8B 42 04 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_oy} 89 86 98 0A 00 00 8B 42 08 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_ox} 89 86 9C 0A 00 00 8B 42 0C 0F AF 05 {abs32:g_hb_num} 8D 04 45 0F 00 00 00 C1 F8 05 03 05 {abs32:g_hb_oy} 89 86 A0 0A 00 00 C3"
+      - id: t_hb_cap
+        offset: 0x44840
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 0D 60 8B 86 44 21 00 00 E8 {rel32:t_hb_caprect} 61 E9 D5 C8 B8 FF"
+      - id: t_hb_cap8
+        offset: 0x44860
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 12 60 8B 86 44 21 00 00 E8 {rel32:t_hb_caprect} 61 E9 C5 01 00 00 E9 30 D2 B8 FF"
+      - id: t_hb_w_title
+        offset: 0x44880
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 5D 8B 44 24 10 A3 {abs32:g_hb_wrap_dev} C7 05 {abs32:g_hb_wrap_nat} EC 00 00 00 A1 {abs32:g_hb_fonts} A3 {abs32:g_hb_wrap_font} A1 {abs32:g_hb_shadows} A3 {abs32:g_hb_wrap_shadow} C7 05 {abs32:g_hb_last_dev} FF FF FF FF C7 05 {abs32:g_hb_wrap_on} 01 00 00 00 FF 74 24 10 FF 74 24 10 FF 74 24 10 FF 74 24 10 E8 47 D0 B8 FF C7 05 {abs32:g_hb_wrap_on} 00 00 00 00 C2 10 00 E9 35 D0 B8 FF"
+      - id: t_hb_w_intro
+        offset: 0x448f0
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 5D 8B 44 24 10 A3 {abs32:g_hb_wrap_dev} C7 05 {abs32:g_hb_wrap_nat} 00 01 00 00 A1 00 0D A5 00 A3 {abs32:g_hb_wrap_font} A1 10 0D A5 00 A3 {abs32:g_hb_wrap_shadow} C7 05 {abs32:g_hb_last_dev} FF FF FF FF C7 05 {abs32:g_hb_wrap_on} 01 00 00 00 FF 74 24 10 FF 74 24 10 FF 74 24 10 FF 74 24 10 E8 D7 CF B8 FF C7 05 {abs32:g_hb_wrap_on} 00 00 00 00 C2 10 00 E9 C5 CF B8 FF"
+      - id: t_hb_w_measure
+        offset: 0x44960
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 55 8B 44 24 08 A3 {abs32:g_hb_wrap_dev} C7 05 {abs32:g_hb_wrap_nat} C7 01 00 00 A1 04 0D A5 00 A3 {abs32:g_hb_wrap_font} A1 14 0D A5 00 A3 {abs32:g_hb_wrap_shadow} C7 05 {abs32:g_hb_last_dev} FF FF FF FF C7 05 {abs32:g_hb_wrap_on} 01 00 00 00 FF 74 24 08 FF 74 24 08 E8 AF B9 B8 FF C7 05 {abs32:g_hb_wrap_on} 00 00 00 00 C2 08 00 E9 9D B9 B8 FF"
+      - id: t_hb_w_entry
+        offset: 0x449d0
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 5C 8B 44 24 08 8B 10 8B 40 08 29 D0 A3 {abs32:g_hb_wrap_dev} C7 05 {abs32:g_hb_wrap_nat} C7 01 00 00 A1 04 0D A5 00 A3 {abs32:g_hb_wrap_font} A1 14 0D A5 00 A3 {abs32:g_hb_wrap_shadow} C7 05 {abs32:g_hb_last_dev} FF FF FF FF C7 05 {abs32:g_hb_wrap_on} 01 00 00 00 FF 74 24 08 FF 74 24 08 E8 08 CB B8 FF C7 05 {abs32:g_hb_wrap_on} 00 00 00 00 C2 08 00 E9 F6 CA B8 FF"
+      - id: t_hb_w_cap8
+        offset: 0x44a40
+        bytes: "83 3D {abs32:g_hb_armed} 00 74 5C 8B 44 24 08 8B 10 8B 40 08 29 D0 A3 {abs32:g_hb_wrap_dev} C7 05 {abs32:g_hb_wrap_nat} C1 01 00 00 A1 08 0D A5 00 A3 {abs32:g_hb_wrap_font} A1 18 0D A5 00 A3 {abs32:g_hb_wrap_shadow} C7 05 {abs32:g_hb_last_dev} FF FF FF FF C7 05 {abs32:g_hb_wrap_on} 01 00 00 00 FF 74 24 08 FF 74 24 08 E8 18 D0 B8 FF C7 05 {abs32:g_hb_wrap_on} 00 00 00 00 C2 08 00 E9 06 D0 B8 FF"
+      - id: t_hb_font_495754
+        offset: 0x44ab0
+        bytes: "9C 83 3D {abs32:g_hb_armed} 00 74 0C 8B 0D {abs32:g_hb_fonts} 9D E9 94 4C A4 FF 8B 0D E4 40 8A 00 9D E9 88 4C A4 FF"
+      - id: t_hb_font_49584d
+        offset: 0x44ae0
+        bytes: "9C 83 3D {abs32:g_hb_armed} 00 74 0B A1 00 0D A5 00 9D E9 5D 4D A4 FF A1 E8 40 8A 00 9D E9 52 4D A4 FF"
+      - id: t_hb_font_495b01
+        offset: 0x44b00
+        bytes: "9C 83 3D {abs32:g_hb_armed} 00 74 0C 8B 15 {abs32:g_hb_fonts} 9D E9 F1 4F A4 FF 8B 15 E4 40 8A 00 9D E9 E5 4F A4 FF"
+      - id: t_hb_font_495c1b
+        offset: 0x44b30
+        bytes: "9C 83 3D {abs32:g_hb_armed} 00 74 0C 8B 0D 08 0D A5 00 9D E9 DB 50 A4 FF 8B 0D F0 40 8A 00 9D E9 CF 50 A4 FF"
+      - id: t_hb_font_495d2e
+        offset: 0x44b60
+        bytes: "9C 83 3D {abs32:g_hb_armed} 00 74 0B A1 08 0D A5 00 9D E9 BE 51 A4 FF A1 F0 40 8A 00 9D E9 B3 51 A4 FF"
+      - id: t_hb_font_495df1
+        offset: 0x44b80
+        bytes: "9C 83 3D {abs32:g_hb_armed} 00 74 0B A1 04 0D A5 00 9D E9 61 52 A4 FF A1 E0 40 8A 00 9D E9 56 52 A4 FF"
+      - id: t_hb_font_496068
+        offset: 0x44ba0
+        bytes: "9C 83 3D {abs32:g_hb_armed} 00 74 0B A1 04 0D A5 00 9D E9 B8 54 A4 FF A1 E0 40 8A 00 9D E9 AD 54 A4 FF"
+      - id: t_hb_font_4962bd
+        offset: 0x44bc0
+        bytes: "9C 83 3D {abs32:g_hb_armed} 00 74 0B A1 00 0D A5 00 9D E9 ED 56 A4 FF A1 E8 40 8A 00 9D E9 E2 56 A4 FF"
+      - id: g_hb_rects
+        offset: 0x44be0
+        bytes: "3A 01 00 00 19 00 00 00 01 03 00 00 35 02 00 00 4C 01 00 00 26 00 00 00 F0 02 00 00 2E 02 00 00 89 02 00 00 39 02 00 00 01 03 00 00 4D 02 00 00 2A 00 00 00 22 00 00 00 16 01 00 00 81 00 00 00 1E 00 00 00 3E 01 00 00 1E 01 00 00 B0 01 00 00 6C 01 00 00 39 02 00 00 7A 02 00 00 4D 02 00 00"
+      - id: g_hb_caps
+        offset: 0x44c40
+        bytes: "5B 01 00 00 F6 01 00 00 E2 02 00 00 1C 02 00 00 36 01 00 00 A5 01 00 00 01 03 00 00 D7 01 00 00 3C 01 00 00 DF 01 00 00 FD 02 00 00 33 02 00 00"
+      - id: g_hb_immtab
+        offset: 0x44c70
+        bytes: "49 5E 49 00 0A 00 00 00 00 00 00 00 00 00 00 00 4C 5E 49 00 06 00 00 00 00 00 00 00 00 00 00 00 E4 5F 49 00 06 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"

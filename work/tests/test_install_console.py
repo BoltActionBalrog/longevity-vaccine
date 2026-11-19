@@ -64,8 +64,8 @@ def _keys(monkeypatch, *keys):
 
 
 def _rows(out: str) -> list:
-    return [ln for ln in out.split("\n") if ln.startswith((" > [", "   ["))
-            or ln[3:] in (inst.INSTALL_SELECTED, inst.SKIP_MODULES)]
+    return [ln for ln in out.split("\n") if ln.startswith((" -> [", "    ["))
+            or ln[4:] in (inst.INSTALL_SELECTED, inst.SKIP_MODULES)]
 
 
 def _pick(catalogue, args, game_dir):
@@ -131,11 +131,15 @@ def test_keys_typed_before_the_list_is_drawn_are_dropped(monkeypatch):
 
 
 def test_poll_key_reads_this_console_without_waiting():
-    """The real console API: nothing waiting (or no console at all) is None at once, never a hang."""
+    """The real console API: nothing waiting is None at once; no console at all is EOFError at once (a failing
+    query was None, and _read_key polled it forever: verification of 9f2cb08). Never a hang."""
     import time
     t = time.monotonic()
-    got = inst._poll_key()
-    assert got is None or (isinstance(got, tuple) and len(got) == 2)
+    try:
+        got = inst._poll_key()
+    except EOFError:
+        got = "eof"
+    assert got in (None, "eof") or (isinstance(got, tuple) and len(got) == 2)
     assert time.monotonic() - t < 1
 
 
@@ -145,12 +149,13 @@ def test_the_list_names_every_module_with_its_size_ticked_on_a_first_run(monkeyp
     assert _pick(CATALOGUE, _args(), tmp_path) == (["movies-hd", "portraits-hd"], [])
     out = capsys.readouterr().out
     rows = _rows(out)
-    assert rows[0].startswith(" > [X] HD Cinematics") and "1.4 GB" in rows[0]
-    assert "[X] Turovetsky's HD Portrait Pack" in rows[1] and "671 MB" in rows[1]
+    # the game's units (binary, FormatBytes; user ruling 2026-11-17): 1395864371 bytes, 640 MiB
+    assert rows[0].startswith(" -> [X] Z2k Retro's HD Cinematics") and "1.3 GB" in rows[0]
+    assert "[X] Turovetsky's HD Portrait Pack" in rows[1] and "640 MB" in rows[1]
     assert "already installed" in rows[1] and "already installed" not in rows[0]
     assert "already on disk" not in "".join(rows)                   # user wording 2026-11-06
-    assert rows[2] == "   Install selected modules" and rows[-1] == " > Install selected modules"
-    assert "Selected: HD Cinematics, Turovetsky's HD Portrait Pack" in out
+    assert rows[2] == "    Continue" and rows[-1] == " -> Continue"
+    assert "Selected: Z2k Retro's HD Cinematics, Turovetsky's HD Portrait Pack" in out
     assert "Select which optional modules you would like to install. You can download these later from the in-game preferences menu." in out
 
 
@@ -173,14 +178,17 @@ def test_unticking_a_pack_on_disk_turns_nothing_down(monkeypatch, tmp_path):
     assert _pick(CATALOGUE, _args(), tmp_path) == ([], ["movies-hd"])
 
 
-def test_the_last_row_says_install_or_skip(monkeypatch):
-    """User wording 2026-11-04: "Install selected modules", "Skip optional modules" when nothing
-    is ticked; the row follows every tick."""
+def test_the_last_row_says_continue(monkeypatch):
+    """User wording 2026-11-15: "Continue", "Continue without optional modules" when nothing is ticked (nothing is
+    downloaded at this row); the row follows every tick."""
     monkeypatch.setattr(ix, "_colour_ok", lambda: False)
     names = ["movies-hd", "portraits-hd"]
     some = inst._picker_rows(names, CATALOGUE, {"movies-hd": True, "portraits-hd": False}, 2)
     none = inst._picker_rows(names, CATALOGUE, {"movies-hd": False, "portraits-hd": False}, 0)
-    assert some[2] == " > Install selected modules" and none[2] == "   Skip optional modules"
+    assert some[2] == " -> Continue" and none[2] == "    Continue without optional modules"
+    # nothing after the row's own text (user 2026-11-15: "remove the right arrow")
+    on_pack = inst._picker_rows(names, CATALOGUE, {"movies-hd": True, "portraits-hd": True}, 1)[1]
+    assert on_pack.startswith(" -> [X] Turovetsky's HD Portrait Pack") and on_pack.endswith("already installed")
     assert some[-1] == none[-1] == ix.RULE
 
 
@@ -261,16 +269,17 @@ def test_control_hints_are_blue_and_plain_without_colour(monkeypatch, capsys):
     asked = []
     monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or "")
     monkeypatch.setattr(ix, "_colour_ok", lambda: True)
-    ix.question_head("Choose", ["a note"], keys="Up/Down: move")
+    ix.ask_block("Choose", ["a note"], [" > a row", ix.RULE], keys="Up/Down: move")
     ix.ask("Replace it? [Y/n] ", title="Shortcut")
     ix.ask("Sure? [y/N] ", title="Sure")
     out = capsys.readouterr().out
-    assert " \x1b[94mUp/Down: move\x1b[0m\n a note\n" in out
+    # user 2026-11-15: the keys on their own line directly above the rows, inside the rows' section
+    assert f" a note\n{ix.RULE}\n \x1b[94mUp/Down: move\x1b[0m\n > a row\n" in out
     assert asked == [" Replace it? \x1b[94m[Y/n]\x1b[0m ", " Sure? \x1b[94m[y/N]\x1b[0m "]
     monkeypatch.setattr(ix, "_colour_ok", lambda: False)
-    ix.question_head("Choose", keys="Up/Down: move")
+    ix.ask_block("Choose", [], ["   a row"], keys="Up/Down: move")
     ix.ask("Replace it? [Y/n] ", title="Shortcut")
-    assert " Up/Down: move\n" in capsys.readouterr().out and asked[-1] == " Replace it? [Y/n] "
+    assert f"{ix.RULE}\n Up/Down: move\n   a row\n" in capsys.readouterr().out and asked[-1] == " Replace it? [Y/n] "
 
 
 def test_a_question_is_a_ruled_block_set_apart_from_output(monkeypatch, capsys):
@@ -288,13 +297,16 @@ def test_a_question_is_a_ruled_block_set_apart_from_output(monkeypatch, capsys):
 
 # ---------------------------------------------------------------- the update-check opt-in (user 2026-11-06)
 
-def _first_install(monkeypatch, tmp_path, *answers):
+def _first_install(monkeypatch, tmp_path, *keys):
+    """A first install at a console; the update-check choice gets `keys` (user 2026-11-15: an arrow-key list)."""
     monkeypatch.setattr(ix, "can_ask", lambda: True)
     monkeypatch.setattr(inst, "_has_install", lambda g: False)
-    it = iter(answers)
-    asked = []
-    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or next(it))
-    return asked
+    _keys(monkeypatch, *keys)
+
+
+def _never_asked(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    monkeypatch.setattr(inst, "_arrow_menu", lambda *a, **k: pytest.fail("must not ask"))
 
 
 def _ini(tmp_path) -> str:
@@ -306,33 +318,38 @@ def _ini(tmp_path) -> str:
 
 def test_a_first_install_asks_about_update_checks_in_the_users_words(monkeypatch, capsys, tmp_path):
     """The website says the player chooses during installation whether the game checks for updates: a
-    first install at a console asks, as a ruled block with the user's text; Enter means yes."""
-    asked = _first_install(monkeypatch, tmp_path, "")
+    first install at a console asks, as a ruled block with the user's text; an arrow-key choice (user
+    2026-11-15), the keys line above the options, the marker on "Check for updates when the game starts"."""
+    monkeypatch.setattr(ix, "_colour_ok", lambda: False)
+    _first_install(monkeypatch, tmp_path, "enter")
     ix.say("Selected: none")
     assert inst.ask_update_checks(tmp_path, _args()) is True
     out = capsys.readouterr().out
     r = ix.RULE
     assert out == ("Selected: none\n\n" + f"{r}\n AUTOMATIC UPDATES\n"
                    " When the game starts, it can check our server for a newer version of Longevity Vaccine and its\n"
-                   " optional modules, and offer to install them. You can change this any time in Longevity Mod\n"
-                   " Preferences (\"Check for Updates at Startup\").\n"
-                   f"{r}\n{r}\n  The game will check for updates when it starts.\n")
-    assert asked == [" Check for updates when the game starts? [Y/n] "]
+                   " optional modules, and offer to install them. You can change this any time in\n"
+                   " Longevity Preferences.\n"                   # no option name in the block (user 2026-11-15)
+                   f"{r}\n Up/Down: move   Enter: choose\n"
+                   " -> Check for updates when the game starts\n    Don't check for updates\n"
+                   f"{r}\n  The game will check for updates when it starts.\n")
     assert _ini(tmp_path) == "", "the answer is written after the patch pass, not at the question"
     inst.write_update_check(tmp_path, True)
     assert "CheckForUpdates=1" in _ini(tmp_path)
 
 
-@pytest.mark.parametrize("answer,on", [("y", True), ("YES", True), ("n", False), ("no", False), ("maybe", False)])
-def test_the_answer_becomes_the_games_setting(monkeypatch, capsys, tmp_path, answer, on):
-    _first_install(monkeypatch, tmp_path, answer)
+@pytest.mark.parametrize("keys,on", [(["enter"], True), (["down", "enter"], False), (["down", "up", "enter"], True),
+                                     (["down", "down", "enter"], False), (["up", "enter"], True), (["", "enter"], True)])
+def test_the_answer_becomes_the_games_setting(monkeypatch, capsys, tmp_path, keys, on):
+    """Only Enter on "Check for updates when the game starts" turns the checks on; the marker stops at both ends and
+    any other key does nothing."""
+    _first_install(monkeypatch, tmp_path, *keys)
     assert inst.ask_update_checks(tmp_path, _args()) is on
     out = capsys.readouterr().out
     if on:
         assert "The game will check for updates when it starts." in out
     else:
-        assert ("The game will not check for updates. Turn it on any time in Longevity Mod Preferences "
-                "(\"Check for Updates at Startup\").") in out
+        assert "The game will not check for updates. Turn it on any time in Longevity Preferences.\n" in out
     inst.write_update_check(tmp_path, on)
     assert f"CheckForUpdates={1 if on else 0}" in _ini(tmp_path)
 
@@ -340,15 +357,15 @@ def test_the_answer_becomes_the_games_setting(monkeypatch, capsys, tmp_path, ans
 def test_a_rerun_keeps_the_players_setting_and_says_so(monkeypatch, capsys, tmp_path):
     """Not asked again: the key the first install wrote (or the game's Preferences) stands; one line."""
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    _never_asked(monkeypatch)
     monkeypatch.setattr(inst, "_has_install", lambda g: True)
     for value, word in (("1", "checks"), ("0", "does not check")):
         (tmp_path / "Alpha Centauri.ini").write_text(f"[UIMod]\nCheckForUpdates={value}\n", encoding="ascii")
         assert inst.ask_update_checks(tmp_path, _args()) is None
         out = capsys.readouterr().out
         assert out == ("\n--- automatic updates ---\n"
-                       f"  The game {word} for updates when it starts (as before); change it in Longevity Mod "
-                       "Preferences (\"Check for Updates at Startup\").\n"), out
+                       f"  The game {word} for updates when it starts (as before); change it in Longevity "
+                       "Preferences.\n"), out
     # the mod installed by a release that never wrote the key (0.2.x): the default stands, no question
     (tmp_path / "Alpha Centauri.ini").write_text("[UIMod]\n", encoding="ascii")
     assert inst.ask_update_checks(tmp_path, _args()) is None
@@ -372,7 +389,7 @@ def test_the_mod_already_here_means_no_question_even_without_the_key(tmp_path, m
     """_has_install for real: a lone uimod.dll (a part-finished uninstall, or an install that failed after
     the patch) makes a re-run, not a first install."""
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    _never_asked(monkeypatch)
     (tmp_path / "uimod.dll").write_bytes(b"dll")
     assert inst.ask_update_checks(tmp_path, _args()) is None
     assert "checks for updates when it starts (the default)" in capsys.readouterr().out
@@ -388,26 +405,26 @@ def test_the_answer_is_written_the_moment_the_exe_is_patched(tmp_path, bak_path,
     g.mkdir()
     shutil.copy2(bak_path, g / "terranx_PRACX.exe")
     monkeypatch.setattr(ix, "can_ask", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    _keys(monkeypatch, "down", "enter")                       # "Don't check for updates"
     monkeypatch.setattr(inst, "module_catalogue", lambda gd, a: ([], None))
     monkeypatch.setattr(inst, "pick_modules", lambda c, a, gd: ([], [], []))
     monkeypatch.setattr(inst, "deploy_runtime", lambda gd, quiet=False: False)
     args = types.SimpleNamespace(no_prompt=False, ai="off", modules=None, force=False, manifest=None,
-                                 offline=False, pack=None, portrait_pack=None)
+                                 offline=False, pack=None, portrait_pack=None, keep_thinker=True)   # no Thinker screen
     with pytest.raises(ix.InstallerError) as e:
         inst._install(g, args)
-    assert e.value.changed is True and "copying the mod files" in e.value.message
+    assert e.value.changed is True and "copying Longevity Vaccine's files" in e.value.message
     assert "CheckForUpdates=0" in (g / "Alpha Centauri.ini").read_text(encoding="mbcs")
     assert "The game will not check for updates." in capsys.readouterr().out
     assert inst._has_install(g), "the patched exe beside its backup counts as installed"
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("a re-run must not ask"))
+    _never_asked(monkeypatch)
     assert inst.ask_update_checks(g, args) is None
     assert "does not check for updates when it starts (as before)" in capsys.readouterr().out
 
 
 def test_no_prompt_and_an_unattended_install_keep_the_default_without_asking(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(inst, "_has_install", lambda g: False)
-    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("must not ask"))
+    _never_asked(monkeypatch)
     monkeypatch.setattr(ix, "can_ask", lambda: True)
     assert inst.ask_update_checks(tmp_path, _args(no_prompt=True)) is None
     assert "checks for updates when it starts (the default)" in capsys.readouterr().out
@@ -421,9 +438,9 @@ def test_a_closed_stdin_at_the_question_keeps_the_default(monkeypatch, capsys, t
     monkeypatch.setattr(ix, "can_ask", lambda: True)
     monkeypatch.setattr(inst, "_has_install", lambda g: False)
 
-    def eof(prompt=""):
+    def eof():
         raise EOFError
-    monkeypatch.setattr("builtins.input", eof)
+    monkeypatch.setattr(inst, "_read_key", eof)
     assert inst.ask_update_checks(tmp_path, _args()) is None
     assert "checks for updates when it starts (the default)" in capsys.readouterr().out
 
@@ -432,9 +449,9 @@ def test_ctrl_c_at_the_update_question_cancels_like_the_picker(monkeypatch, tmp_
     monkeypatch.setattr(ix, "can_ask", lambda: True)
     monkeypatch.setattr(inst, "_has_install", lambda g: False)
 
-    def interrupt(prompt=""):
+    def interrupt():
         raise KeyboardInterrupt
-    monkeypatch.setattr("builtins.input", interrupt)
+    monkeypatch.setattr(inst, "_read_key", interrupt)
     with pytest.raises(KeyboardInterrupt):
         inst.ask_update_checks(tmp_path, _args())
 
@@ -467,9 +484,10 @@ def test_no_prompt_on_a_rerun_keeps_the_players_earlier_no(monkeypatch, tmp_path
 
 
 def test_ai_off_turns_the_cinematics_down_unless_they_are_on_disk(monkeypatch, tmp_path):
-    monkeypatch.setattr(inst, "pack_on_disk", lambda g, n: False)
+    # Installed = the pack's own readable manifest (audit-t ROOT 1: any file in movies\hd used to count)
+    monkeypatch.setattr(inst, "_manifest_readable", lambda g, n: False)
     assert _pick({}, _args(ai="off"), tmp_path) == ([], ["movies-hd"])
-    monkeypatch.setattr(inst, "pack_on_disk", lambda g, n: True)
+    monkeypatch.setattr(inst, "_manifest_readable", lambda g, n: True)
     assert _pick({}, _args(ai="off"), tmp_path) == ([], [])
 
 
@@ -538,7 +556,7 @@ def test_ai_off_never_touches_the_network(monkeypatch, tmp_path):
 
 
 def test_an_unreachable_server_lists_nothing_and_says_so_once(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(ix, "can_ask", lambda: True)
+    monkeypatch.setattr(ix, "has_console", lambda: True)          # the listing is fetched for a console, asked or not
 
     def offline(*a, **k):
         assert k.get("quick"), "the listing must use the quick single-attempt profile"
@@ -578,7 +596,8 @@ def test_cinematics_flag_rules(monkeypatch, tmp_path):
     monkeypatch.setattr(inst, "ini_flag_state", lambda g, k: True)
     assert flag([], tmp_path, _args(), offered=[]) is True, "keeps the opt-in"
     monkeypatch.setattr(inst, "pack_on_disk", lambda g, n: True)
-    assert flag([], tmp_path, _args(ai="off")) is True, "clips already there"
+    # audit-t ROOT 1: never inferred from the files; --ai off means "don't play HD movies", even over an installed pack
+    assert flag([], tmp_path, _args(ai="off")) is False, "--ai off, clips there or not"
 
 
 # ---------------------------------------------------------------- the patcher's summary
@@ -707,7 +726,8 @@ def test_a_portrait_folder_without_the_pack_manifest_is_not_the_installed_pack(t
     hd.mkdir(parents=True)
     (hd / "gaians.png").write_bytes(b"png")
     assert not inst.pack_on_disk(tmp_path, "portraits-hd")
-    (hd / "pack-manifest.json").write_text("{}", encoding="utf-8")
+    # a readable manifest that lists the pack (audit-q L2: "{}" lists nothing, so it is unreadable)
+    (hd / "pack-manifest.json").write_text('{"files": [{"name": "gaians.png", "size": 3}]}', encoding="utf-8")
     assert inst.pack_on_disk(tmp_path, "portraits-hd")
 
 
@@ -736,8 +756,9 @@ def test_the_resolution_refusal_is_a_yellow_stretched_warning(tmp_path, monkeypa
     ini.write_text("[PRACX]\r\nScreenWidth=1920\r\nScreenHeight=1080\r\n", encoding="ascii")
     monkeypatch.setattr(inst, "current_display_mode", lambda: (3840, 2160))
     monkeypatch.setattr(ix, "can_ask", lambda: True)
+    from test_arrow_choices import _keys
+    _keys(monkeypatch, "down", "enter")                 # Keep 1920x1080 (an arrow choice, user-approved 2026-11-15)
     monkeypatch.setattr(ix, "_colour_ok", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
     inst.check_display_resolution(tmp_path, "pracx")
     out = capsys.readouterr().out
     line = next(l for l in out.split("\n") if "Left your resolution as is" in l)
@@ -767,3 +788,16 @@ def test_a_failed_copy_is_one_readable_line():
     assert text.startswith("2 files could not be copied, the first D:/game/LongevityMods/a: [WinError 3] not found")
     assert "longer than Windows allows" in text and "C:/src/b" not in text
     assert inst.copy_error_summary(OSError("disk full")) == "disk full"
+
+
+def test_the_datalinks_summary_note_names_a_reason_for_every_left_alone_status():
+    """Every status patch_helptext can leave a file in gets a worded reason under the summary row, never the raw
+    status name -- and the marker-less one never claims the mod patched the file (audit round 7)."""
+    import patch_helptext as ph
+    for status in (ph.FOREIGN, ph.FAILED) + tuple(ph.REFUSED):
+        note = inst.datalinks_text_note({"helpx.txt": ph.PATCHED, "conceptsx.txt": status})
+        assert note.startswith("  (conceptsx.txt left alone: ") and note.endswith(")"), (status, note)
+        reason = note.split("left alone: ", 1)[1][:-1]
+        assert reason != status and reason == inst._DATALINKS_LEFT_REASON[status], (status, note)
+    assert "patched" not in inst._DATALINKS_LEFT_REASON[ph.UNMARKED]
+    assert inst.datalinks_text_note({"helpx.txt": ph.PATCHED, "conceptsx.txt": ph.CURRENT}) == ""

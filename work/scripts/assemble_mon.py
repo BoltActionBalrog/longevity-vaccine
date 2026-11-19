@@ -86,6 +86,7 @@ WIDE = 0x008A4168
 SCALE_NN = PCAVE2 + 0x2150     # thunk_sprite_scale_nn (Sprite_draw_2 contract, RET 0x18)
 SCALE_UNIFORM = 0x00668200     # scale_uniform (menu_strip_thunks +0x00): eax = dim -> dim * min(W/1024, H/768) floored; keeps ecx/edx/ebx
 GATE_PRE = PCAVE2 + 0x24230    # thunk_btn_gate_pre (rw_scale_shared; E8 helper, esi = button)
+T_HB_RESTRIPE = PCAVE2 + 0x44030  # holobook_scale (assemble_holobook.py): the Buffer_draw_2 face-restripe head, chains t_mon_restripe
 
 SCRATCH_SIZE = 0xE0000
 SCR_LUT, SCR_COL, SCR_SLOTS, SCR_TAGS, SCR_E0 = 0x0, 0x8000, 0x40000, 0xA0000, 0xA0040
@@ -1682,8 +1683,11 @@ def site_list(names: dict[str, int]) -> list[dict]:
                  "hover re-blit of the 160x97 picture -> resampled")
     detour("MonumentWin_draw.plaque_font", "MonumentWin_draw", FONT_SITE, 5, "t_mon_font",
            "mov eax,[0x8A40BC] -> find_font(fl(12*num/16), 0) when armed")
-    detour("Buffer_draw_2.mon_button_restripe", "Buffer_draw_2", BUFFER_DRAW2, 5, "t_mon_restripe",
-           "src == a Monument CLOSE/BACK canvas (or the HOF CLOSE canvas) -> face pair restriped at the P law, darker member on top")
+    # 2026-11-15 holobook_scale: the site enters t_hb_restripe (the Holobook's CLOSE/BACK canvases), which tail-jumps
+    # t_mon_restripe -- assemble_holobook.py owns that head; its VA is pinned here like assemble_ntw's T_HB_GATE.
+    names = dict(names, t_hb_restripe=T_HB_RESTRIPE)
+    detour("Buffer_draw_2.mon_button_restripe", "Buffer_draw_2", BUFFER_DRAW2, 5, "t_hb_restripe",
+           "src == a Holobook CLOSE/BACK canvas (t_hb_restripe), then a Monument CLOSE/BACK or HOF CLOSE canvas (t_mon_restripe) -> face pair restriped at the P law, darker member on top")
     S.extend(hof_site_list(names))
     return S
 
@@ -2732,9 +2736,11 @@ def asm_hof_luma() -> str:
 OFF_BD_FIELD, OFF_PAIRFLD, OFF_HOF_FIELD, OFF_PLACED_END = 0x1AF00, 0x1AF40, 0x1AFF0, 0x1B000
 
 
-def asm_hof_bd_field() -> str:  # Buffer_copy_4 contract (ecx = src Buffer, 7 args, RET 0x1C): g_hof_field := 1 around t_hof_bd_hof
-    return """
-    mov     dword ptr [g_hof_field], 1
+def asm_hof_bd_field() -> str:  # Buffer_copy_4 contract (ecx = src Buffer, 7 args, RET 0x1C): g_hof_field := the pair around t_hof_bd_hof
+    # 2026-11-15: the cell carries the PAIR (SL.hof_field_cell: A | B << 8; was the flag 1 + literals in t_hof_pairfld)
+    # so the retirement Holobook (assemble_holobook.py) reuses t_hof_pairfld with its own art's pair.
+    return f"""
+    mov     dword ptr [g_hof_field], {SL.hof_field_cell(SL.HOF_FIELD_PAIR):#x}
 """ + "    push    dword ptr [esp+0x1C]\n" * 7 + """
     call    t_hof_bd_hof
     mov     dword ptr [g_hof_field], 0
@@ -2744,23 +2750,27 @@ def asm_hof_bd_field() -> str:  # Buffer_copy_4 contract (ecx = src Buffer, 7 ar
 
 def asm_hof_pairfld() -> str:
     # t_hof_pairtex's contract (esi = &texel, ebx = its index, ebp = t_hof_pairnn's frame; eax = mate or -1; ecx/edx/edi
-    # preserved) + scaling_laws.hof_pair_texel's `field` clause: with g_hof_field set and no chain, a texel of the field
-    # pair whose upper (then lower) neighbour inside [sy, sy + sh) is its mate is a member.
-    fa, fb = SL.HOF_FIELD_PAIR
-    return f"""
+    # preserved) + scaling_laws.hof_pair_texel's `field` clause: with g_hof_field = a pair (A | B << 8, hof_field_cell;
+    # 0 = off) and no chain, a texel of the pair whose upper (then lower) neighbour inside [sy, sy + sh) is its mate is a
+    # member.  v2 2026-11-15: the pair comes from the cell (the Holobook's 64/197 as well as hof.pcx's 65/197).
+    return """
     call    t_hof_pairtex
     cmp     eax, -1
     jne     pf_ret
-    cmp     dword ptr [g_hof_field], 0
-    je      pf_ret
-    cmp     ebx, {fa}
-    je      pf_mate
-    cmp     ebx, {fb}
-    jne     pf_ret
-pf_mate:
     push    ecx
     push    edx
-    mov     edx, {fa + fb}
+    mov     ecx, dword ptr [g_hof_field]
+    test    ecx, ecx
+    jz      pf_none
+    movzx   edx, cl
+    shr     ecx, 8
+    and     ecx, 0xFF
+    cmp     ebx, edx
+    je      pf_mate
+    cmp     ebx, ecx
+    jne     pf_none
+pf_mate:
+    add     edx, ecx
     sub     edx, ebx
     mov     ecx, dword ptr [ebp+0xC]
     mov     eax, dword ptr [ebp-0x34]

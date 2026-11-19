@@ -17,6 +17,7 @@
 #include <delayimp.h>
 #include "movie.h"
 #include "movieaudio.h"
+#include "moviepace.h"
 #include "codecs.h"
 #include "caption.h"
 #include "vidmode.h"
@@ -27,6 +28,7 @@ void UimodLog(const char* msg);   // init.cpp: uimod.log + debugger
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <deque>
 #include <vector>
 
 extern "C" {
@@ -322,6 +324,158 @@ struct DDrawPresenter {
 // init on the game thread) is reachable from file scope and closed there.
 movieaudio::Sink* g_activeSink = nullptr;
 
+// One clock for the schedule: the performance counter, because GetTickCount moves in ~15.6 ms steps
+// (a frame is 33 ms; that is half a frame of false lateness) whatever timeBeginPeriod says.
+double NowMs()
+{
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return static_cast<double>(c.QuadPart) * 1000.0 / static_cast<double>(f.QuadPart);
+}
+
+// ---- CPU affinity, widened for one movie --------------------------------------------------------
+// DDrawCompat pins the game to one CPU and that stays outside movies (the maintainer's decision), but an
+// HD clip wants several for its decoder threads. NOT kernel32's SetProcessAffinityMask: DDrawCompat hooks
+// it and returns TRUE without doing anything; ntdll's call is not hooked and every result is read back
+// (docs\notes\feedback-ddrawcompat-affinity.md, the same route as update.cpp's WidenAffinity).
+//
+// DDrawCompat's CpuAffinityRotation (on by default) moves the pin to the next core ten times a second from its
+// own update thread, through the original SetProcessAffinityMask, which pins the decoder threads again. A small
+// watchdog thread undoes it: the player thread cannot, it spends its time inside the decoder and the scaler.
+// File scope for the same reason as g_activeSink: under /EHsc an SEH exception unwinds no C++ frame, and
+// PlayGuarded has to be able to give the pin back on its own.
+moviepace::AffinityState g_affinity;   // the watchdog alone writes it between the widen and StopWatchdog
+int    g_playDepth = 0;                // a message dispatched by Pump could in principle start a movie
+HANDLE g_watchdog = nullptr, g_watchdogStop = nullptr;
+
+constexpr DWORD kAffinityPollMs = 5;
+
+bool SetProcessMaskNt(DWORD_PTR mask)
+{
+    typedef LONG (NTAPI* FSetInfo)(HANDLE, ULONG, PVOID, ULONG);
+    const HMODULE nt = GetModuleHandleW(L"ntdll.dll");
+    const FSetInfo setInfo = nt ? reinterpret_cast<FSetInfo>(GetProcAddress(nt, "NtSetInformationProcess")) : nullptr;
+    if (!setInfo) return false;
+    constexpr ULONG kProcessAffinityMask = 21;   // PROCESSINFOCLASS ProcessAffinityMask (a KAFFINITY)
+    DWORD_PTR want = mask;
+    return setInfo(GetCurrentProcess(), kProcessAffinityMask, &want, sizeof want) >= 0;
+}
+
+DWORD_PTR CurrentProcessMask(DWORD_PTR* system = nullptr)
+{
+    DWORD_PTR proc = 0, sys = 0;
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys)) return 0;
+    if (system) *system = sys;
+    return proc;
+}
+
+void LogAffinity(const char* what, DWORD_PTR a, DWORD_PTR b, unsigned n = 0)
+{
+    char l[200];
+    _snprintf_s(l, sizeof l, _TRUNCATE, "[uimod] movie affinity: %s 0x%lX -> 0x%lX (re-pinned %u time(s))\n",
+                what, static_cast<unsigned long>(a), static_cast<unsigned long>(b), n);
+    UimodLog(l);
+}
+
+// A re-pin is corrected within one poll, and the poll is two cheap system calls.
+void PollAffinity()
+{
+    if (!g_affinity.active || g_affinity.gaveUp) return;
+    const DWORD_PTR cur = CurrentProcessMask();
+    if (!moviepace::OnPoll(g_affinity, cur)) return;
+    SetProcessMaskNt(g_affinity.wide);
+    const DWORD_PTR back = CurrentProcessMask();
+    moviepace::OnRewidenResult(g_affinity, back);
+    if (g_affinity.repins == 1) LogAffinity("re-pinned during the movie, widening again:", cur, back, 1);   // the rest are counted
+    if (g_affinity.gaveUp) LogAffinity("gave up widening again", cur, back, g_affinity.repins);
+}
+
+// Its own stop event comes as the parameter: a thread that outlived a join (below) never waits on the next one's.
+DWORD WINAPI AffinityWatchdog(LPVOID stop)
+{
+    while (WaitForSingleObject(static_cast<HANDLE>(stop), kAffinityPollMs) == WAIT_TIMEOUT) PollAffinity();
+    return 0;
+}
+
+void StartWatchdog()
+{
+    g_watchdogStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (g_watchdogStop) g_watchdog = CreateThread(nullptr, 64 * 1024, AffinityWatchdog, g_watchdogStop, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    if (g_watchdog) { SetThreadPriority(g_watchdog, THREAD_PRIORITY_HIGHEST); return; }   // it must run on the one CPU
+    if (g_watchdogStop) { CloseHandle(g_watchdogStop); g_watchdogStop = nullptr; }
+    LogAffinity("no watchdog thread, a re-pin will stay", 0, 0);
+}
+
+// Before the restore, so that nothing widens again behind it. It only ever makes system calls, so the wait is
+// short; if it somehow is not, the stop event is left for it rather than closed under it.
+void StopWatchdog()
+{
+    if (!g_watchdog) return;
+    SetEvent(g_watchdogStop);
+    if (WaitForSingleObject(g_watchdog, 2000) == WAIT_OBJECT_0) CloseHandle(g_watchdogStop);
+    CloseHandle(g_watchdog);
+    g_watchdog = g_watchdogStop = nullptr;
+}
+
+void WidenAffinity()
+{
+    if (g_affinity.active) return;
+    DWORD_PTR sys = 0;
+    const DWORD_PTR before = CurrentProcessMask(&sys);
+    if (!moviepace::IsPinned(before, sys)) { LogAffinity("not pinned, left alone", before, sys); return; }
+    DWORD_PTR after = before;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        SetProcessMaskNt(sys);
+        after = CurrentProcessMask();
+        if (moviepace::WidenTook(before, after)) {
+            moviepace::OnWidened(g_affinity, before, after);
+            LogAffinity("widened", before, after);
+            StartWatchdog();
+            return;
+        }
+    }
+    LogAffinity("could NOT be widened", before, after);   // playback carries on pinned, as it always did
+}
+
+void RestoreAffinity()
+{
+    StopWatchdog();
+    if (!g_affinity.active) return;
+    const DWORD_PTR cur = CurrentProcessMask();
+    if (moviepace::ShouldRestore(g_affinity, cur)) {
+        DWORD_PTR back = cur;
+        for (int attempt = 0; attempt < 3 && !moviepace::RestoreTook(g_affinity, back); ++attempt) {
+            SetProcessMaskNt(g_affinity.pinned);
+            back = CurrentProcessMask();
+        }
+        LogAffinity(moviepace::RestoreTook(g_affinity, back) ? "restored" : "could NOT be restored", cur, back, g_affinity.repins);
+    } else {
+        LogAffinity("already re-pinned, left alone", g_affinity.wide, cur, g_affinity.repins);
+    }
+    g_affinity = moviepace::AffinityState();
+}
+
+// Decoder threads for the mask the movie will run on: the widened one, or as things stand if there is none.
+int DecoderThreadCount()
+{
+    const DWORD_PTR proc = g_affinity.active ? g_affinity.wide : CurrentProcessMask();
+    if (!proc) return 1;
+    int cores = 0;
+    DWORD len = 0;
+    GetLogicalProcessorInformation(nullptr, &len);
+    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && len >= sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION)) {
+        std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> info(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+        if (GetLogicalProcessorInformation(info.data(), &len)) {
+            std::vector<uintptr_t> masks;
+            for (const auto& i : info) if (i.Relationship == RelationProcessorCore) masks.push_back(i.ProcessorMask);
+            cores = moviepace::CountCores(masks.data(), static_cast<int>(masks.size()), proc);
+        }
+    }
+    if (cores <= 0) cores = moviepace::CoresFromCpus(moviepace::BitCount(proc));
+    return moviepace::DecoderThreads(cores);
+}
+
 // noinline: PlayGuarded's __try frame must stay free of C++ objects (its contract); inlining this into it
 // would move every destructor-bearing local there.
 __declspec(noinline)
@@ -338,9 +492,12 @@ void DecodeAndPlay(const char* name, const char* path, HWND hwnd, int scrW, int 
     const AVCodec* dec = avcodec_find_decoder(vs->codecpar->codec_id);
     AVCodecContext* ctx = avcodec_alloc_context3(dec);
     avcodec_parameters_to_context(ctx, vs->codecpar);
-    // Threaded decode: the HD pack is 1280x960..2368x1152 H.264 -- single-threaded decode
-    // can't hold 15fps at 4K. 0 = auto (CPU count); harmless for the tiny .wve streams.
-    ctx->thread_count = 0;
+    // Threaded decode: the HD pack is 1280x960..2368x1152 H.264 and single-threaded decode can't hold
+    // its frame rate at 4K. The count is fixed here at open, so the widening comes first (a restore is
+    // PlayGuarded's job, on every way out). Harmless for the tiny .wve streams: tqi has no threading.
+    if (moviepace::WantsMoreCores(vs->codecpar->width, vs->codecpar->height)) WidenAffinity();
+    const int decoderThreads = DecoderThreadCount();
+    ctx->thread_count = decoderThreads;
     ctx->thread_type  = FF_THREAD_FRAME | FF_THREAD_SLICE;
     if (!dec || avcodec_open2(ctx, dec, nullptr) < 0) {
         avcodec_free_context(&ctx); avformat_close_input(&fmt); return;
@@ -348,6 +505,10 @@ void DecodeAndPlay(const char* name, const char* path, HWND hwnd, int scrW, int 
 
     double fps = av_q2d(vs->avg_frame_rate);
     if (!(fps >= 1.0 && fps <= 120.0)) fps = 15.0;
+    const double frameMs = 1000.0 / fps;
+    const double tbMs = av_q2d(vs->time_base) * 1000.0;
+    const double lengthMs = vs->duration > 0 ? static_cast<double>(vs->duration) * tbMs
+                          : fmt->duration > 0 ? static_cast<double>(fmt->duration) / 1000.0 : 0.0;
 
     // ---- audio (optional; video plays silently if any of this fails) ----
     int aId = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
@@ -355,12 +516,13 @@ void DecodeAndPlay(const char* name, const char* path, HWND hwnd, int scrW, int 
     SwrContext* swr = nullptr;
     movieaudio::Sink* sink = nullptr;   // XAudio2, or waveOut where Windows has no xaudio2_9.dll (movieaudio.h)
     std::vector<uint8_t*> audioBufs;
+    int rate = 22050;
     if (aId >= 0) {
         AVStream* as = fmt->streams[aId];
         const AVCodec* ad = avcodec_find_decoder(as->codecpar->codec_id);
         actx = avcodec_alloc_context3(ad);
         avcodec_parameters_to_context(actx, as->codecpar);
-        const int rate = (as->codecpar->sample_rate > 0) ? as->codecpar->sample_rate : 22050;
+        if (as->codecpar->sample_rate > 0) rate = as->codecpar->sample_rate;
         AVChannelLayout outcl = AV_CHANNEL_LAYOUT_STEREO;
         bool ok = ad && avcodec_open2(actx, ad, nullptr) == 0;
         if (ok) ok = swr_alloc_set_opts2(&swr, &outcl, AV_SAMPLE_FMT_S16, rate,
@@ -398,7 +560,14 @@ void DecodeAndPlay(const char* name, const char* path, HWND hwnd, int scrW, int 
     AVPacket* pkt = av_packet_alloc();
     AVFrame*  frm = av_frame_alloc();
     AVFrame*  afrm = av_frame_alloc();
-    DWORD start = 0; int idx = 0; bool skip = false; bool started = false;
+    AVFrame*  held = av_frame_alloc();     // the newest frame that was NOT drawn: the end may need it
+    bool skip = false, started = false, haveBasePts = false, haveHeld = false;
+    int64_t basePts = 0;
+    double t0 = 0, lastRelMs = -frameMs, lastTargetMs = 0;
+    moviepace::Pacer pacer(frameMs);
+    moviepace::AudioTimeline audioClock;
+    std::vector<uint8_t> pendingPcm;       // sound not yet with the device: held for the first picture, then one buffer per read
+    unsigned droppedPackets = 0;
 
     // Push the composed back buffer to the screen (shared by the frame loop and the caption stage).
     auto present = [&]() {
@@ -423,77 +592,211 @@ void DecodeAndPlay(const char* name, const char* path, HWND hwnd, int scrW, int 
         }
     };
 
-    // Receive every frame the decoder has ready: scale into the back buffer, present, hold to its
-    // scheduled time. Also used to DRAIN the (frame-threaded) decoder at EOF so the true last frame
-    // is the one left in `bb` for the caption.
-    auto showFrames = [&]() {
-            while (!skip && avcodec_receive_frame(ctx, frm) == 0) {
-                if (!sws || frm->width != curW || frm->height != curH || frm->format != curFmt) {
-                    curW = frm->width; curH = frm->height; curFmt = frm->format;
-                    dst = FitRect(curW, curH, scrW, scrH);
-                    if (sws) sws_freeContext(sws);
-                    sws = sws_getContext(curW, curH, static_cast<AVPixelFormat>(curFmt),
-                                         dst.right - dst.left, dst.bottom - dst.top, AV_PIX_FMT_BGRA,
-                                         swsFlags, nullptr, nullptr, nullptr);
-                    memset(bb, 0, static_cast<size_t>(bbStride) * scrH); // refresh bars on size change
-                }
-                if (sws) {
-                    uint8_t* d0 = static_cast<uint8_t*>(bb)
-                                + static_cast<size_t>(dst.top) * bbStride + static_cast<size_t>(dst.left) * 4;
-                    uint8_t* dd[4] = { d0, nullptr, nullptr, nullptr };
-                    int      dl[4] = { bbStride, 0, 0, 0 };
-                    sws_scale(sws, frm->data, frm->linesize, 0, curH, dd, dl);
-                }
-
-                if (!started) { start = GetTickCount(); started = true; }
-                const DWORD target = start + static_cast<DWORD>(idx * 1000.0 / fps);
-
-                // Present this frame ONCE, then hold until its scheduled time, pumping for
-                // skip/alt-tab without re-presenting.
-                present();
-                while (!skip) {
-                    Pump(&skip);
-                    if (skip) break;
-                    const DWORD now = GetTickCount();
-                    if (static_cast<int>(now - target) >= 0) break;
-                    const DWORD rem = target - now;
-                    Sleep(rem > 10 ? 10 : rem);
-                }
-                ++idx;
-            }
+    auto scaleToBack = [&](AVFrame* f) {
+        if (!sws || f->width != curW || f->height != curH || f->format != curFmt) {
+            curW = f->width; curH = f->height; curFmt = f->format;
+            dst = FitRect(curW, curH, scrW, scrH);
+            if (sws) sws_freeContext(sws);
+            sws = sws_getContext(curW, curH, static_cast<AVPixelFormat>(curFmt),
+                                 dst.right - dst.left, dst.bottom - dst.top, AV_PIX_FMT_BGRA,
+                                 swsFlags, nullptr, nullptr, nullptr);
+            memset(bb, 0, static_cast<size_t>(bbStride) * scrH); // refresh bars on size change
+        }
+        if (sws) {
+            uint8_t* d0 = static_cast<uint8_t*>(bb)
+                        + static_cast<size_t>(dst.top) * bbStride + static_cast<size_t>(dst.left) * 4;
+            uint8_t* dd[4] = { d0, nullptr, nullptr, nullptr };
+            int      dl[4] = { bbStride, 0, 0, 0 };
+            sws_scale(sws, f->data, f->linesize, 0, curH, dd, dl);
+        }
     };
 
-    bool eof = false;
-    while (!skip && hbb && bb) {
-        if (av_read_frame(fmt, pkt) < 0) { eof = true; break; }
-        if (pkt->stream_index == vId && avcodec_send_packet(ctx, pkt) == 0) {
-            showFrames();
-        } else if (sink && pkt->stream_index == aId && avcodec_send_packet(actx, pkt) == 0) {
-            // Decode audio -> S16 stereo -> queue on the sink. The loop is paced by the video
-            // frame waits, so audio is submitted at ~realtime and stays in sync (XAudio2 and
-            // waveOut both play the queue on their own thread while we sleep between video frames).
-            while (avcodec_receive_frame(actx, afrm) == 0) {
-                const int maxOut = swr_get_out_samples(swr, afrm->nb_samples);
-                if (maxOut <= 0) continue;
-                uint8_t* abuf = static_cast<uint8_t*>(malloc(static_cast<size_t>(maxOut) * 4)); // s16 stereo
-                if (!abuf) continue;
-                uint8_t* outp[1] = { abuf };
-                const int got = swr_convert(swr, outp, maxOut,
-                                            const_cast<const uint8_t**>(afrm->data), afrm->nb_samples);
-                if (got > 0) {
-                    if (sink->Submit(abuf, static_cast<uint32_t>(got) * 4)) audioBufs.push_back(abuf);
-                    else free(abuf);
-                } else {
-                    free(abuf);
+    // Wait for a time on the clock, pumping for skip/alt-tab and watching the affinity. At least one pump
+    // always happens, so Esc works however late we are.
+    auto holdUntil = [&](double targetMs) {
+        while (!skip) {
+            Pump(&skip);
+            if (skip) break;
+            const double now = NowMs();
+            if (now >= targetMs) break;
+            const double rem = targetMs - now;
+            Sleep(rem > 10.0 ? 10 : static_cast<DWORD>(rem) + 1);
+        }
+    };
+
+    // What has been read goes to the device as ONE buffer: XAudio2 refuses past 64 queued, and a clip can end in
+    // a few seconds of nothing but sound (the Cloudbase movie, 81 packets at once).
+    auto submitAudio = [&]() {
+        if (!sink || !started || pendingPcm.empty()) return;
+        bool taken = false;
+        if (uint8_t* p = static_cast<uint8_t*>(malloc(pendingPcm.size()))) {
+            memcpy(p, pendingPcm.data(), pendingPcm.size());
+            taken = sink->Submit(p, static_cast<uint32_t>(pendingPcm.size()));
+            if (taken) audioBufs.push_back(p);
+            else free(p);
+        }
+        if (!taken) audioClock.OnRefused();
+        pendingPcm.clear();
+    };
+
+    // The first picture is on the screen: the movie's clock and its sound start now, together. Frame-threaded
+    // decoding delivers that picture several packets after the first sound packet has been read.
+    auto startClock = [&]() {
+        t0 = NowMs();
+        started = true;
+        audioClock.Start(t0);
+        submitAudio();
+    };
+
+    // Receive every frame the decoder has ready and show the ones that are in time. Also used to DRAIN
+    // the (frame-threaded) decoder at EOF. Returns how many frames came out.
+    auto showFrames = [&]() -> int {
+        int delivered = 0;
+        while (!skip && avcodec_receive_frame(ctx, frm) == 0) {
+            ++delivered;
+            // The schedule comes from the frame's own timestamp: when frames are discarded a counter
+            // would run early. No timestamp at all = one frame after the last, the old rule.
+            const int64_t ts = frm->best_effort_timestamp;
+            double relMs;
+            if (ts != AV_NOPTS_VALUE) {
+                if (!haveBasePts) {
+                    haveBasePts = true; basePts = ts;
+                    pacer.AllowDiscard(ctx->codec_id == AV_CODEC_ID_H264 && lengthMs > 0);
                 }
+                relMs = static_cast<double>(ts - basePts) * tbMs;
+            } else {
+                relMs = lastRelMs + frameMs;
+            }
+            lastRelMs = relMs;
+            lastTargetMs = t0 + relMs + audioClock.ShiftMs();
+
+            const double now = NowMs();
+            if (started && pacer.OnFrame(now, lastTargetMs) == moviepace::kSkip) {
+                // Late: nothing is scaled or drawn. It is kept in case it turns out to be the last.
+                av_frame_unref(held);
+                av_frame_move_ref(held, frm);
+                haveHeld = true;
+                Pump(&skip);
+                continue;
+            }
+            scaleToBack(frm);
+            haveHeld = false;
+            if (started) {
+                holdUntil(lastTargetMs);
+                if (skip) break;
+                present();
+            } else {
+                present();
+                startClock();
+                lastTargetMs = t0;
+            }
+            pacer.OnShown(NowMs());
+        }
+        return delivered;
+    };
+
+    // Decode audio -> S16 stereo -> append to what waits for the device.
+    auto feedAudio = [&]() {
+        while (avcodec_receive_frame(actx, afrm) == 0) {
+            const int maxOut = swr_get_out_samples(swr, afrm->nb_samples);
+            if (maxOut <= 0) continue;
+            const size_t have = pendingPcm.size();
+            pendingPcm.resize(have + static_cast<size_t>(maxOut) * 4);   // s16 stereo
+            uint8_t* outp[1] = { pendingPcm.data() + have };
+            const int got = swr_convert(swr, outp, maxOut,
+                                        const_cast<const uint8_t**>(afrm->data), afrm->nb_samples);
+            pendingPcm.resize(have + (got > 0 ? static_cast<size_t>(got) * 4 : 0));
+            if (got <= 0) continue;
+            const double durMs = got * 1000.0 / rate;
+            if (started) { audioClock.OnSubmit(NowMs(), durMs); continue; }
+            audioClock.Queue(durMs);
+            const double dropMs = audioClock.TrimPending(moviepace::kPreRollKeepMs);
+            if (dropMs > 0) {   // whole stereo frames, the oldest first
+                size_t drop = static_cast<size_t>(dropMs * rate / 1000.0) * 4;
+                if (drop > pendingPcm.size()) drop = pendingPcm.size();
+                pendingPcm.erase(pendingPcm.begin(), pendingPcm.begin() + static_cast<std::ptrdiff_t>(drop));
             }
         }
-        av_packet_unref(pkt);
+    };
+
+    // Video packets wait here while the file is read further ahead, because the sound has to be read in
+    // the same order: it is what keeps the sound queue topped up while a picture is slow.
+    std::deque<AVPacket*> queue;
+    size_t queuedBytes = 0;
+    bool demuxEof = false;
+    size_t videoSinceAudio = 0;       // a track that has ended must not be waited for
+    double lastPacketMs = 0;
+
+    auto takePacket = [&](size_t i) {
+        AVPacket* q = queue[i];
+        queuedBytes -= static_cast<size_t>(q->size);
+        queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(i));
+        return q;
+    };
+
+    while (!skip && hbb && bb) {
+        const auto audioLive = [&]() { return sink && videoSinceAudio < moviepace::kAudioEndedPackets; };
+        while (!demuxEof && moviepace::WantDemux(audioLive(), audioClock.LeadMs(NowMs()), queue.size(), queuedBytes)) {
+            if (av_read_frame(fmt, pkt) < 0) { demuxEof = true; break; }
+            if (pkt->stream_index == vId) {
+                ++videoSinceAudio;
+                if (pkt->pts != AV_NOPTS_VALUE) lastPacketMs = static_cast<double>(pkt->pts) * tbMs;
+                if (AVPacket* q = av_packet_alloc()) {
+                    av_packet_move_ref(q, pkt);
+                    queuedBytes += static_cast<size_t>(q->size);
+                    queue.push_back(q);
+                }
+            } else if (sink && pkt->stream_index == aId) {
+                videoSinceAudio = 0;
+                if (avcodec_send_packet(actx, pkt) == 0) feedAudio();
+            }
+            av_packet_unref(pkt);
+        }
+        submitAudio();
+        if (queue.empty()) { if (demuxEof) break; continue; }
+
+        const bool nearEnd = moviepace::NearEnd(demuxEof, lengthMs, lastPacketMs);
+
+        // Last resort: drawing nothing was not enough, the picture is falling behind the sound. The jump lands on
+        // the newest keyframe that is already due, and needs timestamps to know which one that is.
+        if (started && haveBasePts && moviepace::ShouldDropToKeyframe(pacer.LateMs())) {
+            const double now = NowMs();
+            for (size_t i = queue.size(); i-- > 1; ) {
+                const AVPacket* k = queue[i];
+                if (!(k->flags & AV_PKT_FLAG_KEY) || k->pts == AV_NOPTS_VALUE) continue;
+                if (t0 + static_cast<double>(k->pts - basePts) * tbMs + audioClock.ShiftMs() > now) continue;
+                for (size_t n = 0; n < i; ++n) { AVPacket* q = takePacket(0); av_packet_free(&q); ++droppedPackets; }
+                break;
+            }
+        }
+
+        AVPacket* q = takePacket(0);
+        ctx->skip_frame = pacer.DiscardNonRef(nearEnd) ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
+        pacer.OnPacketSent();
+        const int delivered = avcodec_send_packet(ctx, q) == 0 ? showFrames() : 0;
+        av_packet_free(&q);
+        if (!delivered) Pump(&skip);   // a discarded or delayed picture: the keyboard still gets its turn
     }
+    const bool eof = demuxEof && queue.empty();
+    for (AVPacket* q : queue) av_packet_free(&q);
+    queue.clear();
 
     if (eof && !skip && hbb && bb) {
+        ctx->skip_frame = AVDISCARD_DEFAULT;
         avcodec_send_packet(ctx, nullptr);   // flush: the threaded decoder still holds the tail frames
         showFrames();
+        // The true last frame ends up in `bb` for the caption, even if it was too late to be drawn.
+        if (!skip && haveHeld) { scaleToBack(held); present(); haveHeld = false; }
+        if (started && !skip) holdUntil(lastTargetMs + frameMs);
+    }
+    {
+        char l[260];
+        _snprintf_s(l, sizeof l, _TRUNCATE,
+                    "[uimod] movie pacing: %s threads=%d shown=%u skipped=%u discard_entries=%u dropped_packets=%u max_late=%.0fms "
+                    "sound_underruns=%u sound_shift=%.0fms\n",
+                    name ? name : "(movie)", decoderThreads, pacer.Shown(), pacer.Skipped(), pacer.DiscardEntries(), droppedPackets,
+                    pacer.MaxLateMs(), audioClock.Underruns(), audioClock.ShiftMs());
+        UimodLog(l);
     }
 
     // Vanilla's post-movie caption (title + typewriter benefit text over the held last frame). Like
@@ -521,6 +824,7 @@ void DecodeAndPlay(const char* name, const char* path, HWND hwnd, int scrW, int 
     if (sws) sws_freeContext(sws);
     av_frame_free(&frm);
     av_frame_free(&afrm);
+    av_frame_free(&held);
     av_packet_free(&pkt);
     avcodec_free_context(&ctx);
     avformat_close_input(&fmt);
@@ -543,14 +847,21 @@ DWORD DelayLoadFilter(DWORD code)
 void PlayGuarded(const char* name, const char* path, HWND hwnd, int scrW, int scrH, PresentMode mode,
                  DDrawPresenter* dp, int swsFlags)
 {
+    ++g_playDepth;
     __try {
-        DecodeAndPlay(name, path, hwnd, scrW, scrH, mode, dp, swsFlags);
-    } __except (DelayLoadFilter(GetExceptionCode())) {
-        char l[200];
-        _snprintf_s(l, sizeof l, _TRUNCATE, "[uimod] movie aborted: a codec DLL bind failed inside the player (exception 0x%08lX); "
-                                            "see the delay-load line above\n", static_cast<unsigned long>(GetExceptionCode()));
-        UimodLog(l);
-        if (g_activeSink) { g_activeSink->Stop(); delete g_activeSink; g_activeSink = nullptr; }   // no exception in flight here
+        __try {
+            DecodeAndPlay(name, path, hwnd, scrW, scrH, mode, dp, swsFlags);
+        } __except (DelayLoadFilter(GetExceptionCode())) {
+            char l[200];
+            _snprintf_s(l, sizeof l, _TRUNCATE, "[uimod] movie aborted: a codec DLL bind failed inside the player (exception 0x%08lX); "
+                                                "see the delay-load line above\n", static_cast<unsigned long>(GetExceptionCode()));
+            UimodLog(l);
+            if (g_activeSink) { g_activeSink->Stop(); delete g_activeSink; g_activeSink = nullptr; }   // no exception in flight here
+        }
+    } __finally {
+        // Every way out of the movie comes through here: the end, a skip, an open or decoder failure, the handler
+        // above, and any exception something further up the stack goes on to catch.
+        if (--g_playDepth == 0) RestoreAffinity();
     }
 }
 

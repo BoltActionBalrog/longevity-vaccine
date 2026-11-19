@@ -1,6 +1,7 @@
 // uimod "Modern Control Set" (opt-in, [UIMod] ModernControls): right click moves the selected unit at once,
 // the move-to line follows the pointer whenever a unit is selected, Shift+left click opens the tile orders
 // menu, no left drag. Child [UIMod] RightClickDragsToMove: vanilla's hold-and-drag on the RIGHT button instead.
+// Child [UIMod] HideMoveLine: no move-to line on hover (instant mode).
 // [UIMod] MapDragButton: which button drag-scrolls the map under PRACX (2 right, 1 middle, 0 none).
 // Also owns the Shift-branch neutralisation (no Shift+click instant drag in any mode) and the modifier
 // auto-repeat filter that fixes the engine's swallowed-click bug. See modernctl.cpp.
@@ -10,6 +11,7 @@
 
 constexpr int kModernControlsDefault = 0;     // vanilla
 constexpr int kRightClickDragDefault = 0;
+constexpr int kHideMoveLineDefault   = 0;     // the hover line shows
 constexpr int kMapDragButtonDefault  = 2;     // PRACX's right-button drag scroll
 constexpr int kMapDragRight = 2, kMapDragMiddle = 1, kMapDragNone = 0;
 
@@ -27,6 +29,12 @@ bool RightClickDragAvailable();               // Available() and (no PRACX, or P
 int  RightClickDragGet();
 void RightClickDragSet(int on);
 void RightClickDragSave();
+
+// Child [UIMod] HideMoveLine: the hover line and its "Move to" label are off (instant mode only; the line still
+// shows while Ctrl is held and while a Ctrl+right waypoint path is being built).
+int  HideMoveLineGet();                       // its row exists with the Modern Control Set rows (ModernControlsAvailable)
+void HideMoveLineSet(int on);                 // live-apply (no persist)
+void HideMoveLineSave();
 
 bool MapDragButtonAvailable();                // PRACX bound and its drag sites checked out (the cell row shows)
 int  MapDragButtonGet();                      // the STORED value (2/1/0)

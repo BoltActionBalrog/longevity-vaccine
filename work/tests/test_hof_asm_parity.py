@@ -546,7 +546,7 @@ def test_pairnn_field_rule_is_bit_exact_against_the_law(num):
     make_buffer(e, DEST, DDATA, dW, dH, dW, bytes(pal))
     P = SL.stripe_period(num)
     cases = [(5, 3, y0, 0, 0, sw, sh) for y0 in range(P)] + [(-4, -7, 1, 0, 0, sw, sh), (2, 2, 0, 3, 5, 40, 33)]
-    for flag, field in ((1, SL.HOF_FIELD_PAIR), (0, None)):
+    for flag, field in ((SL.hof_field_cell(SL.HOF_FIELD_PAIR), SL.HOF_FIELD_PAIR), (0, None)):
         for dx, dy, y0, sx, sy, w, h in cases:
             w32(uc, VA["g_hof_field"], flag)
             w32(uc, DEST - 0x304, y0)
@@ -559,7 +559,7 @@ def test_pairnn_field_rule_is_bit_exact_against_the_law(num):
             assert (e.reg("esi"), e.reg("edi"), e.reg("ebx"), e.reg("ebp")) == (0x11, 0x22, 0x33, 0x44)
             assert bytes(uc.mem_read(DDATA, dW * dH)) == bytes(want), (flag, dx, dy, y0, sx, sy)
     # the rule changed something: the channels came out on the grid with the flag, plain NN without
-    w32(uc, VA["g_hof_field"], 1)
+    w32(uc, VA["g_hof_field"], SL.hof_field_cell(SL.HOF_FIELD_PAIR))
     a = bytearray(dst0)
     SL.hof_pair_enlarge(src, sw, 0, 0, sw, sh, bytes(pal), num, a, dW, dW, dH, 0, 0, 0, 9, SL.HOF_FIELD_PAIR)
     b = bytearray(dst0)
@@ -580,7 +580,7 @@ def test_pairfld_preserves_the_pairtex_contract_registers():
     w32(uc, FR + 0x1C, sh)
     w32(uc, FR + 0x2C, 9)
     f0, f1 = SL.HOF_FIELD_PAIR
-    for flag in (0, 1):
+    for flag in (0, SL.hof_field_cell(SL.HOF_FIELD_PAIR)):
         w32(uc, VA["g_hof_field"], flag)
         for x, y in ((5, 7), (5, 8), (5, 2), (5, 30), (5, 29), (5, 33), (30, 16), (5, 0), (5, sh - 1)):
             w32(uc, FR - 0x34, y)
@@ -596,7 +596,7 @@ def test_pairfld_preserves_the_pairtex_contract_registers():
 
 @pytest.mark.parametrize("armed", (0, 1))
 def test_backdrop_field_bracket_wraps_the_unchanged_backdrop(armed):
-    """The hof.pcx site enters t_hof_bd_field: g_hof_field = 1 only for the duration of t_hof_bd_hof, the 7 args / ecx
+    """The hof.pcx site enters t_hof_bd_field: g_hof_field = the packed hof.pcx pair only for the duration of t_hof_bd_hof, the 7 args / ecx
     reach it unchanged, its eax comes back, RET 0x1C."""
     e = Emu()
     uc = e.uc
@@ -610,7 +610,7 @@ def test_backdrop_field_bracket_wraps_the_unchanged_backdrop(armed):
     e.run(VA["t_hof_bd_field"], ecx=0x777, esi=0x11, edi=0x22, ebx=0x33, ebp=0x44)
     assert e.reg("esp") == SP0 + 4 + 0x1C and e.reg("eax") == 0x5A
     assert (e.reg("esi"), e.reg("edi"), e.reg("ebx"), e.reg("ebp")) == (0x11, 0x22, 0x33, 0x44)
-    assert r32(uc, REC3 + 0x30) == 1 and r32(uc, REC3) == 0x777 and r32(uc, REC3 + 4) == 1
+    assert r32(uc, REC3 + 0x30) == 1 and r32(uc, REC3) == 0x777 and r32(uc, REC3 + 4) == SL.hof_field_cell(SL.HOF_FIELD_PAIR)
     assert [r32(uc, REC3 + 8 + 4 * k) for k in range(7)] == [11, 22, 33, 44, 55, 66, 77]
     assert r32(uc, VA["g_hof_field"]) == 0
 

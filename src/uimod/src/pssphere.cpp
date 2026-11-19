@@ -43,7 +43,11 @@
 // is stale. The would-be totals are therefore Thinker's psych without the sphere, which is what that
 // ruleset would really give. Thinker also NOPs draw_pop's two superdrone assignments (its way of hiding the
 // vanilla leftover-superdrone count on a sphere base); they are restored because the row draws the would-be
-// totals, which need the faces. Checked lazily, because the load order of the two DLLs is unknown.
+// totals, which need the faces. Thinker's PSYCH-tab label append (0x408DBD) is chained as well: its relabel of a
+// sphere / stapled base's rows is squashed over our would-be totals, and everything else it prints -- the captured-base
+// countdown included -- is its own (pslabel_core.h). Every chained jump or call must land inside thinker.dll's image
+// as the startup check found it (thinkerversion.cpp Detect, decided once before Init): a thinker.dll that turns up
+// later is never chained. Looked at once more on first use, in case Thinker's writes land after our Init.
 
 #include "pssphere.h"
 
@@ -54,7 +58,9 @@
 
 #include "prefs.h"
 #include "psbadge.h"
-#include "thinkercompat.h"   // ThinkerRange(): the PSYCH relabel squash checks the call lands in thinker.dll
+#include "pslabel_core.h"    // which PSYCH-tab row labels skip Thinker's relabel
+#include "thinkercompat.h"   // ThinkerRange(): every Thinker target we chain must lie inside thinker.dll
+#include "thinkerversion.h"  // ThinkerPresent() / ThinkerOnPin(): the startup check's one decision
 
 void UimodLog(const char* msg);   // init.cpp
 
@@ -94,8 +100,9 @@ constexpr int kBasePop = 0x06, kBaseSpecialists = 0x7C, kBaseSphereByte = 0x8E; 
 constexpr BYTE kSphereBit = 0x80;
 constexpr int kBaseStaple = 0x08;                      // uint8 nerve_staple_turns_left (Thinker engine_base.h); > 0 = stapled
 constexpr int kKindSphere = 1, kKindStaple = 2;        // what suppresses the base's drones (both bits for a stapled sphere)
-constexpr uintptr_t kVA_PsychLabelSite = 0x00408DBD;   // BaseWin_draw_psych: `call 0x645470` (the row-label append)
-constexpr uintptr_t kVA_PsychLabelOrig = 0x00645470;   //   Thinker write_calls it to its relabel; we put the original back
+constexpr uintptr_t kVA_PsychLabelSite = 0x00408DBD;   // BaseWin_draw_psych: `call crt_strcat` (the row-label append)
+constexpr uintptr_t kVA_PsychLabelOrig = 0x00645470;   //   crt_strcat, cdecl; Thinker write_calls the site to its relabel
+constexpr uintptr_t kVA_TextLabels     = 0x009B90F8;   // TextLabels {char** labels; uint32 count}
 constexpr int kBaseTalents = 0x118, kBaseDrones = 0x11C, kBaseSuperdrones = 0x120;
 constexpr int kSpriteSize = 0x2C, kSpriteW = 0x10, kSpriteH = 0x14, kSpriteOffX = 0x20, kSpriteOffY = 0x24;
 constexpr int kBufferColors = 0xA4, kBufferPalStamp = 0x4A4;   // RGBQUAD[256] + the synced palette's generation
@@ -163,6 +170,9 @@ FVoid g_psychTramp = nullptr;         // base_psych past our detour
 FVoid g_energyNext = nullptr;         // Thinker's mod_base_energy (the E9 operand Thinker writes at 0x4EB560)
 using FInt = void(__cdecl*)(int);
 FInt  g_computeNext = nullptr;        // Thinker's base_compute (the E9 operand Thinker writes at 0x4EC3B0)
+using FLabel = void(__cdecl*)(char*, const char*);
+FLabel g_labelNext = nullptr;         // Thinker's BaseWin_draw_psych_strcat (the E8 operand Thinker writes at 0x408DBD)
+bool  g_energyForeign = false;        // base_energy is neither vanilla nor chained: its psych is not the engine's
 unsigned g_cacheGen = 0;              // bumped whenever the would-be cache is (re)filled
 bool  g_superNoped = false;           // Thinker NOPed draw_pop's superdrone face assignments (see SuperFacesVanilla)
 void* g_opsTramp = nullptr;
@@ -226,52 +236,85 @@ bool AllNops(const BYTE* p, size_t n)
 
 void PsychCore(FVoid next, bool runReal);
 
+// The target of the E9 / E8 at `p` when it lies inside thinker.dll; nullptr otherwise (no Thinker, another module's
+// jump, or no jump at all). Every Thinker function this file chains comes through here (arithmetic: pslabel_core.h).
+BYTE* ThinkerBranchTarget(BYTE* p, BYTE opcode)
+{
+    uintptr_t lo = 0, hi = 0;
+    if (p[0] != opcode || !ThinkerRange(&lo, &hi)) return nullptr;
+    return reinterpret_cast<BYTE*>(pslabel::BranchTarget(p, reinterpret_cast<uintptr_t>(p), opcode, lo, hi));
+}
+
+// Re-points the 5-byte E9 / E8 at `p` (opcode kept) at `fn`.
+void Branch(BYTE* p, BYTE opcode, const void* fn)
+{
+    BYTE b[5];
+    pslabel::EncodeBranch(b, reinterpret_cast<uintptr_t>(p), opcode, reinterpret_cast<uintptr_t>(fn));
+    Patch(p, b, 5);
+}
+
+// The PSYCH tab's row-label append at 0x408DBD under Thinker (pslabel_core.h): its relabel of "Stapled Base" and
+// "Secret Projects" on a sphere / stapled base -- where row 4 holds our would-be totals -- is squashed by the engine's
+// own strcat (user decision 2026-10-29); every other label, the captured-base countdown included, is Thinker's.
+// cdecl like both callees; the caller cleans the stack and never reads eax (Thinker's function returns void).
+char* __cdecl PsychLabelChain(char* buffer, const char* source)
+{
+    if (pslabel::KeepOwn(Rd<int>(kVA_CurrentBaseID), At(kVA_Bases), Rd<const char* const*>(kVA_TextLabels),
+                         Rd<uint32_t>(kVA_TextLabels + 4), source)) {
+        using FStrcat = char*(__cdecl*)(char*, const char*);
+        return reinterpret_cast<FStrcat>(At(kVA_PsychLabelOrig))(buffer, source);
+    }
+    g_labelNext(buffer, source);
+    return buffer;
+}
+
+// The psych a draw-time would-be pass runs: Thinker's chained mod_base_energy, else the engine's base_psych -- but
+// only while base_energy is still the engine's; under a psych we did not chain, none (the base draws vanilla).
+FVoid DrawTimePsych()
+{
+    if (g_energyNext) return g_energyNext;
+    return g_energyForeign ? nullptr : g_psychTramp;
+}
+
 // Checked at install AND on first use (`inGame`): Thinker may load after us, but not after the game runs.
 void ThinkerCheck(bool inGame)
 {
     if (g_thinkerChecked || !g_installed) return;
     BYTE* e = At(kVA_BaseEnergy);
-    if (e[0] == 0xE9) {
-        int32_t rel; memcpy(&rel, e + 1, 4);
-        g_energyNext = reinterpret_cast<FVoid>(e + 5 + rel);
-        const int32_t fwd = static_cast<int32_t>(reinterpret_cast<BYTE*>(&WrapEnergy) - (e + 5));
-        BYTE jmp[5] = { 0xE9 }; memcpy(jmp + 1, &fwd, 4);
-        Patch(e, jmp, 5);
+    BYTE* energy = ThinkerBranchTarget(e, 0xE9);
+    if (energy) {
+        g_energyNext = reinterpret_cast<FVoid>(energy);
+        Branch(e, 0xE9, &WrapEnergy);
         BYTE* c = At(kVA_BaseCompute);
-        if (c[0] == 0xE9) {
-            memcpy(&rel, c + 1, 4);
-            g_computeNext = reinterpret_cast<FInt>(c + 5 + rel);
-            const int32_t fwd2 = static_cast<int32_t>(reinterpret_cast<BYTE*>(&WrapBaseCompute) - (c + 5));
-            memcpy(jmp + 1, &fwd2, 4);
-            Patch(c, jmp, 5);
+        if (BYTE* compute = ThinkerBranchTarget(c, 0xE9)) {
+            g_computeNext = reinterpret_cast<FInt>(compute);
+            Branch(c, 0xE9, &WrapBaseCompute);
             UimodLog("[uimod] pssphere: Thinker: base_energy 0x4EB560 and base_compute 0x4EC3B0 are its jumps -> both "
                      "chained; the would-be psych runs through Thinker's mod_base_energy after its base_compute\n");
-            // Thinker's render_base_info relabels the PSYCH tab's rows for a sphere / stapled base (row 4 "Secret
-            // Projects" -> "Stapled Base", row 0 -> "Unmodified"); over our would-be totals in row 4 that reads
-            // backwards. The engine's own label append goes back at that site (user decision 2026-10-29: squash).
+            // Thinker's PSYCH-tab label append (its relabel of a sphere / stapled base's rows, and the captured-base
+            // countdown) is chained, with the relabel squashed where row 4 holds our would-be totals.
             BYTE* s = At(kVA_PsychLabelSite);
-            uintptr_t tlo = 0, thi = 0;
-            if (s[0] == 0xE8 && ThinkerRange(&tlo, &thi)) {
-                memcpy(&rel, s + 1, 4);
-                const uintptr_t target = reinterpret_cast<uintptr_t>(s + 5 + rel);
-                if (target >= tlo && target < thi) {
-                    BYTE call[5] = { 0xE8 };
-                    const int32_t back = static_cast<int32_t>(At(kVA_PsychLabelOrig) - (s + 5));
-                    memcpy(call + 1, &back, 4);
-                    Patch(s, call, 5);
-                    UimodLog("[uimod] pssphere: Thinker: its PSYCH-tab relabel at 0x408DBD is undone -> the rows keep "
-                             "their own labels over our would-be totals\n");
-                }
+            if (BYTE* label = ThinkerBranchTarget(s, 0xE8)) {
+                g_labelNext = reinterpret_cast<FLabel>(label);
+                Branch(s, 0xE8, &PsychLabelChain);
+                UimodLog("[uimod] pssphere: Thinker: its PSYCH-tab label append at 0x408DBD is chained -> a sphere / "
+                         "stapled base keeps its own row labels over our would-be totals; every other label is Thinker's\n");
+            } else {
+                UimodLog("[uimod] pssphere: Thinker: 0x408DBD is not a call into thinker.dll -> the PSYCH-tab labels "
+                         "are left as they are\n");
             }
         } else {
-            UimodLog("[uimod] pssphere: Thinker: base_energy 0x4EB560 chained, but base_compute 0x4EC3B0 is not a jmp -> "
-                     "a base_compute that bypasses base_energy would show no suppressed drones\n");
+            UimodLog("[uimod] pssphere: Thinker: base_energy 0x4EB560 chained, but base_compute 0x4EC3B0 is not a jmp "
+                     "into thinker.dll -> a base_compute that bypasses base_energy would show no suppressed drones\n");
         }
     } else if (memcmp(e, kEnergyEntry, sizeof kEnergyEntry) == 0) {
         if (!inGame) return;                             // vanilla so far: look once more when the game runs
     } else {
-        UimodLog("[uimod] pssphere: unexpected bytes at base_energy 0x4EB560 -> not chained; a psych "
-                 "replacement that bypasses base_psych will show no suppressed drones\n");
+        // Not ours to chain (e.g. a thinker.dll the startup check did not see): the draw-time fallback must not run
+        // the ENGINE's psych on that game (DrawTimePsych), so a stale base draws vanilla instead (review 2026-11-15).
+        g_energyForeign = true;
+        UimodLog("[uimod] pssphere: base_energy 0x4EB560 is neither vanilla nor a jmp into thinker.dll -> not chained; "
+                 "a psych replacement that bypasses base_psych will show no suppressed drones\n");
     }
     g_thinkerChecked = true;
 
@@ -547,7 +590,7 @@ void __cdecl PopEnter()
         // badge appeared only after closing and reopening the base).
         // runReal = false: the real totals are already in the record; a real pass outside PsychCore's snapshot would
         // let Thinker's mod_base_energy accumulate energy_intake_2 once more (audit 2026-10-30)
-        FVoid next = g_energyNext ? g_energyNext : g_psychTramp;
+        FVoid next = DrawTimePsych();
         if (next) PsychCore(next, false);
     }
     if (CacheStale(base, id, kind)) {
@@ -680,6 +723,14 @@ void DetourEntryN(uintptr_t va, size_t steal, BYTE* tramp, void* hook)
 
 void InstallPunishmentSphereView()
 {
+    // Reduced mode. Under Thinker this view runs INSIDE Thinker's compute flow (its base_energy / base_compute jumps,
+    // the psych pass, three naked stubs) and chains into Thinker's functions on first use; all of that is measured on
+    // the pinned build only. On any other Thinker the whole view stays out -- not one hook is installed, so there is
+    // nothing left to gate later (a gate inside ThinkerCheck would leave five hook families running; audit 2026-11-14).
+    if (ThinkerPresent() && !ThinkerOnPin()) {
+        UimodLog("[uimod] pssphere: not the supported Thinker Mod build -> Punishment Sphere drone view NOT installed\n");
+        return;
+    }
     uintptr_t lo = 0, hi = 0;
     if (!UimodPcave2Range(&lo, &hi)) lo = hi = 0;               // unpatched exe: only the vanilla targets pass
 
@@ -736,7 +787,7 @@ bool PsSphereWouldBePop(int* talents, int* workers, int* drones, int* specialist
     BYTE* base = CurrentSphereBase(&id, &kind);
     if (!base) return false;
     if (CacheStale(base, id, kind) && !g_inPsych && Rd<int>(kVA_BaseUpkeepState) == 0) {
-        FVoid next = g_energyNext ? g_energyNext : g_psychTramp;   // runReal = false: the real totals are in the record
+        FVoid next = DrawTimePsych();                           // runReal = false: the real totals are in the record
         if (next) PsychCore(next, false);
     }
     if (CacheStale(base, id, kind)) return false;

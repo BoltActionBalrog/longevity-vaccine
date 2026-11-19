@@ -82,6 +82,8 @@ MENU_WIN, MENU_BUF = 0x9380DC, 0x938520
 COMM_WIN, MW_BUF   = 0x7FD648, 0x7FDA8C
 MW_ROW_FONT, MW_HDR_FONT = 0x7FD648 + 0x285C, 0x7FD648 + 0x2884   # MultiWin row_font (Arial 10,0) / hdr_font (Arial 14,1)
 T_FFN    = 0xA0C000 + 0x2E570   # t_ffn(S, v) cdecl: the find_font drop-in with the face law (assemble_fontlaw.py)
+T_FDIRECT_A14B = 0xA0C000 + 0x2E590   # t_fdirect_a14b() cdecl: the shared Arial fl(14g/16) bold slot
+SMALL_MAX = 12   # scaling_laws.FONT_POOL_SMALL_MAX: pool face boundary
 MW_RECT  = 0x7FE080      # comm+0xa38 (w/h at +8/+0xC == +0xa40/+0xa44)
 HS_FIELD = 0x7FE08C      # comm+0xa44 scaled box H
 BTN1_OBJ, BTN1_BUF = 0x7FE80C, 0x7FEC50   # Council
@@ -166,10 +168,12 @@ hry_small:
     ret
 """
 
-# hm_scalefont v2 (2026-09-17, audit finding 3.3): MultiWin's two Font_init'd fonts (row_font MW+0x285C =
-# Arial 10 REGULAR, hdr_font MW+0x2884 = Arial 14 bold) go through t_ffn(NATIVE size, variant) = the face
-# law; v1's off-table branch asked the pool for round((cell-3)g/16) with variant 1 = Arial Narrow bold.
-# Any other off-table font keeps the v1 estimate.
+# hm_scalefont v3 (2026-11-10): row_font MW+0x285C = Font_init("Arial", 10, 0) -> t_ffn(10, 0) (Arial regular);
+# hdr_font MW+0x2884 = Font_init("Arial", 14, 1), a DIRECT init (the MP turn-clock text) -> t_fdirect_a14b() =
+# Arial fl(14g/16) bold (law COMMLINK_HDR_FONT; v2's t_ffn(14, 1) went to the pool = Arial Narrow bold); a POOL
+# font <= 12 (commlink_redraw's find_font(12, 1) "NO CONTACTS") -> t_ffn(S, v) (law commlink_pool_font_law; v1/v2
+# asked the pool for round(S*g/16) = Arial Narrow bold from g = 18).  Pool fonts > 12 keep the v1 round ask; any
+# other off-table font keeps the v1 estimate.
 ASMS["hm_scalefont"] = f"""
     push ecx
     push ebx
@@ -182,11 +186,12 @@ ASMS["hm_scalefont"] = f"""
 hsf_nrow:
     cmp ebx, {MW_HDR_FONT:#x}
     jne hsf_pool
-    push 1
-    push 14
+    call {T_FDIRECT_A14B:#x}
+    jmp hsf_j
 hsf_ffn:
     call {T_FFN:#x}
     add esp, 8
+hsf_j:
     jmp hsf_done
 hsf_pool:
     sub eax, 0x93FC58
@@ -199,11 +204,16 @@ hsf_pool:
     movzx ebx, byte ptr [eax + {V['hm_font_size_table']:#x}]
     mov eax, edx
     xor edx, edx
-    mov ecx, 0x28
+    push 0x28
+    pop ecx
     div ecx
     mov ecx, eax
     mov eax, ebx
-    jmp hsf_scale
+    cmp eax, {SMALL_MAX}
+    jg hsf_scale
+    push ecx
+    push eax
+    jmp hsf_ffn
 hsf_off:
     mov eax, dword ptr [ebx+0xC]
     test eax, eax
@@ -212,18 +222,21 @@ hsf_off:
     jle hsf_v
     sub eax, 3
 hsf_v:
-    mov ecx, 1
+    xor ecx, ecx
+    inc ecx
 hsf_scale:
     imul eax, dword ptr [{G:#x}]
     add eax, 8
     sar eax, 4
     cmp eax, 40
     jle hsf_c1
-    mov eax, 40
+    push 40
+    pop eax
 hsf_c1:
     cmp eax, 8
     jge hsf_c2
-    mov eax, 8
+    push 8
+    pop eax
 hsf_c2:
     push ecx
     push eax

@@ -316,21 +316,69 @@ def clear_declines(game_dir: Path) -> bool:
     return ini_set(game_dir, KEY_DECLINED, "")
 
 
-def clear(game_dir: Path, say=print) -> None:
-    """Remove the receipt (uninstall). Leaves the [UIMod] settings alone -- they are the player's
-    preferences, not our bookkeeping."""
+#: The [Longevity] keys that are our bookkeeping (clear() removes them; the player's settings stay).
+RECEIPT_KEYS = tuple(MODULE_KEYS.values()) + (KEY_TARGET, KEY_DECLINED, KEY_LAST_CHECK)
+_ABSENT = "<longevity: key absent>"     # printable: the wide API stops a default at its first NUL
+
+
+def receipt_keys_present(game_dir: Path) -> list:
+    """The receipt keys still in Alpha Centauri.ini (read() falls back to them when the file is gone). An ini the
+    profile API cannot read gives none -- ini_unreadable() tells that apart."""
+    return [k for k in RECEIPT_KEYS if ini_get(game_dir, k, _ABSENT) != _ABSENT]
+
+
+def ini_unreadable(game_dir: Path) -> str:
+    """'' when the profile API can read Alpha Centauri.ini, or it is not there; else why not (another program holds
+    it without sharing, access is denied). The profile API answers an unreadable file with the default, exactly as
+    it answers a missing key: receipt_keys_present() alone read "no keys" there (audit 2026-11-16, D3: an ini held
+    open kept the keys under a COMPLETE verdict). Never raises."""
+    try:
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    except (AttributeError, OSError):
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(_INI_BUF)
+        ctypes.set_last_error(0)
+        k32.GetPrivateProfileStringW(INI_SECTION, RECEIPT_KEYS[0], _ABSENT, buf, _INI_BUF, _ini_path(game_dir))
+        err = ctypes.get_last_error()
+    except (OSError, AttributeError, ValueError):
+        return ""
+    # 0: read; 2 / 3: no such key, section or file; 234: a value longer than the buffer (read all the same)
+    if err in (0, 2, 3, 234):
+        return ""
+    return ctypes.FormatError(err).strip() or f"error {err}"
+
+
+def clear(game_dir: Path, say=print) -> bool:
+    """Remove the receipt (uninstall): the file and its keys in Alpha Centauri.ini. Leaves the [UIMod] settings
+    alone -- they are the player's preferences, not our bookkeeping. Returns False when any of it is still there
+    (said): a key left behind reads as "installed" as much as the file does (audit 2026-11-16: a read-only ini kept
+    them silently under a COMPLETE verdict)."""
     game_dir = Path(game_dir)
+    gone = True
     try:
         (game_dir / JSON_NAME).unlink(missing_ok=True)
     except OSError as e:
         say(f"  WARNING: could not remove {JSON_NAME}: {e}")
+        gone = False
     k = _k32()
-    for key in list(MODULE_KEYS.values()) + [KEY_TARGET, KEY_DECLINED, KEY_LAST_CHECK]:
+    for key in RECEIPT_KEYS:
         if k is None:
             break
+        if ini_get(game_dir, key, _ABSENT) == _ABSENT:
+            continue                 # never written: deleting it would still rewrite the file (a trailing newline)
         try:
             # A NULL value DELETES the key (that is the documented Win32 behaviour, and the only
             # way to remove one).
             k.WritePrivateProfileStringW(INI_SECTION, key, None, _ini_path(game_dir))
         except (OSError, AttributeError, ValueError):
             pass
+    left = receipt_keys_present(game_dir) if k is not None else []
+    unreadable = ini_unreadable(game_dir) if k is not None else ""
+    if unreadable:
+        say(f"  WARNING: could not read {INI_NAME} to remove the install record's keys from it: {unreadable}")
+        gone = False
+    elif left:
+        say(f"  WARNING: could not remove the install record's keys ({', '.join(left)}) from {INI_NAME}.")
+        gone = False
+    return gone

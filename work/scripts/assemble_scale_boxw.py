@@ -75,7 +75,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 
 PCAVE2_VA = 0xA0C000
 OFF_THUNK = 0xAF00                 # RELOCATED from 0x300 (v4 outgrew the slot)
-SLOT_END  = 0xB000                 # pcave2 length — hard ceiling
+SLOT_END  = 0xAFF0                 # t_pref_morefont starts here (2026-11-14; was 0xB000)
 THUNK_VA  = PCAVE2_VA + OFF_THUNK  # 0xA16F00
 
 OFF_HELPER = 0xA294                # t_boxw_t1_term (cave_map.py --at 2026-10-18: FREE 0xA294..0xA300,
@@ -258,7 +258,7 @@ henc, _ = ks.asm(_strip(helper_asm), HELPER_VA)
 hb = bytes(henc)
 cenc, _ = ks.asm(_strip(core_asm), CORE_VA)
 cb = bytes(cenc)
-assert OFF_THUNK + len(b) <= SLOT_END, "v7 overruns the 0xAF00..0xB000 slot (bounded by the 0xB000 gap gwinit v5 vacated in W5A, 2026-10-25; gwinit v6 is at 0x3C100) — relocate"
+assert OFF_THUNK + len(b) <= SLOT_END, "v7 overruns the 0xAF00..0xAFF0 slot (t_pref_morefont at 0xAFF0 since 2026-11-14) (bounded by the 0xB000 gap gwinit v5 vacated in W5A, 2026-10-25; gwinit v6 is at 0x3C100) — relocate"
 assert OFF_HELPER + len(hb) == OFF_CORE, "t_boxw_t1_term v2 length moved -- re-pack OFF_CORE behind it"
 assert OFF_CORE + len(cb) <= HELPER_END, "t_t1_list_w overruns 0xA2C1..0xA300 (thunk_bandmap_blit) — relocate"
 

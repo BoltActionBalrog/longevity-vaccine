@@ -19,7 +19,9 @@ frames; the .wve path masked it because the sources are tiny.
   avcodec_open2.
 - After any ffmpeg-slim rebuild, copy `tools\ffmpeg-slim\bin\*.dll` into
   `src\uimod\third_party\ffmpeg\bin\` (the installer's deploy source) or end users keep getting the
-  old DLLs — this exact miss caused a "re-ran installer, no dice" round-trip.
+  old DLLs — this exact miss caused a "re-ran installer, no dice" round-trip. Since 2026-11-14 that
+  folder is TRACKED in git (DLLs, include, lib, licences): commit the new DLLs and update the hashes in
+  `work\tests\test_ffmpeg_vendored.py` in the same commit (that test also fails a `--disable-asm` build).
 - Verify a build's flags by extracting the embedded configure string from avutil-60.dll.
 
 See [[project-smac-movie-impl-progress]].

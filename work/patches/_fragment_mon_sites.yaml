@@ -154,8 +154,8 @@
     function: Buffer_draw_2
     virtual_addr: 0x005d84c0
     length: 5
-    original_bytes: "83 EC 18 53 55"   # src == a Monument CLOSE/BACK canvas (or the HOF CLOSE canvas) -> face pair restriped at the P law, darker member on top (E9 -> t_mon_restripe)
-    new_bytes:      "E9 4B F2 45 00"
+    original_bytes: "83 EC 18 53 55"   # src == a Holobook CLOSE/BACK canvas (t_hb_restripe), then a Monument CLOSE/BACK or HOF CLOSE canvas (t_mon_restripe) -> face pair restriped at the P law, darker member on top (E9 -> t_hb_restripe)
+    new_bytes:      "E9 6B 7B 47 00"
     pattern: detour_inplace
 
   - id: hall_of_fame.load_hoficons

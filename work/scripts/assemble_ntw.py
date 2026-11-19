@@ -17,7 +17,7 @@ the fields.  So ONE lever re-runs vanilla's cascade at device density over those
                 NATIVE 4 / 3 -> x,y += d; w,h -= 2d, d = s(n) - n.
   t_ntw_modal   0x48478D `call [edx+0xE4]` (Win_set_modal; the builder is MODAL and loops through
                 Datalinks, whose leave writes g_netwin_active := 0): re-arm, run the modal, disarm.
-  t_ntw_gate    E8 helper in front of t_mon_gate (thunk_btn_shrink's gate call): the three
+  t_ntw_gate    E8 helper in front of t_hb_gate -> t_mon_gate (thunk_btn_shrink's gate call): the three
                 breakthrough FlatButtons (OK + the two unlabelled icon buttons) -> admit while armed.
   t_ntw_bm / t_ntw_bmdf   painter frames: R-1/B-1 rect copy (law bandmap_rect_from_halfopen) ->
                 thunk_box_thick_hollow_flat (d5a0) / thunk_box_thick_devfill (d528, d618).
@@ -83,6 +83,7 @@ DEVFILL = PCAVE2 + 0x42A0
 T_FFN = PCAVE2 + 0x2E570
 T_FFN_AT = PCAVE2 + 0x2E490
 T_MON_GATE = PCAVE2 + 0x2B6D0
+T_HB_GATE = PCAVE2 + 0x44000                # holobook_scale (2026-11-15): t_ntw_gate's tail enters it; it tail-jumps t_mon_gate
 RINGFIX = PCAVE2 + 0x1C800                 # thunk_btn_ringfix (thunk_btn_2dscale's post-zoom stripes/ring call)
 EDGEBAND = PCAVE2 + 0x37140                # t_btn_edgeband (2026-10-25 W2D F39, assemble_edge_stroke.py): CALLs ringfix,
                                            # then the 9-slice hover face's K-wide edge bands -- the pass-through target
@@ -96,7 +97,7 @@ TS_QUOTE, TS_LIST0, TS_STRIDE = NTW + 0xDC24, NTW + 0x2DA4, 0x2BA0
 ORNATE_BD = PCAVE2 + 0xA920                # thunk_tutwin_backdrop: ornate 0x6846B0 -> devfill + thunk_hollow_keyint over it
 G_NETWIN = PCAVE2 + 0x4800
 REUSED = {"thunk_box_thick_hollow_flat": HOLLOWFLAT, "thunk_box_thick_devfill": DEVFILL, "t_ffn": T_FFN,
-          "t_ffn_at": T_FFN_AT, "t_mon_gate": T_MON_GATE, "g_netwin_active": G_NETWIN,
+          "t_ffn_at": T_FFN_AT, "t_mon_gate": T_MON_GATE, "t_hb_gate": T_HB_GATE, "g_netwin_active": G_NETWIN,
           "thunk_tutwin_backdrop": ORNATE_BD, "thunk_btn_ringfix": RINGFIX, "t_btn_edgeband": EDGEBAND,
           "t_rw_wheel_down": RW_WHEEL_DOWN, "t_rw_wheel_up": RW_WHEEL_UP,
           "t_wheel_stc": WHEEL_STC}     # (2026-10-25: the shipped yaml calls it {rel32:t_wheel_stc}; templ() now emits that)
@@ -263,7 +264,7 @@ nm_out:
     cmp esi, {BTN_2:#x}
     je ng_hit
 ng_pass:
-    push {T_MON_GATE:#x}
+    push {T_HB_GATE:#x}
     ret
 ng_hit:
     mov eax, 1
